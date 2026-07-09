@@ -4,6 +4,12 @@
  * TODO: 도메인별 repository 구현.
  */
 export * from "./pool.js";
+export * from "./repositories.js";
+export * from "./audit-repository.js";
+export * from "./command-repository.js";
+export * from "./command-service.js";
+export * from "./device-repository.js";
+export * from "./auth-repository.js";
 
 /** 명령 상태전이 + audit_log 는 반드시 동일 트랜잭션(withTransaction)으로 기록한다. */
 export const AUDIT_REQUIRED_IN_TX = true as const;

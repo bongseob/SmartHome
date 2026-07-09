@@ -17,6 +17,7 @@
 | ERD (DB 설계) | [docs/erd.md](erd.md) | 초안 v0.1 |
 | MQTT Topic 설계서 | [docs/mqtt-topic-design.md](mqtt-topic-design.md) | 초안 v0.1 |
 | REST API 명세 (OpenAPI/Swagger) | [docs/api-spec.md](api-spec.md) | 초안 v0.1 |
+| REST API OpenAPI skeleton | [docs/openapi.yaml](openapi.yaml) | 작성 중 |
 | 화면(UI/UX) 설계서 | [docs/ui-ux-design.md](ui-ux-design.md) | 초안 v0.1 |
 | 시퀀스 다이어그램 | [docs/sequence-diagrams.md](sequence-diagrams.md) | 초안 v0.1 |
 | 시스템 아키텍처 (HLD/LLD) | [docs/architecture.md](architecture.md) | 초안 v0.1 |
@@ -28,5 +29,6 @@
 |---|---|---|
 | 가상 기기 시뮬레이터 계획 | [docs/device-simulator.md](device-simulator.md) | 초안 v0.1 |
 | 테스트 / QA 전략 | [docs/test-strategy.md](test-strategy.md) | 초안 v0.1 |
+| 구현 추적 문서 | [docs/implementation-tracker.md](implementation-tracker.md) | 작성 중 |
 
 > 산출물을 작성하면 상태를 `작성 중` / `완료`로 갱신한다.

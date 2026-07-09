@@ -1,13 +1,17 @@
-import { ExecutionStatus } from "@smarthome/contracts";
+import "reflect-metadata";
+import { NestFactory } from "@nestjs/core";
+import { AppModule } from "./modules/app.module.js";
+import { ProblemJsonFilter } from "./filters/problem-json.filter.js";
 
-/**
- * @smarthome/api — REST + WebSocket (dashboard-facing) (docs/api-spec.md).
- * TODO: NestJS 부트스트랩, 인증/RBAC 가드, 제어 명령 발행, 대시보드 WS.
- */
-export function main(): void {
-  console.log(
-    `[api] 스캐폴딩 OK — 명령 수명주기 상태=${ExecutionStatus.options.join(" → ")}. 구현 예정(docs/api-spec.md).`,
-  );
+export async function main(): Promise<void> {
+  const app = await NestFactory.create(AppModule, { cors: true });
+  app.useGlobalFilters(new ProblemJsonFilter());
+  const port = Number(process.env.API_PORT ?? "3000");
+  await app.listen(port);
+  console.log(`[api] listening on http://localhost:${port}`);
 }
 
-main();
+void main().catch((err: unknown) => {
+  console.error("[api] fatal:", err);
+  process.exit(1);
+});

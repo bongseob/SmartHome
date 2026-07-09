@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildAreaAclTopic,
   buildTopic,
   buildDeviceBase,
+  buildEnterpriseAclTopic,
   InvalidTopicSegmentError,
   isRetained,
+  parseTopic,
   qosFor,
 } from "./topics.js";
 
@@ -42,6 +45,51 @@ describe("buildTopic", () => {
     expect(() => buildTopic({ ...base, device, suffix: "state" })).toThrow(
       InvalidTopicSegmentError,
     );
+  });
+});
+
+describe("ACL topic builders", () => {
+  it("admin용 enterprise wildcard topic을 생성한다", () => {
+    expect(buildEnterpriseAclTopic()).toBe("enterprise/#");
+  });
+
+  it("area 권한용 wildcard topic을 검증된 UNS segment로 생성한다", () => {
+    expect(
+      buildAreaAclTopic({
+        site: "site1",
+        building: "bldg-a",
+        floor: "2f",
+        area: "living-room",
+      }),
+    ).toBe("enterprise/site1/bldg-a/2f/living-room/#");
+  });
+});
+
+describe("parseTopic", () => {
+  it("buildTopic 결과를 역파싱한다(round-trip)", () => {
+    const parts = {
+      site: "site1",
+      building: "bldg-a",
+      floor: "2f",
+      area: "living-room",
+      device: "light-01",
+      suffix: "cmd/ack",
+    } as const;
+    expect(parseTopic(buildTopic(parts))).toEqual(parts);
+  });
+
+  it("telemetry/state suffix 파싱", () => {
+    const p = parseTopic("enterprise/site1/bldg-a/2f/living-room/thermostat-01/telemetry");
+    expect(p?.device).toBe("thermostat-01");
+    expect(p?.suffix).toBe("telemetry");
+  });
+
+  it.each([
+    ["루트 불일치", "acme/site1/b/f/a/d/state"],
+    ["세그먼트 부족", "enterprise/site1/state"],
+    ["알 수 없는 suffix", "enterprise/site1/b/f/a/d/unknown"],
+  ])("잘못된 토픽(%s)은 null", (_label, topic) => {
+    expect(parseTopic(topic)).toBeNull();
   });
 });
 

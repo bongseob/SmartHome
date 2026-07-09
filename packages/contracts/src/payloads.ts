@@ -30,6 +30,14 @@ export const AckPayload = z.object({
   reasonCode: z.number().int().optional(), // FAILED 시 MQTT Reason Code
   ts: epochMs,
   deviceId: z.string().min(1),
+}).superRefine((value, ctx) => {
+  if (value.status === "FAILED" && value.reasonCode === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["reasonCode"],
+      message: "FAILED ack requires MQTT reasonCode",
+    });
+  }
 });
 export type AckPayload = z.infer<typeof AckPayload>;
 

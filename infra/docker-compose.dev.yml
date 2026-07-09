@@ -3,7 +3,7 @@
 # 중지: docker compose -f infra/docker-compose.dev.yml down
 #
 # PostgreSQL은 기존 도커 컨테이너(포트 5432, DB=smarthome)를 사용한다.
-# 아래는 MQTT 브로커(Mosquitto)만 정의한다.
+# 아래는 MQTT 브로커(Mosquitto)와 Redis만 정의한다.
 #
 # 주의: 기존에 `docker run`으로 띄운 mosquitto 컨테이너가 있으면 이름이 충돌한다.
 #       먼저 `docker rm -f mosquitto` 후 compose로 기동할 것.
@@ -27,6 +27,23 @@ services:
       retries: 5
       start_period: 5s
 
+  redis:
+    image: redis:7-alpine
+    container_name: smarthome-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
 volumes:
   mosquitto-data:
   mosquitto-log:
+  redis-data:

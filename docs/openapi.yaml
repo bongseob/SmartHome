@@ -1,0 +1,334 @@
+openapi: 3.1.0
+info:
+  title: SmartHome IoT Control API
+  version: 0.1.0
+  description: Minimal REST surface for command lifecycle and device state lookup.
+servers:
+  - url: http://localhost:3000
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        "200":
+          description: API process is alive.
+  /api/v1/auth/login:
+    post:
+      summary: Login and issue JWT tokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "201":
+          description: Token pair.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          $ref: "#/components/responses/Problem"
+  /api/v1/auth/refresh:
+    post:
+      summary: Rotate a refresh token and issue a new token pair
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "201":
+          description: Rotated token pair.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          $ref: "#/components/responses/Problem"
+  /api/v1/auth/logout:
+    post:
+      summary: Revoke a refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "201":
+          description: Refresh token revoked.
+  /api/v1/commands:
+    post:
+      summary: Create and publish a device command
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCommandRequest"
+      responses:
+        "201":
+          description: Command accepted or duplicate command returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommandCreateResponse"
+        "400":
+          $ref: "#/components/responses/Problem"
+  /api/v1/commands/{commandId}:
+    get:
+      summary: Get command lifecycle state
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/CommandId"
+      responses:
+        "200":
+          description: Command record.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommandRecord"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /api/v1/devices/{id}/state:
+    get:
+      summary: Get current device state
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceIdOrCode"
+      responses:
+        "200":
+          description: Device state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceState"
+        "404":
+          $ref: "#/components/responses/Problem"
+  /api/v1/devices/{id}/history:
+    get:
+      summary: Get recent command, audit, and alarm history for a device
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/DeviceIdOrCode"
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Device history buckets.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceHistory"
+        "404":
+          $ref: "#/components/responses/Problem"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    CommandId:
+      name: commandId
+      in: path
+      required: true
+      schema:
+        type: string
+    DeviceIdOrCode:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Device UUID or device code.
+  responses:
+    Problem:
+      description: RFC 7807 style problem response.
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+    LoginResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        tokenType:
+          type: string
+          enum: [Bearer]
+        expiresIn:
+          type: integer
+        user:
+          type: object
+          properties:
+            id:
+              type: string
+            username:
+              type: string
+            roles:
+              type: array
+              items:
+                type: string
+            topics:
+              type: array
+              items:
+                type: string
+    CreateCommandRequest:
+      type: object
+      required: [command, target]
+      properties:
+        commandId:
+          type: string
+        sessionId:
+          type: string
+        actorType:
+          type: string
+          enum: [ADMIN, USER, AI, SYSTEM]
+        actorId:
+          type: string
+          nullable: true
+        role:
+          type: string
+          enum: [ADMIN, USER, MONITOR, HITL_APPROVER]
+        command:
+          type: string
+        target:
+          type: object
+          required: [id, device, enterprise, site, building, floor, room]
+          properties:
+            id:
+              type: string
+            type:
+              type: string
+              enum: [DEVICE]
+            enterprise:
+              type: string
+            site:
+              type: string
+            building:
+              type: string
+            floor:
+              type: string
+            room:
+              type: string
+            device:
+              type: string
+        args:
+          type: object
+          additionalProperties: true
+    CommandCreateResponse:
+      type: object
+      required: [commandId, status]
+      properties:
+        commandId:
+          type: string
+        status:
+          type: string
+        published:
+          type: boolean
+    CommandRecord:
+      type: object
+      properties:
+        commandId:
+          type: string
+        sessionId:
+          type: string
+        targetType:
+          type: string
+        targetId:
+          type: string
+        command:
+          type: string
+        payload:
+          type: object
+        status:
+          type: string
+        mqttReasonCode:
+          type: integer
+          nullable: true
+    DeviceState:
+      type: object
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+        currentStatus:
+          type: string
+        lifecycleStatus:
+          type: string
+        mqttTopic:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+    DeviceHistory:
+      type: object
+      properties:
+        device:
+          type: object
+        commands:
+          type: array
+          items:
+            type: object
+        audits:
+          type: array
+          items:
+            type: object
+        alarms:
+          type: array
+          items:
+            type: object
+    Problem:
+      type: object
+      required: [type, title, status, code, detail, instance]
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        code:
+          type: string
+        detail:
+          type: string
+        instance:
+          type: string

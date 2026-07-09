@@ -13,12 +13,12 @@ MQTT(Mosquitto) / UNS 기반 IoT·스마트홈 통합 관제 플랫폼. **pnpm +
 ```
 packages/
   contracts/   enum · UNS buildTopic · MQTT payload 스키마 · 명령 수명주기 (단일 소스)
-  mqtt/        mqtt.js 래퍼 (QoS/LWT/공유구독)              [스캐폴딩]
-  db/          pg + repository (ORM 미사용) + node-pg-migrate [스캐폴딩]
+  mqtt/        mqtt.js 래퍼 (QoS/LWT/공유구독)
+  db/          pg + repository (ORM 미사용) + node-pg-migrate
   auth/        JWT 발급/검증 + RBAC 가드                     [스캐폴딩]
 apps/
-  api/         REST + WebSocket                              [스캐폴딩]
-  gateway/     MQTT ingest/command/ack/LWT/alarm             [스캐폴딩]
+  api/         REST + WebSocket                              [M5 진행]
+  gateway/     MQTT ingest/command/ack/LWT/alarm             [M4 진행]
   scheduler/   cron/event → 명령 발행                        [스캐폴딩]
   ai-engine/   추천 + HITL 게이트                            [스캐폴딩]
   media-gateway/ PTZ 카메라 영상 중계 (옵션)                 [스캐폴딩]
@@ -31,9 +31,9 @@ apps/
 ```bash
 corepack enable pnpm      # Node 20+ 동봉
 pnpm install
-cp .env.example .env      # DATABASE_URL / MQTT_URL 설정
+cp .env.example .env      # DATABASE_URL / MQTT_URL / REDIS_URL 설정
 
-# 인프라: PostgreSQL(기존 :5432, DB=smarthome) + Mosquitto
+# 인프라: PostgreSQL(기존 :5432, DB=smarthome) + Mosquitto + Redis
 docker compose -f infra/docker-compose.dev.yml up -d
 pnpm --filter @smarthome/db migrate:up   # ERD 스키마 적용
 
@@ -48,6 +48,10 @@ SIM_RUN_MS=8000 pnpm --filter @smarthome/device-simulator start
 현재 상태:
 - ✅ `@smarthome/contracts`(단일 소스) · `@smarthome/db`(35테이블 마이그레이션) ·
   `@smarthome/mqtt`(mqtt.js 래퍼) · `device-simulator` M1(connect+LWT+state+telemetry)
+- ✅ `@smarthome/gateway` M4: telemetry/state ingest, command publish, cmd/ack 처리,
+  Redis command correlation, timeout sweeper
+- ✅ `@smarthome/api` M5: NestJS bootstrap, `/health`, `POST /api/v1/commands`,
+  `GET /api/v1/commands/:commandId`
 - 🟡 나머지 앱은 스캐폴딩 스텁
 
 다음 구현 순서는 각 문서의 "미해결/후속"과 [docs/test-strategy.md](docs/test-strategy.md) 마일스톤 참고.

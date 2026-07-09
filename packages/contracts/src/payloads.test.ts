@@ -47,6 +47,26 @@ describe("AckPayload", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("FAILED status는 reasonCode를 요구", () => {
+    expect(
+      AckPayload.safeParse({
+        commandId: "CMD-1",
+        status: "FAILED",
+        reasonCode: 128,
+        ts: 1,
+        deviceId: "light-01",
+      }).success,
+    ).toBe(true);
+    expect(
+      AckPayload.safeParse({
+        commandId: "CMD-1",
+        status: "FAILED",
+        ts: 1,
+        deviceId: "light-01",
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe("LwtPayload", () => {

@@ -87,6 +87,49 @@ export function buildDeviceBase(
   return [UNS_ROOT, parts.site, parts.building, parts.floor, parts.area, parts.device].join("/");
 }
 
+export function buildEnterpriseAclTopic(): string {
+  return `${UNS_ROOT}/#`;
+}
+
+export function buildAreaAclTopic(parts: Omit<TopicParts, "device" | "suffix">): string {
+  assertSegment("site", parts.site);
+  assertSegment("building", parts.building);
+  assertSegment("floor", parts.floor);
+  assertSegment("area", parts.area);
+  return [UNS_ROOT, parts.site, parts.building, parts.floor, parts.area, "#"].join("/");
+}
+
+/**
+ * UNS 토픽을 세그먼트로 분해한다. 형식이 맞지 않으면 null.
+ * (gateway 등 수신측이 토픽에서 device/suffix를 추출할 때 사용)
+ */
+export function parseTopic(topic: string): TopicParts | null {
+  const segs = topic.split("/");
+  if (segs.length < 7) return null;
+  const root = segs[0];
+  const site = segs[1];
+  const building = segs[2];
+  const floor = segs[3];
+  const area = segs[4];
+  const device = segs[5];
+  const rest = segs.slice(6);
+  if (!root || !site || !building || !floor || !area || !device) return null;
+  if (root !== UNS_ROOT) return null;
+  const suffix = rest.join("/");
+  if (!(TOPIC_SUFFIXES as readonly string[]).includes(suffix)) return null;
+  for (const seg of [site, building, floor, area, device]) {
+    if (!SEGMENT_PATTERN.test(seg)) return null;
+  }
+  return {
+    site,
+    building,
+    floor,
+    area,
+    device,
+    suffix: suffix as TopicSuffix,
+  };
+}
+
 export function qosFor(suffix: TopicSuffix): 0 | 1 | 2 {
   return QOS_BY_SUFFIX[suffix];
 }
