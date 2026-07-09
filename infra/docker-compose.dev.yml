@@ -1,0 +1,15 @@
+# 개발 인프라 (dev ONLY). 프로덕션 아님.
+# 실행: docker compose -f infra/docker-compose.dev.yml up -d
+#
+# PostgreSQL은 기존 도커 컨테이너(포트 5432, DB=smarthome)를 사용한다.
+# 아래는 MQTT 브로커(Mosquitto)만 정의한다.
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"   # MQTT
+      - "9001:9001"   # MQTT over WebSocket (대시보드)
+    volumes:
+      - ./mosquitto:/mosquitto/config

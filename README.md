@@ -31,10 +31,23 @@ apps/
 ```bash
 corepack enable pnpm      # Node 20+ 동봉
 pnpm install
+cp .env.example .env      # DATABASE_URL / MQTT_URL 설정
+
+# 인프라: PostgreSQL(기존 :5432, DB=smarthome) + Mosquitto
+docker compose -f infra/docker-compose.dev.yml up -d
+pnpm --filter @smarthome/db migrate:up   # ERD 스키마 적용
+
 pnpm build                # turbo: contracts 먼저 → 나머지
-pnpm test                 # contracts 단위 테스트
+pnpm test                 # 단위 테스트
 pnpm typecheck
+
+# 가상 기기 M1 (실기기 없이 데이터 흐름 확인)
+SIM_RUN_MS=8000 pnpm --filter @smarthome/device-simulator start
 ```
 
-현재 상태: 워크스페이스 + `@smarthome/contracts` 구현 완료, 나머지는 스캐폴딩 스텁.
+현재 상태:
+- ✅ `@smarthome/contracts`(단일 소스) · `@smarthome/db`(35테이블 마이그레이션) ·
+  `@smarthome/mqtt`(mqtt.js 래퍼) · `device-simulator` M1(connect+LWT+state+telemetry)
+- 🟡 나머지 앱은 스캐폴딩 스텁
+
 다음 구현 순서는 각 문서의 "미해결/후속"과 [docs/test-strategy.md](docs/test-strategy.md) 마일스톤 참고.
