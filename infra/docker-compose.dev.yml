@@ -1,8 +1,12 @@
 # 개발 인프라 (dev ONLY). 프로덕션 아님.
 # 실행: docker compose -f infra/docker-compose.dev.yml up -d
+# 중지: docker compose -f infra/docker-compose.dev.yml down
 #
 # PostgreSQL은 기존 도커 컨테이너(포트 5432, DB=smarthome)를 사용한다.
 # 아래는 MQTT 브로커(Mosquitto)만 정의한다.
+#
+# 주의: 기존에 `docker run`으로 띄운 mosquitto 컨테이너가 있으면 이름이 충돌한다.
+#       먼저 `docker rm -f mosquitto` 후 compose로 기동할 것.
 services:
   mosquitto:
     image: eclipse-mosquitto:2
@@ -10,6 +14,19 @@ services:
     restart: unless-stopped
     ports:
       - "1883:1883"   # MQTT
-      - "9001:9001"   # MQTT over WebSocket (대시보드)
+      - "9001:9001"   # MQTT over WebSocket (대시보드 구독)
     volumes:
-      - ./mosquitto:/mosquitto/config
+      - ./mosquitto:/mosquitto/config:ro   # mosquitto.conf (읽기 전용)
+      - mosquitto-data:/mosquitto/data     # retained 메시지·세션 영속
+      - mosquitto-log:/mosquitto/log
+    healthcheck:
+      # 브로커에 실제 publish 해보고 성공하면 healthy
+      test: ["CMD-SHELL", "mosquitto_pub -h localhost -t healthcheck -m ok -q 1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  mosquitto-data:
+  mosquitto-log:
