@@ -43,7 +43,7 @@ export function createRedisCommandClient(
   url: string = process.env.REDIS_URL ?? "redis://localhost:6379",
 ): RedisCommandClient {
   const client = createClient({ url });
-  client.on("error", (err) => console.error(`[gateway] redis error: ${err.message}`));
+  client.on("error", (err) => console.error(`[command-flow] redis error: ${err.message}`));
   return client as unknown as RedisCommandClient;
 }
 

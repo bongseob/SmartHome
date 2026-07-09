@@ -40,8 +40,9 @@
 |---|---:|---|
 | `pnpm build` | 통과 | 11개 패키지 build 성공 |
 | `pnpm typecheck` | 통과 | 15개 task 성공 |
-| `pnpm test` | 통과 | 55개 (contracts 34, db 14, auth 4, gateway 3) |
-| E2E 스모크 | 통과 | Mosquitto+Redis+Postgres 실인프라: simulator→gateway→telemetry 5행 적재, state ON→OFFLINE 반영, offline alarm_log 생성 (2026-07-09) |
+| `pnpm test` | 통과 | 55개 (contracts 34, db 14, auth 4, command-flow 3) |
+| E2E 인제스트 | 통과 | simulator→gateway→telemetry 적재, state 반영, offline alarm (2026-07-09) |
+| **E2E 명령 전체 경로** | **통과** | login→`POST /commands`→MQTT→simulator ack→**SUCCEEDED**, 멱등성(published:false), **NO_ACK 결함→TIMED_OUT**. 두 경로 모두 audit 4행 체인(CREATED→PENDING→IN_PROGRESS→종결) DB 검증 (2026-07-09) |
 
 주의:
 - `pnpm test` 통과는 전체 기능 검증이 아니다. 대부분 앱/패키지에는 아직 테스트 파일이 없다.
@@ -58,9 +59,10 @@
 5. **[운영] 마이그레이션 0011 미적용**(refresh_token 없음→로그인 500) 적용, Redis 컨테이너 기동.
 
 ### 알려진 부채 (미수정)
-- **api commands.service ↔ gateway publishDeviceCommand 중복**: correlation 키 포맷·SLA·전이 시퀀스가
-  두 곳에 존재. 드리프트 시 타임아웃이 조용히 깨진다 → 공유 패키지로 추출 필요(M5 마무리 시).
+- ~~api ↔ gateway correlation/발행 중복~~ → **해소됨(2026-07-09)**: `packages/command-flow`로 추출,
+  api·gateway가 동일 `publishDeviceCommand`·correlation을 재사용. scheduler·HITL도 이 패키지를 쓸 것.
 - gateway `idCache` 음성 캐시 무기한(기기 나중 등록 시 재시작 필요), `lastStatus` 무한 성장 — 운영 전 정리.
+- simulator `processed` 맵 무한 성장(장기 실행 시) — fleet/M3 때 bounded LRU로.
 
 ---
 
@@ -132,7 +134,10 @@ Gateway M1 흐름:
 10. `OFFLINE`이면 `alarm_log` 기록
 
 추적 포인트:
-- 현재 gateway는 command 발행/ack 수신을 처리하지 않는다.
+- ~~gateway command 발행/ack 미처리~~ → 완료. 발행/상관은 `@smarthome/command-flow` 단일 소스,
+  ack는 `completeCommandFromAck`(PENDING 레이스 흡수), 스위퍼는 correlation 소실 시에도 TIMED_OUT 보장.
+- simulator M2: `/cmd`→ack(멱등성: 동일 commandId 재실행 금지·ack 재전송), 결함주입
+  `SIM_FAULT=noack:<cmd>|fail:<cmd>[:code]`, turn_on/off 시 state(retained) 반영.
 - offline alarm 중복 억제 정책은 최소 상태 변화 기준이며, 운영 기준은 추가 설계가 필요하다.
 
 ---
@@ -198,7 +203,7 @@ Gateway M1 흐름:
 
 ### M5. API 서버 기반
 
-상태: 진행 중
+상태: **완료** (E2E 검증: login→POST /commands→ack→SUCCEEDED/TIMED_OUT + audit 체인, 2026-07-09)
 
 작업:
 - NestJS bootstrap 완료
@@ -414,6 +419,11 @@ Gateway M1 흐름:
 6. `cmd:{commandId}` correlation state 저장
 7. ack 수신 시 Redis/DB 상관 확인
 8. timeout sweeper 구현
+
+완료된 명령 경로 마감 작업 단위 (2026-07-09):
+1. `packages/command-flow` 추출 — 발행/correlation 단일 소스, api·gateway 재배선
+2. simulator M2 — `/cmd`→ack, 멱등성, 결함주입(noack/fail)
+3. 명령 전체 E2E — 성공/멱등/타임아웃 3경로 + audit 4행 체인 DB 검증
 
 다음 작업 단위:
 1. 로그인/refresh/logout audit 기록 추가

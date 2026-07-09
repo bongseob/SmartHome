@@ -11,10 +11,10 @@
     "start": "dotenv -e ../../.env -- node dist/index.js"
   },
   "dependencies": {
+    "@smarthome/command-flow": "workspace:*",
     "@smarthome/contracts": "workspace:*",
     "@smarthome/db": "workspace:*",
-    "@smarthome/mqtt": "workspace:*",
-    "redis": "^4.7.0"
+    "@smarthome/mqtt": "workspace:*"
   },
   "devDependencies": { "dotenv-cli": "^8.0.0", "rimraf": "^6.0.1" }
 }

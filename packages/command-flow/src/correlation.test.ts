@@ -8,7 +8,7 @@ import {
   updateCorrelationStatus,
   type CommandCorrelationState,
   type RedisCommandClient,
-} from "./command-correlation.js";
+} from "./correlation.js";
 
 class FakeRedis implements RedisCommandClient {
   private readonly kv = new Map<string, string>();

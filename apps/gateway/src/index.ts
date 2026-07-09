@@ -1,38 +1,30 @@
 import {
   AckPayload,
-  CommandPayload,
   IllegalCommandTransitionError,
   parseTopic,
   StatePayload,
   TelemetryPayload,
-  type ActorType,
   type ExecutionStatus,
-  type Role,
 } from "@smarthome/contracts";
-import { connect, publish, type DeviceIdentity, type MqttClient } from "@smarthome/mqtt";
+import { connect, type MqttClient } from "@smarthome/mqtt";
 import {
   closePool,
   completeCommandFromAck,
-  createCommandWithAuditResult,
   getDeviceIdByCode,
   insertTelemetryBatch,
   raiseOfflineAlarm,
   setDeviceStatus,
   transitionCommandWithAudit,
-  type CommandRecord,
   type TelemetryRow,
 } from "@smarthome/db";
 import {
   clearCorrelation,
   createRedisCommandClient,
-  defaultCommandSlaMs,
   dueCommandIds,
   getCorrelation,
-  storeNewCorrelation,
   updateCorrelationStatus,
-  type CommandCorrelationState,
   type RedisCommandClient,
-} from "./command-correlation.js";
+} from "@smarthome/command-flow";
 
 /**
  * @smarthome/gateway — MQTT 인제스트 (docs/architecture.md §8).
@@ -40,25 +32,9 @@ import {
  *  - telemetry(QoS0) → 버퍼 → 배치 insert(TimescaleDB)
  *  - state(QoS1)     → device.current_status 갱신, OFFLINE 이면 alarm_log
  *  - cmd/ack(QoS1)   → command 상태 전이 + audit_log
- * TODO(후속): Redis ack 상관·타임아웃 스위퍼·alarm 인테이크.
+ * 명령 발행/상관은 @smarthome/command-flow 단일 소스를 재사용한다.
+ * TODO(후속): alarm 인테이크.
  */
-
-export interface PublishDeviceCommandInput {
-  commandId: string;
-  sessionId: string;
-  actorType: ActorType;
-  actorId: string | null;
-  role: Role;
-  targetId: string;
-  target: DeviceIdentity;
-  command: string;
-  args?: Record<string, unknown>;
-}
-
-export interface PublishDeviceCommandResult {
-  command: CommandRecord;
-  published: boolean;
-}
 
 // code → device.id 캐시(음성 캐시 포함: 미등록은 null)
 const idCache = new Map<string, string | null>();
@@ -90,85 +66,6 @@ async function flush(): Promise<void> {
 
 function ackStatusToExecutionStatus(status: "IN_PROGRESS" | "SUCCEEDED" | "FAILED"): ExecutionStatus {
   return status;
-}
-
-/**
- * command 생성(CREATED audit) → PENDING audit → MQTT /cmd 발행 → IN_PROGRESS audit.
- * 중복 commandId는 멱등성 재요청으로 보고 재발행하지 않는다.
- */
-export async function publishDeviceCommand(
-  client: MqttClient,
-  redis: RedisCommandClient,
-  input: PublishDeviceCommandInput,
-): Promise<PublishDeviceCommandResult> {
-  const timestamp = Date.now();
-  const slaMs = defaultCommandSlaMs();
-  const deadlineEpochMs = timestamp + slaMs;
-  const payload: CommandPayload = {
-    sessionId: input.sessionId,
-    commandId: input.commandId,
-    command: input.command,
-    target: input.target.device,
-    timestamp,
-    ...(input.args ? { args: input.args } : {}),
-  };
-
-  const created = await createCommandWithAuditResult({
-    commandId: input.commandId,
-    sessionId: input.sessionId,
-    actorType: input.actorType,
-    actorId: input.actorId,
-    role: input.role,
-    targetType: "DEVICE",
-    targetId: input.targetId,
-    command: input.command,
-    payload,
-  });
-
-  if (!created.inserted) {
-    console.warn(`[gateway] duplicate commandId '${input.commandId}' — MQTT 재발행 생략`);
-    return { command: created.command, published: false };
-  }
-
-  await transitionCommandWithAudit({
-    commandId: input.commandId,
-    toStatus: "PENDING",
-    reason: "command accepted for mqtt publish",
-  });
-
-  const pendingCorrelation: CommandCorrelationState = {
-    commandId: input.commandId,
-    deviceCode: input.target.device,
-    sessionId: input.sessionId,
-    status: "PENDING",
-    deadlineEpochMs,
-  };
-  const correlationStored = await storeNewCorrelation(redis, pendingCorrelation, slaMs + 5000);
-  if (!correlationStored) {
-    throw new Error(`command correlation already exists: ${input.commandId}`);
-  }
-
-  publish(client, input.target, "cmd", payload, {
-    actorId: input.actorId ?? input.actorType,
-    sessionId: input.sessionId,
-    commandId: input.commandId,
-    role: input.role,
-    requestTimeMs: timestamp,
-  });
-
-  const inProgress = await transitionCommandWithAudit({
-    commandId: input.commandId,
-    toStatus: "IN_PROGRESS",
-    reason: "mqtt command published",
-  });
-  await updateCorrelationStatus(
-    redis,
-    { ...pendingCorrelation, status: "IN_PROGRESS" },
-    Math.max(deadlineEpochMs - Date.now() + 5000, 1000),
-  );
-
-  console.log(`[gateway] command ${input.commandId} published → ${input.target.device}`);
-  return { command: inProgress, published: true };
 }
 
 async function handleAckMessage(

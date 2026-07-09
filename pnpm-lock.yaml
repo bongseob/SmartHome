@@ -45,6 +45,9 @@ importers:
       '@smarthome/auth':
         specifier: workspace:*
         version: link:../../packages/auth
+      '@smarthome/command-flow':
+        specifier: workspace:*
+        version: link:../../packages/command-flow
       '@smarthome/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -54,9 +57,6 @@ importers:
       '@smarthome/mqtt':
         specifier: workspace:*
         version: link:../../packages/mqtt
-      redis:
-        specifier: ^4.7.0
-        version: 4.7.1
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
@@ -89,6 +89,9 @@ importers:
 
   apps/gateway:
     dependencies:
+      '@smarthome/command-flow':
+        specifier: workspace:*
+        version: link:../../packages/command-flow
       '@smarthome/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
@@ -98,9 +101,6 @@ importers:
       '@smarthome/mqtt':
         specifier: workspace:*
         version: link:../../packages/mqtt
-      redis:
-        specifier: ^4.7.0
-        version: 4.7.1
     devDependencies:
       dotenv-cli:
         specifier: ^8.0.0
@@ -147,6 +147,25 @@ importers:
       '@smarthome/contracts':
         specifier: workspace:*
         version: link:../contracts
+    devDependencies:
+      rimraf:
+        specifier: ^6.0.1
+        version: 6.1.3
+
+  packages/command-flow:
+    dependencies:
+      '@smarthome/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@smarthome/db':
+        specifier: workspace:*
+        version: link:../db
+      '@smarthome/mqtt':
+        specifier: workspace:*
+        version: link:../mqtt
+      redis:
+        specifier: ^4.7.0
+        version: 4.7.1
     devDependencies:
       rimraf:
         specifier: ^6.0.1

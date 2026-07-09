@@ -1,22 +1,25 @@
-import { BadRequestException, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
+} from "@nestjs/common";
 import { randomUUID } from "node:crypto";
-import { createClient, type RedisClientType } from "redis";
 import { actorRole, isAdmin, type AuthContext } from "@smarthome/auth";
 import {
-  CommandPayload,
   parseDeviceBase,
   type ActorType,
   type Role,
   type TargetType,
 } from "@smarthome/contracts";
-import { connect, publish, type DeviceIdentity, type MqttClient } from "@smarthome/mqtt";
+import { connect, type DeviceIdentity, type MqttClient } from "@smarthome/mqtt";
+import { getCommandById, getDeviceState, query } from "@smarthome/db";
 import {
-  createCommandWithAuditResult,
-  getCommandById,
-  getDeviceState,
-  query,
-  transitionCommandWithAudit,
-} from "@smarthome/db";
+  createRedisCommandClient,
+  publishDeviceCommand,
+  type RedisCommandClient,
+} from "@smarthome/command-flow";
 
 /**
  * 클라이언트는 대상 device의 id(또는 code)만 보낸다.
@@ -48,26 +51,16 @@ interface CommandResponse {
 
 const commandExecutor = { query };
 
-function commandKey(commandId: string): string {
-  return `cmd:${commandId}`;
-}
-
-function commandSlaMs(): number {
-  const parsed = Number(process.env.COMMAND_SLA_MS ?? "30000");
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 30000;
-}
-
 @Injectable()
 export class CommandsService implements OnModuleInit, OnModuleDestroy {
   private mqtt: MqttClient | undefined;
-  private redis: RedisClientType | undefined;
+  private redis: RedisCommandClient | undefined;
 
   async onModuleInit(): Promise<void> {
     this.mqtt = connect(process.env.MQTT_URL ?? "mqtt://localhost:1883", {
       clientId: `svc:api-${process.pid}`,
     });
-    this.redis = createClient({ url: process.env.REDIS_URL ?? "redis://localhost:6379" });
-    this.redis.on("error", (err) => console.error(`[api] redis error: ${err.message}`));
+    this.redis = createRedisCommandClient();
     await this.redis.connect();
   }
 
@@ -106,85 +99,24 @@ export class CommandsService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException(`device has invalid mqtt_topic: ${device.code}`);
     }
 
-    const timestamp = Date.now();
-    const payload = CommandPayload.parse({
-      sessionId,
-      commandId,
-      command: body.command,
-      target: identity.device,
-      timestamp,
-      ...(body.args ? { args: body.args } : {}),
-    });
-
-    const created = await createCommandWithAuditResult({
+    // 발행 흐름은 command-flow 단일 소스 재사용 (gateway와 동일 시퀀스·correlation)
+    const result = await publishDeviceCommand(mqtt, redis, {
       commandId,
       sessionId,
       actorType,
       actorId: auth.userId,
       role,
-      targetType,
       targetId: device.id,
+      target: identity,
       command: body.command,
-      payload,
-    });
-    if (!created.inserted) {
-      return {
-        commandId: created.command.commandId,
-        status: created.command.status,
-        published: false,
-      };
-    }
-
-    await transitionCommandWithAudit({
-      commandId,
-      toStatus: "PENDING",
-      reason: "api command accepted for mqtt publish",
+      ...(body.args ? { args: body.args } : {}),
     });
 
-    const slaMs = commandSlaMs();
-    const deadlineEpochMs = timestamp + slaMs;
-    const correlation = JSON.stringify({
-      commandId,
-      deviceCode: identity.device,
-      sessionId,
-      status: "PENDING",
-      deadlineEpochMs,
-    });
-    const stored = await redis.set(commandKey(commandId), correlation, {
-      PX: slaMs + 5000,
-      NX: true,
-    });
-    if (stored !== "OK") {
-      throw new BadRequestException(`command correlation already exists: ${commandId}`);
-    }
-    await redis.zAdd("cmd:timeouts", { score: deadlineEpochMs, value: commandId });
-
-    publish(mqtt, identity, "cmd", payload, {
-      actorId: auth.userId,
-      sessionId,
-      commandId,
-      role,
-      requestTimeMs: timestamp,
-    });
-
-    const inProgress = await transitionCommandWithAudit({
-      commandId,
-      toStatus: "IN_PROGRESS",
-      reason: "api mqtt command published",
-    });
-    await redis.set(
-      commandKey(commandId),
-      JSON.stringify({
-        commandId,
-        deviceCode: identity.device,
-        sessionId,
-        status: "IN_PROGRESS",
-        deadlineEpochMs,
-      }),
-      { PX: Math.max(deadlineEpochMs - Date.now() + 5000, 1000), XX: true },
-    );
-
-    return { commandId, status: inProgress.status, published: true };
+    return {
+      commandId: result.command.commandId,
+      status: result.command.status,
+      published: result.published,
+    };
   }
 
   async get(commandId: string): Promise<unknown> {
