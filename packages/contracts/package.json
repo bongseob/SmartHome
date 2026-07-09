@@ -1,0 +1,28 @@
+{
+  "name": "@smarthome/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "공유 단일 소스: enum · UNS 토픽 빌더 · MQTT payload 스키마 · 명령 수명주기",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "clean": "rimraf dist .turbo"
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "rimraf": "^6.0.1"
+  }
+}

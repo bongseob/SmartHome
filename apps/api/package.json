@@ -1,0 +1,14 @@
+{
+  "name": "@smarthome/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rimraf dist .turbo"
+  },
+  "dependencies": { "@smarthome/contracts": "workspace:*", "@smarthome/db": "workspace:*", "@smarthome/auth": "workspace:*" },
+  "devDependencies": { "rimraf": "^6.0.1" }
+}
