@@ -11,8 +11,18 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
-    "clean": "rimraf dist .turbo"
+    "clean": "rimraf dist .turbo",
+    "migrate": "dotenv -e ../../.env -- node-pg-migrate -j sql -m migrations",
+    "migrate:up": "dotenv -e ../../.env -- node-pg-migrate up -j sql -m migrations",
+    "migrate:down": "dotenv -e ../../.env -- node-pg-migrate down -j sql -m migrations"
   },
-  "dependencies": {  },
-  "devDependencies": { "rimraf": "^6.0.1" }
+  "dependencies": {
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10",
+    "dotenv-cli": "^8.0.0",
+    "node-pg-migrate": "^7.9.0",
+    "rimraf": "^6.0.1"
+  }
 }
