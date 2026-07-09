@@ -24,6 +24,14 @@ describe("jwt auth", () => {
 
     expect(() => verifyJwt(token, secret, "access", 1061)).toThrow("jwt expired");
   });
+
+  it("서명 길이가 다른 조작 토큰도 RangeError 없이 invalid signature로 처리", () => {
+    const token = issueJwt(context, secret, 60, "access", 1000);
+    const [h, p] = token.split(".");
+    expect(() => verifyJwt(`${h}.${p}.short`, secret, "access", 1001)).toThrow(
+      "invalid jwt signature",
+    );
+  });
 });
 
 describe("password hashing", () => {

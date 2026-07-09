@@ -94,6 +94,56 @@ export async function transitionCommandWithAudit(
   return withTransaction(async (client) => transitionCommandWithAuditInTx(client, input));
 }
 
+export interface AckCompletionResult {
+  command: CommandRecord;
+  /** false = 이미 종결 상태라 전이 없음(중복/늦은 ack) */
+  applied: boolean;
+}
+
+const TERMINAL_STATUSES: ReadonlySet<ExecutionStatus> = new Set([
+  "SUCCEEDED",
+  "FAILED",
+  "TIMED_OUT",
+]);
+
+/**
+ * 기기 ack로 명령을 종결한다. 발행측의 IN_PROGRESS 전이가 커밋되기 전에 종결 ack가
+ * 도착하는 레이스를 흡수: 현재 상태가 PENDING이면 같은 transaction 안에서
+ * IN_PROGRESS를 거쳐 종결까지 순차 전이한다(전이마다 audit 1행, 상태 건너뛰기 없음).
+ * 이미 종결된 명령이면 전이 없이 반환한다(applied=false) — 중복 ack 멱등 처리.
+ */
+export async function completeCommandFromAck(
+  input: TransitionCommandInput,
+): Promise<AckCompletionResult> {
+  return withTransaction(async (client) => completeCommandFromAckInTx(client, input));
+}
+
+export async function completeCommandFromAckInTx(
+  db: QueryExecutor,
+  input: TransitionCommandInput,
+): Promise<AckCompletionResult> {
+  if (!TERMINAL_STATUSES.has(input.toStatus)) {
+    throw new Error(`completeCommandFromAck는 종결 상태 전용: ${input.toStatus}`);
+  }
+  const current = await lockCommandById(db, input.commandId);
+  if (!current) {
+    throw new CommandNotFoundError(input.commandId);
+  }
+  if (TERMINAL_STATUSES.has(current.status)) {
+    return { command: current, applied: false };
+  }
+  let record = current;
+  if (record.status === "PENDING") {
+    record = await transitionCommandWithAuditInTx(db, {
+      commandId: input.commandId,
+      toStatus: "IN_PROGRESS",
+      reason: "implied by terminal device ack",
+    });
+  }
+  record = await transitionCommandWithAuditInTx(db, input);
+  return { command: record, applied: true };
+}
+
 export async function transitionCommandWithAuditInTx(
   db: QueryExecutor,
   input: TransitionCommandInput,

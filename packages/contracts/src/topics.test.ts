@@ -6,6 +6,7 @@ import {
   buildEnterpriseAclTopic,
   InvalidTopicSegmentError,
   isRetained,
+  parseDeviceBase,
   parseTopic,
   qosFor,
 } from "./topics.js";
@@ -90,6 +91,28 @@ describe("parseTopic", () => {
     ["알 수 없는 suffix", "enterprise/site1/b/f/a/d/unknown"],
   ])("잘못된 토픽(%s)은 null", (_label, topic) => {
     expect(parseTopic(topic)).toBeNull();
+  });
+});
+
+describe("parseDeviceBase", () => {
+  it("buildDeviceBase 결과를 역파싱한다(round-trip)", () => {
+    const parts = {
+      site: "site1",
+      building: "bldg-a",
+      floor: "2f",
+      area: "living-room",
+      device: "light-01",
+    } as const;
+    expect(parseDeviceBase(buildDeviceBase(parts))).toEqual(parts);
+  });
+
+  it.each([
+    ["suffix 포함(7세그먼트)", "enterprise/s/b/f/a/d/state"],
+    ["루트 불일치", "acme/s/b/f/a/d"],
+    ["세그먼트 부족", "enterprise/s/b/f/a"],
+    ["대문자 세그먼트", "enterprise/s/b/f/a/Light-01"],
+  ])("잘못된 base(%s)는 null", (_label, base) => {
+    expect(parseDeviceBase(base)).toBeNull();
   });
 });
 

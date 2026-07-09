@@ -40,11 +40,27 @@
 |---|---:|---|
 | `pnpm build` | 통과 | 11개 패키지 build 성공 |
 | `pnpm typecheck` | 통과 | 15개 task 성공 |
-| `pnpm test` | 통과 | contracts 29개, auth 3개, db 10개, gateway 3개 테스트 통과 |
+| `pnpm test` | 통과 | 55개 (contracts 34, db 14, auth 4, gateway 3) |
+| E2E 스모크 | 통과 | Mosquitto+Redis+Postgres 실인프라: simulator→gateway→telemetry 5행 적재, state ON→OFFLINE 반영, offline alarm_log 생성 (2026-07-09) |
 
 주의:
 - `pnpm test` 통과는 전체 기능 검증이 아니다. 대부분 앱/패키지에는 아직 테스트 파일이 없다.
 - `pnpm install` 후 `pnpm-lock.yaml`이 갱신됐다. `packages/db`가 `@smarthome/contracts`를 새로 의존한다.
+
+### 2026-07-09 점검에서 수정된 결함
+1. **[보안] API 명령 target 신뢰 문제** — 클라이언트가 준 UNS 세그먼트로 발행해 권한 검사(target.id)와
+   실제 발행 토픽이 어긋날 수 있었음 → DB `mqtt_topic`에서 서버가 identity 도출(`parseDeviceBase`).
+2. **[레이스] terminal ack가 PENDING에 도착** — 불법 전이로 실패해 성공한 명령이 TIMED_OUT 처리됨
+   → `completeCommandFromAck`(한 tx에서 IN_PROGRESS 경유 순차 전이, 중복 ack 멱등).
+3. **[정합성] 스위퍼 stuck-command** — Redis correlation 키 TTL 만료 시 DB 전이 없이 zset만 정리해
+   명령이 영원히 IN_PROGRESS로 남음 → correlation 소실 시에도 TIMED_OUT 전이 보장.
+4. **[견고성] verifyJwt** — 서명 길이 불일치 시 timingSafeEqual RangeError → 길이 선검사.
+5. **[운영] 마이그레이션 0011 미적용**(refresh_token 없음→로그인 500) 적용, Redis 컨테이너 기동.
+
+### 알려진 부채 (미수정)
+- **api commands.service ↔ gateway publishDeviceCommand 중복**: correlation 키 포맷·SLA·전이 시퀀스가
+  두 곳에 존재. 드리프트 시 타임아웃이 조용히 깨진다 → 공유 패키지로 추출 필요(M5 마무리 시).
+- gateway `idCache` 음성 캐시 무기한(기기 나중 등록 시 재시작 필요), `lastStatus` 무한 성장 — 운영 전 정리.
 
 ---
 

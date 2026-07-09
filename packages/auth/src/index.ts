@@ -122,7 +122,13 @@ export function verifyJwt(
     throw new Error("invalid jwt format");
   }
   const expectedSignature = sign(`${encodedHeader}.${encodedPayload}`, secret);
-  if (!timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
+  const signatureBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expectedSignature);
+  // 길이가 다르면 timingSafeEqual이 throw(RangeError)하므로 먼저 검사한다
+  if (
+    signatureBuffer.length !== expectedBuffer.length ||
+    !timingSafeEqual(signatureBuffer, expectedBuffer)
+  ) {
     throw new Error("invalid jwt signature");
   }
 

@@ -4,6 +4,7 @@ import { createClient, type RedisClientType } from "redis";
 import { actorRole, isAdmin, type AuthContext } from "@smarthome/auth";
 import {
   CommandPayload,
+  parseDeviceBase,
   type ActorType,
   type Role,
   type TargetType,
@@ -12,11 +13,18 @@ import { connect, publish, type DeviceIdentity, type MqttClient } from "@smartho
 import {
   createCommandWithAuditResult,
   getCommandById,
+  getDeviceState,
   query,
   transitionCommandWithAudit,
 } from "@smarthome/db";
 
-interface CommandTargetRequest extends DeviceIdentity {
+/**
+ * 클라이언트는 대상 device의 id(또는 code)만 보낸다.
+ * 발행 토픽(UNS identity)은 서버가 DB의 canonical mqtt_topic 에서 도출한다 —
+ * 클라이언트가 준 토픽 세그먼트를 신뢰하면 권한 검사(target.id)와 실제 발행 대상이
+ * 어긋날 수 있다(권한 우회·감사 왜곡).
+ */
+interface CommandTargetRequest {
   id: string;
   type?: TargetType;
 }
@@ -88,12 +96,22 @@ export class CommandsService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException("command and DEVICE target are required");
     }
 
+    // 서버측 대상 해석: DB canonical mqtt_topic → UNS identity (클라이언트 입력 불신)
+    const device = await getDeviceState(commandExecutor, body.target.id);
+    if (!device) {
+      throw new NotFoundException(`device not found: ${body.target.id}`);
+    }
+    const identity: DeviceIdentity | null = parseDeviceBase(device.mqttTopic);
+    if (!identity) {
+      throw new BadRequestException(`device has invalid mqtt_topic: ${device.code}`);
+    }
+
     const timestamp = Date.now();
     const payload = CommandPayload.parse({
       sessionId,
       commandId,
       command: body.command,
-      target: body.target.device,
+      target: identity.device,
       timestamp,
       ...(body.args ? { args: body.args } : {}),
     });
@@ -105,7 +123,7 @@ export class CommandsService implements OnModuleInit, OnModuleDestroy {
       actorId: auth.userId,
       role,
       targetType,
-      targetId: body.target.id,
+      targetId: device.id,
       command: body.command,
       payload,
     });
@@ -127,7 +145,7 @@ export class CommandsService implements OnModuleInit, OnModuleDestroy {
     const deadlineEpochMs = timestamp + slaMs;
     const correlation = JSON.stringify({
       commandId,
-      deviceCode: body.target.device,
+      deviceCode: identity.device,
       sessionId,
       status: "PENDING",
       deadlineEpochMs,
@@ -141,7 +159,7 @@ export class CommandsService implements OnModuleInit, OnModuleDestroy {
     }
     await redis.zAdd("cmd:timeouts", { score: deadlineEpochMs, value: commandId });
 
-    publish(mqtt, body.target, "cmd", payload, {
+    publish(mqtt, identity, "cmd", payload, {
       actorId: auth.userId,
       sessionId,
       commandId,
@@ -158,7 +176,7 @@ export class CommandsService implements OnModuleInit, OnModuleDestroy {
       commandKey(commandId),
       JSON.stringify({
         commandId,
-        deviceCode: body.target.device,
+        deviceCode: identity.device,
         sessionId,
         status: "IN_PROGRESS",
         deadlineEpochMs,

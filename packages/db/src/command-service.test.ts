@@ -4,6 +4,7 @@ import { IllegalCommandTransitionError } from "@smarthome/contracts";
 import type { QueryResultRow } from "./pool.js";
 import type { QueryExecutor } from "./audit-repository.js";
 import {
+  completeCommandFromAckInTx,
   createCommandWithAuditInTx,
   createCommandWithAuditResultInTx,
   transitionCommandWithAuditInTx,
@@ -178,5 +179,64 @@ describe("transitionCommandWithAuditInTx", () => {
 
     expect(updated.status).toBe("FAILED");
     expect(updated.mqttReasonCode).toBe(128);
+  });
+});
+
+describe("completeCommandFromAckInTx (terminal ack 레이스 흡수)", () => {
+  it("PENDING에서 종결 ack가 오면 IN_PROGRESS를 거쳐 순차 전이한다(전이마다 audit)", async () => {
+    const db = new FakeCommandDb(commandRow("PENDING"));
+
+    const result = await completeCommandFromAckInTx(db, {
+      commandId: "CMD-1",
+      toStatus: "SUCCEEDED",
+      reason: "device ack SUCCEEDED",
+    });
+
+    expect(result.applied).toBe(true);
+    expect(result.command.status).toBe("SUCCEEDED");
+    // PENDING→IN_PROGRESS, IN_PROGRESS→SUCCEEDED = update 2회 + audit 2행
+    expect(db.statements.filter((s) => s.includes("UPDATE command")).length).toBe(2);
+    expect(db.statements.filter((s) => s.includes("INSERT INTO audit_log")).length).toBe(2);
+  });
+
+  it("IN_PROGRESS에서는 단일 전이로 종결한다", async () => {
+    const db = new FakeCommandDb(commandRow("IN_PROGRESS"));
+
+    const result = await completeCommandFromAckInTx(db, {
+      commandId: "CMD-1",
+      toStatus: "FAILED",
+      reason: "device ack FAILED",
+      mqttReasonCode: 135,
+    });
+
+    expect(result.applied).toBe(true);
+    expect(result.command.status).toBe("FAILED");
+    expect(db.statements.filter((s) => s.includes("UPDATE command")).length).toBe(1);
+  });
+
+  it("이미 종결된 명령의 중복/늦은 ack는 전이 없이 no-op", async () => {
+    const db = new FakeCommandDb(commandRow("TIMED_OUT"));
+
+    const result = await completeCommandFromAckInTx(db, {
+      commandId: "CMD-1",
+      toStatus: "SUCCEEDED",
+      reason: "late ack",
+    });
+
+    expect(result.applied).toBe(false);
+    expect(result.command.status).toBe("TIMED_OUT");
+    expect(db.statements.some((s) => s.includes("UPDATE command"))).toBe(false);
+  });
+
+  it("비종결 상태로는 호출할 수 없다", async () => {
+    const db = new FakeCommandDb(commandRow("PENDING"));
+
+    await expect(
+      completeCommandFromAckInTx(db, {
+        commandId: "CMD-1",
+        toStatus: "IN_PROGRESS",
+        reason: "not terminal",
+      }),
+    ).rejects.toThrow("종결 상태 전용");
   });
 });

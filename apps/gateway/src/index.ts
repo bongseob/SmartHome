@@ -1,6 +1,7 @@
 import {
   AckPayload,
   CommandPayload,
+  IllegalCommandTransitionError,
   parseTopic,
   StatePayload,
   TelemetryPayload,
@@ -11,6 +12,7 @@ import {
 import { connect, publish, type DeviceIdentity, type MqttClient } from "@smarthome/mqtt";
 import {
   closePool,
+  completeCommandFromAck,
   createCommandWithAuditResult,
   getDeviceIdByCode,
   insertTelemetryBatch,
@@ -208,14 +210,17 @@ async function handleAckMessage(
     }
 
     const status = ackStatusToExecutionStatus(ack.status);
-    await transitionCommandWithAudit({
+    // PENDING 상태에서 종결 ack가 도착하는 레이스를 흡수(IN_PROGRESS 경유, 중복 ack 멱등)
+    const result = await completeCommandFromAck({
       commandId: ack.commandId,
       toStatus: status,
       reason: `device ack ${ack.status}`,
       mqttReasonCode: ack.reasonCode ?? null,
     });
     await clearCorrelation(redis, ack.commandId);
-    console.log(`[gateway] ack ${ack.commandId} → ${ack.status}`);
+    console.log(
+      `[gateway] ack ${ack.commandId} → ${ack.status}${result.applied ? "" : " (already terminal, no-op)"}`,
+    );
   } catch (err) {
     console.error(`[gateway] ack 처리 오류 command=${ack.commandId}:`, err);
   }
@@ -274,24 +279,33 @@ async function sweepCommandTimeouts(redis: RedisCommandClient): Promise<void> {
   const due = await dueCommandIds(redis);
   for (const commandId of due) {
     const correlation = await getCorrelation(redis, commandId);
-    if (!correlation) {
-      await clearCorrelation(redis, commandId);
-      continue;
-    }
-    if (correlation.deadlineEpochMs > Date.now()) continue;
+    // correlation 키가 TTL로 먼저 사라졌어도(예: gateway 장기 중단 후 재시작)
+    // zset에 남은 명령은 반드시 DB에서 종결시킨다 — 없으면 영원히 IN_PROGRESS로 남는다.
+    if (correlation && correlation.deadlineEpochMs > Date.now()) continue;
 
     try {
-      await transitionCommandWithAudit({
-        commandId,
-        toStatus: "TIMED_OUT",
-        reason: "mqtt command ack timeout",
-      });
-      console.warn(`[gateway] command ${commandId} timed out`);
+      const timedOut = await lockFreeTimeoutTransition(commandId);
+      if (timedOut) console.warn(`[gateway] command ${commandId} timed out`);
     } catch (err) {
       console.error(`[gateway] timeout 처리 오류 command=${commandId}:`, err);
     } finally {
       await clearCorrelation(redis, commandId);
     }
+  }
+}
+
+/** 이미 종결(ack 선처리)된 명령이면 조용히 건너뛰고, 아니면 TIMED_OUT 전이+audit */
+async function lockFreeTimeoutTransition(commandId: string): Promise<boolean> {
+  try {
+    await transitionCommandWithAudit({
+      commandId,
+      toStatus: "TIMED_OUT",
+      reason: "mqtt command ack timeout",
+    });
+    return true;
+  } catch (err) {
+    if (err instanceof IllegalCommandTransitionError) return false; // 이미 종결 — 정상
+    throw err;
   }
 }
 

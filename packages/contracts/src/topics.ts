@@ -130,6 +130,23 @@ export function parseTopic(topic: string): TopicParts | null {
   };
 }
 
+/**
+ * 기기 베이스 토픽(suffix 없는 6세그먼트, device.mqtt_topic 저장값)을 분해한다.
+ * DB에 저장된 canonical 토픽에서 identity를 도출할 때 사용 — 클라이언트가 보낸
+ * 토픽 세그먼트를 신뢰하지 않기 위한 서버측 역변환.
+ */
+export function parseDeviceBase(base: string): Omit<TopicParts, "suffix"> | null {
+  const segs = base.split("/");
+  if (segs.length !== 6) return null;
+  const [root, site, building, floor, area, device] = segs;
+  if (root !== UNS_ROOT) return null;
+  if (!site || !building || !floor || !area || !device) return null;
+  for (const seg of [site, building, floor, area, device]) {
+    if (!SEGMENT_PATTERN.test(seg)) return null;
+  }
+  return { site, building, floor, area, device };
+}
+
 export function qosFor(suffix: TopicSuffix): 0 | 1 | 2 {
   return QOS_BY_SUFFIX[suffix];
 }
