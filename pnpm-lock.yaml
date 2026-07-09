@@ -57,13 +57,22 @@ importers:
       '@smarthome/mqtt':
         specifier: workspace:*
         version: link:../../packages/mqtt
+      '@smarthome/realtime':
+        specifier: workspace:*
+        version: link:../../packages/realtime
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
       rxjs:
         specifier: ^7.8.2
         version: 7.8.2
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.0
     devDependencies:
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
       dotenv-cli:
         specifier: ^8.0.0
         version: 8.0.0
@@ -101,6 +110,9 @@ importers:
       '@smarthome/mqtt':
         specifier: workspace:*
         version: link:../../packages/mqtt
+      '@smarthome/realtime':
+        specifier: workspace:*
+        version: link:../../packages/realtime
     devDependencies:
       dotenv-cli:
         specifier: ^8.0.0
@@ -211,6 +223,19 @@ importers:
       mqtt:
         specifier: ^5.10.3
         version: 5.15.2
+    devDependencies:
+      rimraf:
+        specifier: ^6.0.1
+        version: 6.1.3
+
+  packages/realtime:
+    dependencies:
+      '@smarthome/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      redis:
+        specifier: ^4.7.0
+        version: 4.7.1
     devDependencies:
       rimraf:
         specifier: ^6.0.1

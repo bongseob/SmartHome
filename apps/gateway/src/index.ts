@@ -5,6 +5,7 @@ import {
   StatePayload,
   TelemetryPayload,
   type ExecutionStatus,
+  type TargetType,
 } from "@smarthome/contracts";
 import { connect, type MqttClient } from "@smarthome/mqtt";
 import {
@@ -25,6 +26,11 @@ import {
   updateCorrelationStatus,
   type RedisCommandClient,
 } from "@smarthome/command-flow";
+import {
+  createRealtimePublisher,
+  publishRealtimeEvent,
+  type RealtimePublisher,
+} from "@smarthome/realtime";
 
 /**
  * @smarthome/gateway — MQTT 인제스트 (docs/architecture.md §8).
@@ -32,8 +38,8 @@ import {
  *  - telemetry(QoS0) → 버퍼 → 배치 insert(TimescaleDB)
  *  - state(QoS1)     → device.current_status 갱신, OFFLINE 이면 alarm_log
  *  - cmd/ack(QoS1)   → command 상태 전이 + audit_log
- * 명령 발행/상관은 @smarthome/command-flow 단일 소스를 재사용한다.
- * TODO(후속): alarm 인테이크.
+ * 명령 발행/상관은 @smarthome/command-flow, 대시보드 실시간 이벤트는
+ * @smarthome/realtime(Redis pub/sub) 단일 소스를 재사용한다.
  */
 
 // code → device.id 캐시(음성 캐시 포함: 미등록은 null)
@@ -70,6 +76,7 @@ function ackStatusToExecutionStatus(status: "IN_PROGRESS" | "SUCCEEDED" | "FAILE
 
 async function handleAckMessage(
   redis: RedisCommandClient,
+  events: RealtimePublisher,
   deviceFromTopic: string,
   json: unknown,
 ): Promise<void> {
@@ -115,6 +122,16 @@ async function handleAckMessage(
       mqttReasonCode: ack.reasonCode ?? null,
     });
     await clearCorrelation(redis, ack.commandId);
+    if (result.applied) {
+      await publishRealtimeEvent(events, {
+        type: "command.status",
+        commandId: ack.commandId,
+        status: result.command.status,
+        targetType: result.command.targetType,
+        targetId: result.command.targetId,
+        ts: Date.now(),
+      });
+    }
     console.log(
       `[gateway] ack ${ack.commandId} → ${ack.status}${result.applied ? "" : " (already terminal, no-op)"}`,
     );
@@ -123,7 +140,12 @@ async function handleAckMessage(
   }
 }
 
-async function onMessage(redis: RedisCommandClient, topic: string, payload: Buffer): Promise<void> {
+async function onMessage(
+  redis: RedisCommandClient,
+  events: RealtimePublisher,
+  topic: string,
+  payload: Buffer,
+): Promise<void> {
   const parts = parseTopic(topic);
   if (!parts) return;
 
@@ -160,19 +182,40 @@ async function onMessage(redis: RedisCommandClient, topic: string, payload: Buff
     lastStatus.set(parts.device, status);
     await setDeviceStatus(parts.device, status);
     console.log(`[gateway] state ${parts.device} → ${status}`);
-    if (status === "OFFLINE") {
-      const id = await resolveDeviceId(parts.device);
-      if (id) await raiseOfflineAlarm(id, "device offline (state/LWT)");
+    const id = await resolveDeviceId(parts.device);
+    if (id) {
+      await publishRealtimeEvent(events, {
+        type: "device.state",
+        deviceId: id,
+        deviceCode: parts.device,
+        status,
+        ts: Date.now(),
+      });
+      if (status === "OFFLINE") {
+        const message = "device offline (state/LWT)";
+        await raiseOfflineAlarm(id, message);
+        await publishRealtimeEvent(events, {
+          type: "alarm.raised",
+          deviceId: id,
+          tier: "REACTIVE",
+          severity: "WARNING",
+          message,
+          ts: Date.now(),
+        });
+      }
     }
     return;
   }
 
   if (parts.suffix === "cmd/ack") {
-    await handleAckMessage(redis, parts.device, json);
+    await handleAckMessage(redis, events, parts.device, json);
   }
 }
 
-async function sweepCommandTimeouts(redis: RedisCommandClient): Promise<void> {
+async function sweepCommandTimeouts(
+  redis: RedisCommandClient,
+  events: RealtimePublisher,
+): Promise<void> {
   const due = await dueCommandIds(redis);
   for (const commandId of due) {
     const correlation = await getCorrelation(redis, commandId);
@@ -181,8 +224,18 @@ async function sweepCommandTimeouts(redis: RedisCommandClient): Promise<void> {
     if (correlation && correlation.deadlineEpochMs > Date.now()) continue;
 
     try {
-      const timedOut = await lockFreeTimeoutTransition(commandId);
-      if (timedOut) console.warn(`[gateway] command ${commandId} timed out`);
+      const record = await lockFreeTimeoutTransition(commandId);
+      if (record) {
+        console.warn(`[gateway] command ${commandId} timed out`);
+        await publishRealtimeEvent(events, {
+          type: "command.status",
+          commandId,
+          status: "TIMED_OUT",
+          targetType: record.targetType,
+          targetId: record.targetId,
+          ts: Date.now(),
+        });
+      }
     } catch (err) {
       console.error(`[gateway] timeout 처리 오류 command=${commandId}:`, err);
     } finally {
@@ -191,17 +244,19 @@ async function sweepCommandTimeouts(redis: RedisCommandClient): Promise<void> {
   }
 }
 
-/** 이미 종결(ack 선처리)된 명령이면 조용히 건너뛰고, 아니면 TIMED_OUT 전이+audit */
-async function lockFreeTimeoutTransition(commandId: string): Promise<boolean> {
+/** 이미 종결(ack 선처리)된 명령이면 조용히 건너뛰고(null), 아니면 TIMED_OUT 전이+audit 후 레코드 반환 */
+async function lockFreeTimeoutTransition(
+  commandId: string,
+): Promise<{ targetType: TargetType; targetId: string } | null> {
   try {
-    await transitionCommandWithAudit({
+    const updated = await transitionCommandWithAudit({
       commandId,
       toStatus: "TIMED_OUT",
       reason: "mqtt command ack timeout",
     });
-    return true;
+    return { targetType: updated.targetType, targetId: updated.targetId };
   } catch (err) {
-    if (err instanceof IllegalCommandTransitionError) return false; // 이미 종결 — 정상
+    if (err instanceof IllegalCommandTransitionError) return null; // 이미 종결 — 정상
     throw err;
   }
 }
@@ -211,6 +266,10 @@ async function main(): Promise<void> {
   const redis = createRedisCommandClient();
   await redis.connect();
   console.log("[gateway] redis 연결 — command correlation 활성화");
+
+  const events = createRealtimePublisher();
+  await events.connect();
+  console.log("[gateway] redis 연결 — 실시간 이벤트 발행 활성화");
 
   const client: MqttClient = connect(url, { clientId: "svc:gateway-1" });
 
@@ -226,12 +285,12 @@ async function main(): Promise<void> {
     console.log(`[gateway] ${url} 연결 — 공유구독 시작`);
   });
   client.on("message", (topic: string, payload: Buffer) => {
-    void onMessage(redis, topic, payload);
+    void onMessage(redis, events, topic, payload);
   });
   client.on("error", (err: Error) => console.error(`[gateway] mqtt error: ${err.message}`));
 
   const flushTimer = setInterval(() => void flush(), 500);
-  const timeoutTimer = setInterval(() => void sweepCommandTimeouts(redis), 1000);
+  const timeoutTimer = setInterval(() => void sweepCommandTimeouts(redis, events), 1000);
 
   const shutdown = (): void => {
     clearInterval(flushTimer);
@@ -240,6 +299,7 @@ async function main(): Promise<void> {
       client.end(false, {}, () =>
         void redis
           .quit()
+          .then(() => events.quit())
           .then(() => closePool())
           .then(() => process.exit(0)),
       ),

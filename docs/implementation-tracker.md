@@ -18,15 +18,16 @@
 | DB 마이그레이션 초안 | 완료 | `packages/db/migrations/0001` ~ `0010` |
 | DB 최소 repository | 완료 | `packages/db/src/repositories.ts`, `packages/db/src/seed.ts` |
 | MQTT 래퍼 | 완료 | `packages/mqtt/src/index.ts` |
-| Device Simulator M1 | 완료 | `apps/device-simulator/src/*` |
-| Gateway ingest M1 | 완료 | telemetry/state 수신, batch insert, status update, offline alarm |
-| Command + Audit 핵심 경로 | 완료 | DB repository/transaction, gateway MQTT cmd/ack, Redis correlation, timeout sweeper |
-| API 서버 | 진행 중 | NestJS bootstrap, health, command/device API, JWT auth guard, RBAC guard 완료. WS 미완료 |
+| Device Simulator M1~M2 | 완료 | connect/LWT/state/telemetry + `/cmd`→ack(멱등성·결함주입) |
+| Gateway ingest | 완료 | telemetry/state 수신, batch insert, status update, offline alarm |
+| Command + Audit 핵심 경로 | 완료 | `packages/command-flow` 단일 소스, gateway/api MQTT cmd/ack, Redis correlation, timeout sweeper. E2E 검증됨 |
+| API 서버 | 진행 중 | NestJS bootstrap, health, command/device API, JWT auth guard, RBAC guard, **WS `/ws/realtime` 완료**. spatial/devices 목록 API 미완료 |
+| Realtime bridge (M7) | 완료 | `packages/realtime`(Redis pub/sub) + gateway 발행 + api WS 브로드캐스트. E2E 검증됨 |
 | Auth/RBAC | 진행 중 | JWT 발급/검증, refresh token 저장/폐기, role/device access guard, MQTT topics claim 완료. 권한변경 audit 미완료 |
 | Scheduler | 미완료 | `apps/scheduler`는 스캐폴딩 |
 | Alarm service | 미완료 | 정책 평가/라우팅/에스컬레이션 미구현 |
 | AI/HITL | 미완료 | 추천/승인/학습데이터 흐름 미구현 |
-| Web dashboard | 미완료 | React/Konva 실앱 미구현 |
+| Web dashboard | 미완료 | React/Konva 실앱 미구현 (M8, 선행 API 필요) |
 | 운영 보안 | 미완료 | TLS, Mosquitto auth/ACL plugin, service auth 미구현 |
 | 통합/E2E/성능 테스트 | 미완료 | 현재는 contracts 중심 테스트 |
 
@@ -38,11 +39,12 @@
 
 | 명령 | 결과 | 비고 |
 |---|---:|---|
-| `pnpm build` | 통과 | 11개 패키지 build 성공 |
-| `pnpm typecheck` | 통과 | 15개 task 성공 |
+| `pnpm build` | 통과 | 13개 패키지 build 성공 |
+| `pnpm typecheck` | 통과 | 19개 task 성공 |
 | `pnpm test` | 통과 | 55개 (contracts 34, db 14, auth 4, command-flow 3) |
 | E2E 인제스트 | 통과 | simulator→gateway→telemetry 적재, state 반영, offline alarm (2026-07-09) |
 | **E2E 명령 전체 경로** | **통과** | login→`POST /commands`→MQTT→simulator ack→**SUCCEEDED**, 멱등성(published:false), **NO_ACK 결함→TIMED_OUT**. 두 경로 모두 audit 4행 체인(CREATED→PENDING→IN_PROGRESS→종결) DB 검증 (2026-07-09) |
+| **E2E 실시간 브리지(M7)** | **통과** | JWT 인증 WS 클라이언트 연결→`POST /commands`(turn_off)→`device.state`(OFF)·`command.status`(SUCCEEDED) 실시간 수신 확인 (2026-07-09) |
 
 주의:
 - `pnpm test` 통과는 전체 기능 검증이 아니다. 대부분 앱/패키지에는 아직 테스트 파일이 없다.
@@ -240,16 +242,28 @@ Gateway M1 흐름:
 
 ### M7. Realtime Dashboard Bridge
 
-상태: 미완료
+상태: **완료** (E2E 검증: gateway→Redis pub/sub→api WS 클라이언트 실시간 수신, 2026-07-09)
 
 작업:
-- API WebSocket `/ws/realtime`
-- gateway event -> Redis pub/sub 또는 DB event bridge
-- state/alarm/command status push
-- dashboard overview API
+- API WebSocket `/ws/realtime` 완료: `apps/api/src/realtime/realtime-ws.server.ts`
+  (`ws` 패키지, NestJS HTTP 서버에 attach, JWT는 쿼리스트링 `?token=`로 인증)
+- contracts에 `RealtimeEvent`(discriminated union: device.state/alarm.raised/command.status) 추가
+- `packages/realtime` 신설: Redis pub/sub 발행/구독 단일 소스(`REALTIME_CHANNEL`)
+  — publish용과 subscribe용은 항상 별도 Redis 연결(node-redis 구독 모드 제약)
+- gateway가 3개 훅에서 이벤트 발행: state 변경(device.state), OFFLINE 감지(alarm.raised),
+  ack/타임아웃 종결(command.status) — `completeCommandFromAck`/`lockFreeTimeoutTransition` 재사용
+- dashboard overview API는 M8 선행 작업으로 이월(별도 항목)
 
 완료 조건:
-- state 변경과 command 상태 변경이 WebSocket으로 전달된다.
+- state 변경과 command 상태 변경이 WebSocket으로 전달된다. **완료** — 실인프라(Mosquitto+Redis+Postgres)에서
+  JWT 인증 WS 클라이언트가 `POST /commands`(turn_off) 발행 후 `device.state`(OFF)와
+  `command.status`(SUCCEEDED) 이벤트를 실시간 수신함을 확인.
+
+알려진 단순화(후속 필요):
+- **브로드캐스트 방식**: 인증된 전 연결에 전체 이벤트 브로드캐스트. Area/Device 단위 구독 필터링
+  (JWT `topics` claim 기준)은 M8 진행하며 필요 시 추가 — 이벤트에 deviceId만 있고 UNS 토픽이 없어
+  현재는 device→area 매핑 조회가 필요함.
+- **재연결 시 누락분 catch-up 없음**: 연결 끊긴 동안의 이벤트는 유실(재연결 시 REST로 현재 상태 재조회 필요).
 
 ### M8. Web Dashboard
 
@@ -425,9 +439,17 @@ Gateway M1 흐름:
 2. simulator M2 — `/cmd`→ack, 멱등성, 결함주입(noack/fail)
 3. 명령 전체 E2E — 성공/멱등/타임아웃 3경로 + audit 4행 체인 DB 검증
 
-다음 작업 단위:
-1. 로그인/refresh/logout audit 기록 추가
-2. 권한 변경 API 구현 시 audit 강제
-3. Group API 추가 시 group access guard 적용
-4. M7 WebSocket realtime bridge 시작
-5. `pnpm build && pnpm typecheck && pnpm test` 통과
+완료된 M7 작업 단위 (2026-07-09):
+1. contracts에 `RealtimeEvent`(discriminated union) + `REALTIME_CHANNEL` 추가
+2. `packages/realtime` 신설 — Redis pub/sub publish/subscribe 단일 소스
+3. gateway 3개 훅(state/offline-alarm/ack·timeout)에서 이벤트 발행
+4. api `RealtimeWsServer`(`ws` 패키지, NestJS HTTP 서버 attach) — JWT 쿼리스트링 인증
+5. E2E: WS 클라이언트가 `device.state`·`command.status` 이벤트 실시간 수신 확인
+
+다음 작업 단위 (M8 선행 → M8a):
+1. api에 `GET /devices`(목록), `GET /floors/:id/overview`(floor+areas+devices) 추가
+2. seed 보강 — Area 2개 이상(폴리곤), 기기 2~3대, floor_map placeholder
+3. Vite+React 부트스트랩(로그인, 토큰 저장)
+4. Konva Floor Map — 기기 마커(상태색) + Drawer + ON/OFF + WS 실시간 갱신
+5. 로그인/refresh/logout audit 기록 추가(별도 트랙, M8과 병행 가능)
+6. 권한 변경 API 구현 시 audit 강제, Group API 추가 시 group access guard 적용
