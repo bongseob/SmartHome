@@ -20,6 +20,7 @@ import type {
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
 
 const STORAGE_KEY = "smarthome.auth";
+const ACCESS_REFRESH_SKEW_MS = 30_000;
 
 interface StoredAuth {
   tokens: TokenPair;
@@ -59,6 +60,23 @@ function writeStoredAuth(auth: StoredAuth): void {
 
 function clearStoredAuth(): void {
   localStorage.removeItem(STORAGE_KEY);
+}
+
+function jwtExpiresAtMs(token: string): number | null {
+  const [, encodedPayload] = token.split(".");
+  if (!encodedPayload) return null;
+  try {
+    const base64 = encodedPayload.replace(/-/g, "+").replace(/_/g, "/");
+    const payload = JSON.parse(atob(base64)) as { exp?: unknown };
+    return typeof payload.exp === "number" ? payload.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+function shouldRefreshAccessToken(auth: StoredAuth): boolean {
+  const expiresAt = jwtExpiresAtMs(auth.tokens.accessToken);
+  return expiresAt !== null && expiresAt - Date.now() <= ACCESS_REFRESH_SKEW_MS;
 }
 
 export function getSession(): StoredAuth | null {
@@ -151,8 +169,12 @@ export async function logout(): Promise<void> {
 
 /** 인증이 필요한 API 호출. 401을 만나면 refresh 1회 후 재시도하고, 그래도 실패하면 로그아웃 처리한다. */
 async function authedFetch(path: string, init: RequestInit = {}, isRetry = false): Promise<Response> {
-  const current = readStoredAuth();
+  let current = readStoredAuth();
   if (!current) throw new AuthExpiredError();
+
+  if (!isRetry && shouldRefreshAccessToken(current)) {
+    current = await refreshSession();
+  }
 
   const response = await rawFetch(path, {
     ...init,
