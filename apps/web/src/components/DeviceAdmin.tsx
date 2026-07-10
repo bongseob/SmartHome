@@ -220,6 +220,9 @@ export function DeviceAdmin(): JSX.Element {
               onConnectionSaved={() => {
                 if (selectedFloorId) reloadOverview(selectedFloorId);
               }}
+              onUpdated={() => {
+                if (selectedFloorId) reloadOverview(selectedFloorId);
+              }}
             />
           ))}
         </tbody>
@@ -234,6 +237,7 @@ interface DeviceRowProps {
   onToggleConnection: () => void;
   showConnection: boolean;
   onConnectionSaved: () => void;
+  onUpdated: () => void;
 }
 
 function DeviceRow({
@@ -242,6 +246,7 @@ function DeviceRow({
   onToggleConnection,
   showConnection,
   onConnectionSaved,
+  onUpdated,
 }: DeviceRowProps): JSX.Element {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(device.name);
@@ -262,7 +267,10 @@ function DeviceRow({
       model: model.trim() || null,
       firmwareVersion: firmwareVersion.trim() || null,
     })
-      .then(() => setEditing(false))
+      .then(() => {
+        setEditing(false);
+        onUpdated();
+      })
       .catch((err: unknown) =>
         setError(err instanceof ApiError ? err.detail : "저장에 실패했습니다."),
       )
