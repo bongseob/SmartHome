@@ -19,7 +19,8 @@ export interface PublishDeviceCommandInput {
   sessionId: string;
   actorType: ActorType;
   actorId: string | null;
-  role: Role;
+  /** 스케줄러 등 특정 human role이 없는 SYSTEM 액터는 null. */
+  role: Role | null;
   /** device.id (audit 대상) — 호출부는 반드시 DB에서 해석한 값 사용 */
   targetId: string;
   /** DB canonical mqtt_topic 에서 도출한 identity — 클라이언트 입력 금지 */
@@ -93,7 +94,9 @@ export async function publishDeviceCommand(
     actorId: input.actorId ?? input.actorType,
     sessionId: input.sessionId,
     commandId: input.commandId,
-    role: input.role,
+    // MQTT5 User Property는 Role이 항상 필요 — 특정 human role이 없는 SYSTEM 액터(예: 스케줄러)는
+    // 그 설정 권한이 ADMIN 전용이라는 점에서 ADMIN으로 표기한다(DB audit_log.role은 null로 정확히 남는다).
+    role: input.role ?? "ADMIN",
     requestTimeMs: timestamp,
   });
 
