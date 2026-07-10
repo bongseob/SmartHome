@@ -22,7 +22,12 @@ function polygonPoints(polygon: unknown): number[] | null {
   return points.length >= 6 ? points : null; // 최소 삼각형(3점)
 }
 
-function devicePosition(device: DeviceListItem, fallbackIndex: number): { x: number; y: number } {
+function devicePosition(
+  device: DeviceListItem,
+  fallbackIndex: number,
+  override?: { x: number; y: number },
+): { x: number; y: number } {
+  if (override) return override;
   const x = device.posX !== null ? Number(device.posX) : NaN;
   const y = device.posY !== null ? Number(device.posY) : NaN;
   if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
@@ -34,15 +39,32 @@ interface FloorMapProps {
   overview: FloorOverview;
   selectedDeviceId: string | null;
   onSelectDevice: (device: DeviceListItem) => void;
+  /** 편집 모드: 기기 마커를 드래그로 옮길 수 있다(ui-ux-design.md §4.1-mode). 기본 false(실행 모드). */
+  editMode?: boolean;
+  /** 저장 전 임시 위치(드래그했지만 아직 저장하지 않은 좌표) — deviceId별 override. */
+  pendingPositions?: Record<string, { x: number; y: number }>;
+  onDeviceDragEnd?: (deviceId: string, x: number, y: number) => void;
 }
 
-export function FloorMap({ overview, selectedDeviceId, onSelectDevice }: FloorMapProps): JSX.Element {
+export function FloorMap({
+  overview,
+  selectedDeviceId,
+  onSelectDevice,
+  editMode = false,
+  pendingPositions = {},
+  onDeviceDragEnd,
+}: FloorMapProps): JSX.Element {
   const width = overview.floor.floorMapWidth ?? FALLBACK_WIDTH;
   const height = overview.floor.floorMapHeight ?? FALLBACK_HEIGHT;
   const image = useHtmlImage(overview.floor.floorMapUrl);
   const stageRef = useRef<Konva.Stage>(null);
   const [scale, setScale] = useState(1);
   const [pos, setPos] = useState({ x: 0, y: 0 });
+  // 드래그 중인 기기의 실시간 위치. 실시간 이벤트(WS) 등으로 드래그 도중 부모가 리렌더되면
+  // devicePosition()이 아직 커밋되지 않은 device.posX/posY(옛 값)로 되돌아가 Konva의 드래그 중
+  // 내부 위치와 충돌한다 — onDragMove로 이 state를 계속 갱신해 어떤 리렌더가 끼어들어도
+  // 항상 "드래그가 지금 있는 자리"를 좌표로 넘기게 한다.
+  const [dragPreview, setDragPreview] = useState<{ id: string; x: number; y: number } | null>(null);
 
   const areasWithPoints = useMemo(
     () =>
@@ -99,7 +121,9 @@ export function FloorMap({ overview, selectedDeviceId, onSelectDevice }: FloorMa
         scaleY={scale}
         x={pos.x}
         y={pos.y}
-        draggable
+        // 편집 모드에서는 캔버스 팬과 마커 드래그가 같은 제스처를 두고 충돌한다(둘 다 draggable이면
+        // Stage가 드래그를 가로채 마커 대신 도면 전체가 팬됨) — 편집 모드에서는 팬을 비활성화한다.
+        draggable={!editMode}
         onWheel={handleWheel}
         onDragEnd={(e) => setPos({ x: e.target.x(), y: e.target.y() })}
       >
@@ -130,13 +154,27 @@ export function FloorMap({ overview, selectedDeviceId, onSelectDevice }: FloorMa
         </Layer>
         <Layer>
           {overview.devices.map((device, index) => {
-            const { x, y } = devicePosition(device, index);
+            const { x, y } =
+              dragPreview?.id === device.id
+                ? { x: dragPreview.x, y: dragPreview.y }
+                : devicePosition(device, index, pendingPositions[device.id]);
             const selected = device.id === selectedDeviceId;
             return (
-              <Group key={device.id}>
+              // Group 자체를 기기 좌표로 두고 드래그해야 Circle+Text가 함께 움직인다.
+              <Group
+                key={device.id}
+                x={x}
+                y={y}
+                draggable={editMode}
+                onDragMove={(e) => setDragPreview({ id: device.id, x: e.target.x(), y: e.target.y() })}
+                onDragEnd={(e) => {
+                  setDragPreview(null);
+                  onDeviceDragEnd?.(device.id, e.target.x(), e.target.y());
+                  // 프로그래밍적 위치 갱신 후 히트 그래프가 갱신되지 않아 다음 드래그가 안 먹는 사례 방지.
+                  e.target.getStage()?.batchDraw();
+                }}
+              >
                 <Circle
-                  x={x}
-                  y={y}
                   radius={selected ? 11 : 9}
                   fill={DEVICE_STATUS_COLOR[device.currentStatus]}
                   stroke={selected ? "#2c3e50" : "#ffffff"}
@@ -145,8 +183,8 @@ export function FloorMap({ overview, selectedDeviceId, onSelectDevice }: FloorMa
                   onTap={() => onSelectDevice(device)}
                 />
                 <Text
-                  x={x - 30}
-                  y={y + 12}
+                  x={-30}
+                  y={12}
                   width={60}
                   align="center"
                   text={device.name}

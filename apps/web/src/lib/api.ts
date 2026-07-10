@@ -163,6 +163,20 @@ export function getFloorOverview(floorId: string): Promise<FloorOverview> {
   return authedJson<FloorOverview>(`/api/v1/spatial/floors/${floorId}/overview`);
 }
 
+export interface LayoutPosition {
+  deviceId: string;
+  posX: number;
+  posY: number;
+}
+
+/** 도면 편집 모드 — 변경된 기기 좌표 일괄 저장(ADMIN 전용, 서버에서 DEVICE_RELOCATE 감사). */
+export function saveFloorLayout(floorId: string, positions: LayoutPosition[]): Promise<unknown> {
+  return authedJson(`/api/v1/spatial/floors/${floorId}/layout`, {
+    method: "PATCH",
+    body: JSON.stringify({ positions }),
+  });
+}
+
 export function listDevices(filter?: {
   areaId?: string;
   category?: string;

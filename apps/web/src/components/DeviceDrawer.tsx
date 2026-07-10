@@ -14,6 +14,8 @@ interface DeviceDrawerProps {
   pendingCommand: PendingCommand | null;
   onClose: () => void;
   onSendCommand: (command: "turn_on" | "turn_off") => void;
+  /** 편집 모드에서는 오조작 방지를 위해 제어를 비활성화한다(ui-ux-design.md §4.1-mode). */
+  editMode?: boolean;
 }
 
 function historyLine(item: Record<string, unknown>): string {
@@ -35,6 +37,7 @@ export function DeviceDrawer({
   pendingCommand,
   onClose,
   onSendCommand,
+  editMode = false,
 }: DeviceDrawerProps): JSX.Element {
   const timeline = history
     ? [...history.commands, ...history.audits, ...history.alarms]
@@ -66,13 +69,14 @@ export function DeviceDrawer({
         </span>
       </p>
       <div className="device-drawer__actions">
-        <button type="button" onClick={() => onSendCommand("turn_on")}>
+        <button type="button" disabled={editMode} onClick={() => onSendCommand("turn_on")}>
           ON
         </button>
-        <button type="button" onClick={() => onSendCommand("turn_off")}>
+        <button type="button" disabled={editMode} onClick={() => onSendCommand("turn_off")}>
           OFF
         </button>
       </div>
+      {editMode && <p className="device-drawer__edit-note">편집 모드 — 제어 비활성화(위치만 이동 가능)</p>}
       {pendingCommand && (
         <p className="device-drawer__pending">
           명령 {pendingCommand.commandId.slice(0, 12)}… → {pendingCommand.status}

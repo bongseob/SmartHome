@@ -27,7 +27,7 @@
 | Scheduler (M10) | 완료(MVP) | ONE_TIME/DAILY/WEEKLY/MONTHLY/CRON 발화, DEVICE/GROUP fan-out, command-flow 재사용, ADMIN CRUD API+audit. EVENT 트리거는 이벤트 소스 미정으로 제외. E2E 검증됨 |
 | Alarm service (M9) | 완료(MVP) | policy CRUD(ADMIN), threshold 평가(gateway), ack/snooze/resolve/note + audit, 에스컬레이션 sweep, WEBHOOK 실제 발송(PUSH/EMAIL/SMS는 provider 미정 스텁). E2E 검증됨 |
 | AI/HITL | 미완료 | 추천/승인/학습데이터 흐름 미구현 |
-| Web dashboard (M8) | 완료(MVP) | `apps/web` Vite+React+Konva. 로그인, Floor Map(area 폴리곤·기기 마커·zoom/pan), Device Drawer(ON/OFF·이력), 실시간 타임라인(WS). E2E 검증됨 |
+| Web dashboard (M8) | 완료(MVP) | `apps/web` Vite+React+Konva. 로그인, Floor Map(area 폴리곤·기기 마커·zoom/pan), Device Drawer(ON/OFF·이력), 실시간 타임라인(WS), **도면 편집 모드(기기 드래그 배치, ADMIN 전용)**. E2E 검증됨 |
 | 운영 보안 | 미완료 | TLS, Mosquitto auth/ACL plugin, service auth 미구현 |
 | 통합/E2E/성능 테스트 | 미완료 | 현재는 contracts 중심 테스트 |
 
@@ -287,6 +287,11 @@ Gateway M1 흐름:
   최근 50개 스트림으로 표시
 - WebSocket 연결 완료: `useRealtime` 훅, 인증 만료(4401) 시 재연결 대신 로그아웃 위임, 그 외 종료는
   3초 후 재연결
+- **도면 편집 모드 완료(2026-07-10 추가)**: 실행/편집 모드 토글(ADMIN 전용), 편집 모드에서 기기 마커
+  드래그로 위치 이동, dirty 변경 건수 배지 + 저장/취소, 층 전환·모드 이탈 시 미저장 변경 확인
+  다이얼로그, 편집 모드에서는 ON/OFF 제어 비활성화(오조작 방지). 백엔드
+  `PATCH /api/v1/spatial/floors/:id/layout`(ADMIN 전용, 위치 일괄 저장 + `DEVICE_RELOCATE` audit,
+  한 transaction으로 처리)
 
 완료 조건:
 - Floor Map에서 device 상태가 표시된다. 완료
@@ -295,8 +300,10 @@ Gateway M1 흐름:
 - 알람/타임라인이 실시간으로 갱신된다. 완료
 
 MVP 범위 밖으로 의도적으로 제외한 것(ui-ux-design.md 전체 스펙 대비):
-- 편집 모드(도면/배치 구성), 카메라/PTZ, 알람 센터 전용 화면, HITL 승인함, 스케줄러, 관리(Admin) 화면
-  — 각각 해당 백엔드 마일스톤(M9~M13)과 함께 후속 진행
+- 카메라/PTZ, 알람 센터 전용 화면, HITL 승인함, 스케줄러 화면, 관리(Admin) 화면 — 각각 해당 백엔드
+  마일스톤(M9~M13)과 함께 후속 진행
+- 편집 모드 중 Area(Polygon) 생성/편집, 미배치 기기 드롭 배치, Grid Snap — 이번엔 "기기 위치 드래그"만
+  구현(사용자 요청 범위)
 
 알려진 단순화(후속 필요):
 - **WS 브로드캐스트 미스코프 유지**: M7에서 남긴 한계가 그대로 남아 있다 — 인증된 전 연결에 전체
@@ -307,6 +314,17 @@ MVP 범위 밖으로 의도적으로 제외한 것(ui-ux-design.md 전체 스펙
   `light-02`에 ON/OFF를 보내면 ack가 없어 SLA(30s) 후 `TIMED_OUT`으로 종결된다 — fleet 확장(M3 부채,
   §3.3)과 함께 해소 예정.
 - **큰 번들 경고**: `vite build` 결과 단일 청크 512KB(konva 포함) — 코드 스플리팅은 성능 튜닝(M15)과 병행.
+- **편집 모드 드래그 버그 발견 및 수정(2026-07-10)**: Konva `<Stage>`가 팬(pan)을 위해 항상
+  `draggable`이었는데, 편집 모드에서 기기 마커도 `draggable`이 되면서 같은 드래그 제스처를 Stage가
+  가로채 마커 대신 도면 전체가 팬되는 버그를 실제 브라우저(Playwright)로 발견 — 편집 모드에서는
+  Stage의 `draggable`을 꺼서 해결(`draggable={!editMode}`). 추가로, 실시간(WS) 갱신처럼 드래그 도중
+  끼어드는 리렌더가 Konva의 드래그 중 위치를 되돌려쓰는 문제를 막기 위해 `onDragMove`로 드래그 중
+  위치를 별도 state(`dragPreview`)로 추적해 항상 최신 위치를 넘기도록 방어적으로 처리.
+- **테스트 한계**: 같은 Playwright 세션에서 첫 번째 드래그 제스처는 항상 정상 동작하지만, 이후 반복되는
+  합성 마우스 드래그는 캔버스에 `mousedown` 네이티브 이벤트 자체가 전달되지 않는 현상을 확인했다
+  (Konva `DD.isDragging`은 정상적으로 `false`, JS 에러 없음 — 앱 코드가 아니라 headless Chromium의
+  합성 입력 처리 특성으로 보인다). 개별 드래그 동작(다른 기기·다른 위치)은 반복 검증했고 모두 정확했다
+  — 실제 마우스로 연속 드래그가 되는지는 이 세션에서 자동화로 끝까지 확인하지 못했다.
 
 ### M9. Alarm Service
 

@@ -208,6 +208,24 @@ export async function getDeviceState(
   return row ? toDeviceState(row) : null;
 }
 
+/** 도면 편집 모드 — 기기 좌표 갱신(SRS 3.2, ui-ux-design.md §4.1-mode). */
+export async function updateDevicePosition(
+  db: QueryExecutor,
+  deviceId: string,
+  posX: number,
+  posY: number,
+): Promise<DeviceStateRecord | null> {
+  const result = await db.query<DeviceStateRow>(
+    `UPDATE device
+     SET pos_x = $2, pos_y = $3, updated_at = now()
+     WHERE id::text = $1
+     RETURNING ${DEVICE_COLUMNS}`,
+    [deviceId, posX, posY],
+  );
+  const row = result.rows[0];
+  return row ? toDeviceState(row) : null;
+}
+
 export async function getDeviceHistory(
   db: QueryExecutor,
   idOrCode: string,

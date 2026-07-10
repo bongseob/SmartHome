@@ -1,14 +1,28 @@
-﻿import { Injectable, NotFoundException } from "@nestjs/common";
+﻿import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import type { AuthContext } from "@smarthome/auth";
 import { isAdmin } from "@smarthome/auth";
 import {
+  getDeviceState,
   getFloorOverview,
+  insertAuditLog,
   listFloors,
   query,
+  updateDevicePosition,
+  withTransaction,
   type FloorSummary,
 } from "@smarthome/db";
 
 const executor = { query };
+
+export interface LayoutPositionInput {
+  deviceId: string;
+  posX: number;
+  posY: number;
+}
+
+export interface SaveLayoutRequest {
+  positions: LayoutPositionInput[];
+}
 
 /**
  * Area ACL 기반 필터링 헬퍼.
@@ -52,5 +66,43 @@ export class SpatialService {
       );
     }
     return overview;
+  }
+
+  /**
+   * 도면 편집 모드에서 변경된 기기 좌표를 한 번에 커밋한다(ui-ux-design.md §4.1-mode).
+   * 위치 변경은 감사 대상(DEVICE_RELOCATE) — 전체를 한 transaction으로 묶어 부분 실패를 막는다.
+   */
+  async saveLayout(_floorId: string, body: SaveLayoutRequest, auth: AuthContext): Promise<unknown> {
+    if (!body.positions || body.positions.length === 0) {
+      throw new BadRequestException("positions is required");
+    }
+
+    return withTransaction(async (client) => {
+      const updated = [];
+      for (const pos of body.positions) {
+        const before = await getDeviceState(client, pos.deviceId);
+        if (!before) {
+          throw new NotFoundException(`device not found: ${pos.deviceId}`);
+        }
+        const device = await updateDevicePosition(client, pos.deviceId, pos.posX, pos.posY);
+        if (!device) {
+          throw new NotFoundException(`device not found: ${pos.deviceId}`);
+        }
+        await insertAuditLog(client, {
+          actorType: "ADMIN",
+          actorId: auth.userId,
+          targetType: "DEVICE",
+          targetId: pos.deviceId,
+          command: "DEVICE_RELOCATE",
+          reason: `(${before.posX ?? "null"},${before.posY ?? "null"}) → (${pos.posX},${pos.posY})`,
+          executionStatus: "SUCCEEDED",
+          mqttReasonCode: null,
+          sessionId: null,
+          commandId: null,
+        });
+        updated.push(device);
+      }
+      return updated;
+    });
   }
 }

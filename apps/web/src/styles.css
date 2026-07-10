@@ -136,6 +136,56 @@ body {
   color: #2980b9;
 }
 
+.device-drawer__edit-note {
+  font-size: 0.8rem;
+  color: #e67e22;
+  margin: -0.25rem 0 0.75rem;
+}
+
+.mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.mode-toggle button {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid #ccd1d9;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.mode-toggle button.active {
+  background: #2c3e50;
+  color: white;
+  border-color: #2c3e50;
+}
+
+.layout-editbar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 1.25rem;
+  background: #fff7e6;
+  border-bottom: 1px solid #f0d9a8;
+  font-size: 0.85rem;
+}
+
+.layout-editbar button {
+  padding: 0.3rem 0.8rem;
+  border-radius: 4px;
+  border: 1px solid #ccd1d9;
+  cursor: pointer;
+}
+
+.layout-editbar button.primary {
+  background: #2980b9;
+  color: white;
+  border-color: #2980b9;
+}
+
 .device-drawer__history {
   list-style: none;
   padding: 0;

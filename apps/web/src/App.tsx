@@ -10,6 +10,7 @@ import {
   listFloors,
   login as apiLogin,
   logout as apiLogout,
+  saveFloorLayout,
 } from "./lib/api";
 import type { AuthUser, DeviceHistory, DeviceListItem, FloorOverview, FloorSummary } from "./lib/types";
 import { useRealtime } from "./lib/useRealtime";
@@ -38,6 +39,14 @@ export function App(): JSX.Element {
   const [loadError, setLoadError] = useState<string | null>(null);
   const feedSeq = useRef(0);
 
+  // 도면 편집 모드(ui-ux-design.md §4.1-mode) — ADMIN 전용. 실행 모드에서는 조회/제어만 가능하다.
+  const [mode, setMode] = useState<"execute" | "edit">("execute");
+  const [pendingPositions, setPendingPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const [layoutError, setLayoutError] = useState<string | null>(null);
+  const [savingLayout, setSavingLayout] = useState(false);
+  const isAdmin = user?.roles.includes("ADMIN") ?? false;
+  const dirtyCount = Object.keys(pendingPositions).length;
+
   // overview.devices는 실시간으로 갱신되므로, 선택된 기기는 id로만 들고 매 렌더에서 최신 값을 파생한다
   // (별도 스냅샷으로 들고 있으면 realtime 업데이트가 반영되지 않는 상태 불일치가 생긴다).
   const selectedDevice = useMemo(
@@ -55,6 +64,9 @@ export function App(): JSX.Element {
     setHistory(null);
     setFeed([]);
     setPendingByDevice({});
+    setMode("execute");
+    setPendingPositions({});
+    setLayoutError(null);
   }, []);
 
   const handleLogin = useCallback(async (username: string, password: string) => {
@@ -144,6 +156,59 @@ export function App(): JSX.Element {
     [selectedDevice, handleLogout],
   );
 
+  const handleDeviceDragEnd = useCallback((deviceId: string, x: number, y: number) => {
+    setPendingPositions((prev) => ({ ...prev, [deviceId]: { x, y } }));
+  }, []);
+
+  const handleSaveLayout = useCallback(() => {
+    if (!selectedFloorId || dirtyCount === 0) return;
+    setSavingLayout(true);
+    setLayoutError(null);
+    const positions = Object.entries(pendingPositions).map(([deviceId, p]) => ({
+      deviceId,
+      posX: p.x,
+      posY: p.y,
+    }));
+    saveFloorLayout(selectedFloorId, positions)
+      .then(() => {
+        setOverview((prev) => {
+          if (!prev) return prev;
+          const devices = prev.devices.map((d) =>
+            pendingPositions[d.id]
+              ? { ...d, posX: String(pendingPositions[d.id]!.x), posY: String(pendingPositions[d.id]!.y) }
+              : d,
+          );
+          return { ...prev, devices };
+        });
+        setPendingPositions({});
+      })
+      .catch((err: unknown) => {
+        if (err instanceof AuthExpiredError) {
+          handleLogout();
+          return;
+        }
+        setLayoutError(err instanceof ApiError ? err.detail : "배치 저장에 실패했습니다.");
+      })
+      .finally(() => setSavingLayout(false));
+  }, [selectedFloorId, dirtyCount, pendingPositions, handleLogout]);
+
+  const handleCancelLayout = useCallback(() => {
+    setPendingPositions({});
+    setLayoutError(null);
+  }, []);
+
+  const handleToggleMode = useCallback(() => {
+    if (mode === "edit" && dirtyCount > 0) {
+      const discard = window.confirm(
+        `저장하지 않은 위치 변경 ${dirtyCount}건이 있습니다. 실행 모드로 전환하면 버려집니다. 계속할까요?`,
+      );
+      if (!discard) return;
+      setPendingPositions({});
+      setLayoutError(null);
+    }
+    setMode((prev) => (prev === "execute" ? "edit" : "execute"));
+  }, [mode, dirtyCount]);
+
   const handleRealtimeEvent = useCallback(
     (event: RealtimeEvent) => {
       feedSeq.current += 1;
@@ -193,6 +258,14 @@ export function App(): JSX.Element {
           <select
             value={selectedFloorId ?? ""}
             onChange={(e) => {
+              if (dirtyCount > 0) {
+                const discard = window.confirm(
+                  `저장하지 않은 위치 변경 ${dirtyCount}건이 있습니다. 층을 바꾸면 버려집니다. 계속할까요?`,
+                );
+                if (!discard) return;
+                setPendingPositions({});
+                setLayoutError(null);
+              }
               setSelectedFloorId(e.target.value);
               setSelectedDeviceId(null);
             }}
@@ -204,6 +277,16 @@ export function App(): JSX.Element {
             ))}
           </select>
         </label>
+        {isAdmin && (
+          <div className="mode-toggle">
+            <button type="button" className={mode === "execute" ? "active" : ""} onClick={() => mode !== "execute" && handleToggleMode()}>
+              실행
+            </button>
+            <button type="button" className={mode === "edit" ? "active" : ""} onClick={() => mode !== "edit" && handleToggleMode()}>
+              편집
+            </button>
+          </div>
+        )}
         <span className="app-shell__user">
           {user.username} ({user.roles.join(", ")})
         </span>
@@ -212,12 +295,33 @@ export function App(): JSX.Element {
         </button>
       </header>
 
+      {mode === "edit" && (
+        <div className="layout-editbar">
+          <span>편집 모드 — 마커를 드래그해 위치를 옮기세요.</span>
+          {dirtyCount > 0 && <strong>변경 {dirtyCount}건</strong>}
+          {layoutError && <span className="error-text">{layoutError}</span>}
+          <button type="button" onClick={handleCancelLayout} disabled={dirtyCount === 0 || savingLayout}>
+            취소
+          </button>
+          <button type="button" className="primary" onClick={handleSaveLayout} disabled={dirtyCount === 0 || savingLayout}>
+            {savingLayout ? "저장 중…" : "저장"}
+          </button>
+        </div>
+      )}
+
       {loadError && <p className="error-text">{loadError}</p>}
 
       <div className="app-shell__body">
         <main className="app-shell__map">
           {overview ? (
-            <FloorMap overview={overview} selectedDeviceId={selectedDevice?.id ?? null} onSelectDevice={handleSelectDevice} />
+            <FloorMap
+              overview={overview}
+              selectedDeviceId={selectedDevice?.id ?? null}
+              onSelectDevice={handleSelectDevice}
+              editMode={mode === "edit"}
+              pendingPositions={pendingPositions}
+              onDeviceDragEnd={handleDeviceDragEnd}
+            />
           ) : (
             <p>층을 불러오는 중…</p>
           )}
@@ -231,6 +335,7 @@ export function App(): JSX.Element {
               pendingCommand={pendingByDevice[selectedDevice.id] ?? null}
               onClose={() => setSelectedDeviceId(null)}
               onSendCommand={handleSendCommand}
+              editMode={mode === "edit"}
             />
           )}
           <EventFeed entries={feed} />

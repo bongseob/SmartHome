@@ -6,7 +6,19 @@
       "Bash(pnpm --filter @smarthome/gateway build)",
       "Bash(pnpm typecheck *)",
       "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\")",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(pnpm --filter @smarthome/api build)",
+      "Bash(pnpm --filter @smarthome/web typecheck)",
+      "Bash(pnpm --filter @smarthome/web build)",
+      "Bash(pnpm build *)",
+      "Bash(node check-editmode2.mjs)",
+      "Bash(node check-editmode4.mjs)",
+      "Bash(node check-editmode5.mjs)",
+      "Bash(docker exec *)",
+      "Bash(pnpm --filter @smarthome/db run seed)",
+      "Bash(node check-editmode-final.mjs)",
+      "Bash(node check-editmode6.mjs)",
+      "Bash(node check-editmode7.mjs)"
     ]
   }
 }
