@@ -17,8 +17,10 @@ export interface AuditLogInput {
   reason: string;
   executionStatus: ExecutionStatus;
   mqttReasonCode: number | null;
-  sessionId: string;
-  commandId: string;
+  /** MQTT 명령 상관용. 명령 수명주기가 아닌 이벤트(로그인 등)는 null. */
+  sessionId: string | null;
+  /** command 테이블 FK. 명령 수명주기가 아닌 이벤트(로그인 등)는 null. */
+  commandId: string | null;
 }
 
 /** Audit_Log append-only insert. 제어 관련 호출부는 command 상태 변경과 같은 transaction에서 호출한다. */

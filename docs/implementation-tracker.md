@@ -21,9 +21,9 @@
 | Device Simulator M1~M2 | 완료 | connect/LWT/state/telemetry + `/cmd`→ack(멱등성·결함주입) |
 | Gateway ingest | 완료 | telemetry/state 수신, batch insert, status update, offline alarm |
 | Command + Audit 핵심 경로 | 완료 | `packages/command-flow` 단일 소스, gateway/api MQTT cmd/ack, Redis correlation, timeout sweeper. E2E 검증됨 |
-| API 서버 | 진행 중 | NestJS bootstrap, health, command/device API, JWT auth guard, RBAC guard, **WS `/ws/realtime` 완료**. spatial/devices 목록 API 미완료 |
+| API 서버 | 진행 중 | NestJS bootstrap, health, command/device API, JWT auth guard, RBAC guard, **WS `/ws/realtime` 완료**, **spatial/devices 목록 API 완료(area 스코프 필터링 포함)** |
 | Realtime bridge (M7) | 완료 | `packages/realtime`(Redis pub/sub) + gateway 발행 + api WS 브로드캐스트. E2E 검증됨 |
-| Auth/RBAC | 진행 중 | JWT 발급/검증, refresh token 저장/폐기, role/device access guard, MQTT topics claim 완료. 권한변경 audit 미완료 |
+| Auth/RBAC | 진행 중 | JWT 발급/검증, refresh token 저장/폐기, role/device access guard, MQTT topics claim, **로그인/refresh/logout audit 완료**. 권한변경 API 자체가 아직 없어 그 audit은 미완료 |
 | Scheduler | 미완료 | `apps/scheduler`는 스캐폴딩 |
 | Alarm service | 미완료 | 정책 평가/라우팅/에스컬레이션 미구현 |
 | AI/HITL | 미완료 | 추천/승인/학습데이터 흐름 미구현 |
@@ -45,6 +45,7 @@
 | E2E 인제스트 | 통과 | simulator→gateway→telemetry 적재, state 반영, offline alarm (2026-07-09) |
 | **E2E 명령 전체 경로** | **통과** | login→`POST /commands`→MQTT→simulator ack→**SUCCEEDED**, 멱등성(published:false), **NO_ACK 결함→TIMED_OUT**. 두 경로 모두 audit 4행 체인(CREATED→PENDING→IN_PROGRESS→종결) DB 검증 (2026-07-09) |
 | **E2E 실시간 브리지(M7)** | **통과** | JWT 인증 WS 클라이언트 연결→`POST /commands`(turn_off)→`device.state`(OFF)·`command.status`(SUCCEEDED) 실시간 수신 확인 (2026-07-09) |
+| **E2E 인증 audit(M6)** | **통과** | 실인프라(Postgres+Redis+Mosquitto)에서 로그인 실패/성공, refresh 실패(형식 오류·이미 회전된 토큰 재사용)/성공, logout을 직접 호출 후 `audit_log`에 8행이 기대한 actor/target/status로 기록됨을 확인 (2026-07-10) |
 
 주의:
 - `pnpm test` 통과는 전체 기능 검증이 아니다. 대부분 앱/패키지에는 아직 테스트 파일이 없다.
@@ -233,12 +234,15 @@ Gateway M1 흐름:
 - Area/Device access guard 완료: device state/history, command create에 적용
 - Group access guard 미완료: group API 구현 시 적용
 - MQTT ACL용 `topics` claim 생성 완료: ADMIN=`enterprise/#`, area permission 기반 wildcard
-- 로그인/권한변경 audit
+- 로그인/refresh/logout audit 완료: `AuthService`가 성공/실패 모두 `audit_log`에 기록
+  (target은 계정 자신, `command`=LOGIN/REFRESH/LOGOUT, `execution_status`=SUCCEEDED/FAILED 재사용)
+- 권한 변경 audit: 권한 변경 API 자체가 아직 없어 보류(해당 API 구현 시 함께 추가)
 
 완료 조건:
 - 권한 없는 Device 조회/제어가 거부된다. 완료
 - JWT claim으로 MQTT ACL 정책을 만들 수 있다. 완료
-- 로그인/권한변경 audit이 남아 있다.
+- 로그인/refresh/logout audit이 남는다. 완료(2026-07-10 E2E 검증)
+- 권한변경 audit은 권한변경 API 구현 시점으로 이월.
 
 ### M7. Realtime Dashboard Bridge
 
@@ -411,9 +415,11 @@ Gateway M1 흐름:
 
 ## 6. 다음 추천 작업
 
-다음 구현은 **M6 Auth/RBAC의 audit 보강** 또는 **M7 Realtime Dashboard Bridge**부터 진행한다.
+M6(Auth/RBAC audit 보강), M7(Realtime Dashboard Bridge), M8a(devices/spatial 목록 API)는 모두 완료됐다.
+다음 구현은 **M8 Web Dashboard**(Vite+React+Konva)부터 진행한다 — API/WS/스코프 필터링이 갖춰졌으니
+이제 이를 소비하는 실제 화면을 만들 차례다.
 
-이유:
+이유(과거 기록, 여전히 유효):
 - SRS/PROJECT_RULES에서 가장 강한 불변식은 "제어 명령은 audit 없이 실행될 수 없다"이다.
 - API, Scheduler, AI/HITL은 모두 command path를 재사용해야 한다.
 - command/audit transaction을 먼저 고정해야 이후 기능이 우회 경로를 만들지 않는다.
@@ -446,10 +452,21 @@ Gateway M1 흐름:
 4. api `RealtimeWsServer`(`ws` 패키지, NestJS HTTP 서버 attach) — JWT 쿼리스트링 인증
 5. E2E: WS 클라이언트가 `device.state`·`command.status` 이벤트 실시간 수신 확인
 
-다음 작업 단위 (M8 선행 → M8a):
-1. api에 `GET /devices`(목록), `GET /floors/:id/overview`(floor+areas+devices) 추가
-2. seed 보강 — Area 2개 이상(폴리곤), 기기 2~3대, floor_map placeholder
-3. Vite+React 부트스트랩(로그인, 토큰 저장)
-4. Konva Floor Map — 기기 마커(상태색) + Drawer + ON/OFF + WS 실시간 갱신
-5. 로그인/refresh/logout audit 기록 추가(별도 트랙, M8과 병행 가능)
-6. 권한 변경 API 구현 시 audit 강제, Group API 추가 시 group access guard 적용
+완료된 M8a 작업 단위 (2026-07-10):
+1. api에 `GET /devices`(목록), `GET /spatial/floors`, `GET /spatial/floors/:id/overview` 추가
+2. 목록형 API에도 area 스코프 조회 권한 적용 — JWT `topics`(ACL claim) 기준으로 ADMIN 외에는
+   허가된 area/floor만 노출(리뷰에서 발견된 미스코프 이슈 수정)
+3. `floor_map.image_url` UNIQUE 제약은 기존 마이그레이션 수정 대신 `0012` 신규 마이그레이션으로 분리
+4. seed 보강 — Area 2개(폴리곤), 기기 3대, floor_map placeholder
+5. `packages/db/src/spatial-repository.test.ts` 추가(6개)
+
+완료된 M6 마감 작업 단위 (2026-07-10):
+1. `AuthService.login/refresh/logout`에 감사 로그 추가 — 성공/실패 모두 기록
+   (`insertAuditLog` 재사용, `commandId`/`sessionId`는 명령 수명주기 전용이라 auth 이벤트는 null)
+2. E2E: 실인프라에서 로그인 성공/실패, refresh 성공/실패(형식오류·재사용), logout 확인 —
+   `audit_log`에 8행 기대한 actor/target/status로 기록됨
+
+다음 작업 단위 (M8 — Web Dashboard):
+1. Vite+React 부트스트랩(로그인, 토큰 저장)
+2. Konva Floor Map — 기기 마커(상태색) + Drawer + ON/OFF + WS 실시간 갱신
+3. 권한 변경 API 구현 시 audit 강제, Group API 추가 시 group access guard 적용(별도 트랙)
