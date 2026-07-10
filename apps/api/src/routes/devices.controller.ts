@@ -1,10 +1,26 @@
 import { Controller, Get, Param, Query } from "@nestjs/common";
-import { RequireDeviceAccess, Roles } from "../auth/auth.decorators.js";
+import type { AuthContext } from "@smarthome/auth";
+import { CurrentAuth, RequireDeviceAccess, Roles } from "../auth/auth.decorators.js";
 import { DevicesService } from "../services/devices.service.js";
 
 @Controller("api/v1/devices")
 export class DevicesController {
   constructor(private readonly devices: DevicesService) {}
+
+  @Roles("USER", "MONITOR", "HITL_APPROVER")
+  @Get()
+  list(
+    @CurrentAuth() auth: AuthContext,
+    @Query("areaId") areaId?: string,
+    @Query("category") category?: string,
+    @Query("status") status?: string,
+  ): Promise<unknown> {
+    const filter: Record<string, string> = {};
+    if (areaId) filter.areaId = areaId;
+    if (category) filter.category = category;
+    if (status) filter.status = status;
+    return this.devices.list(filter, auth);
+  }
 
   @Roles("USER", "MONITOR", "HITL_APPROVER")
   @RequireDeviceAccess("VIEW", "routeParam", "id")

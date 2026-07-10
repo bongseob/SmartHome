@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { hashPassword, issueJwt, verifyJwt, verifyPassword, type AuthContext } from "./index.js";
+﻿import { describe, expect, it } from "vitest";
+import { hashPassword, hasAreaAccess, issueJwt, verifyJwt, verifyPassword, type AuthContext } from "./index.js";
 
 const secret = "0123456789abcdef0123456789abcdef";
 const context: AuthContext = {
@@ -40,5 +40,32 @@ describe("password hashing", () => {
 
     expect(verifyPassword("admin1234", hash)).toBe(true);
     expect(verifyPassword("wrong", hash)).toBe(false);
+  });
+});
+
+describe("hasAreaAccess", () => {
+  const adminCtx: AuthContext = {
+    userId: "admin-id",
+    username: "admin",
+    roles: ["ADMIN"],
+    topics: ["enterprise/#"],
+  };
+  const userCtx: AuthContext = {
+    userId: "user-id",
+    username: "user",
+    roles: ["USER"],
+    topics: ["enterprise/site1/bldg-a/2f/living-room/#"],
+  };
+
+  it("ADMIN은 모든 area에 접근 가능", () => {
+    expect(hasAreaAccess(adminCtx, "enterprise/site1/bldg-a/2f/bedroom")).toBe(true);
+  });
+
+  it("허가된 area는 접근 가능", () => {
+    expect(hasAreaAccess(userCtx, "enterprise/site1/bldg-a/2f/living-room")).toBe(true);
+  });
+
+  it("미허가 area는 접근 불가", () => {
+    expect(hasAreaAccess(userCtx, "enterprise/site1/bldg-a/2f/bedroom")).toBe(false);
   });
 });

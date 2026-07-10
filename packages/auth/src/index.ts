@@ -52,6 +52,21 @@ export function actorRole(ctx: AuthContext): Role {
   return ctx.roles.includes("ADMIN") ? "ADMIN" : ctx.roles[0] ?? "USER";
 }
 
+/**
+ * 사용자가 특정 area에 접근 권한이 있는지 확인한다.
+ * ADMIN이거나, topics(ACL wildcard) 중 하나가 해당 area를 포함하면 true.
+ *
+ * areaTopicParts: "enterprise/site1/bldg-a/2f/living-room" (suffix 없는 5세그먼트)
+ */
+export function hasAreaAccess(ctx: AuthContext, areaTopicPrefix: string): boolean {
+  if (isAdmin(ctx)) return true;
+  return ctx.topics.some((topic) => {
+    // topic = "enterprise/site1/bldg-a/2f/living-room/#"
+    const prefix = topic.replace(/\/#$/, "");
+    return areaTopicPrefix === prefix || areaTopicPrefix.startsWith(`${prefix}/`);
+  });
+}
+
 function base64Url(input: Buffer | string): string {
   return Buffer.from(input).toString("base64url");
 }
