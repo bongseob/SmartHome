@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(pnpm test *)"
+      "Bash(pnpm test *)",
+      "Read(//tmp/**)",
+      "Bash(pnpm --filter @smarthome/gateway build)",
+      "Bash(pnpm typecheck *)",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\")"
     ]
   }
 }

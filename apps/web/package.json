@@ -4,11 +4,26 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "dev": "vite",
+    "build": "vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
+    "preview": "vite preview",
     "clean": "rimraf dist .turbo"
   },
-  "dependencies": { "@smarthome/contracts": "workspace:*" },
-  "devDependencies": { "rimraf": "^6.0.1" }
+  "dependencies": {
+    "@smarthome/contracts": "workspace:*",
+    "konva": "^9.3.16",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-konva": "^18.2.10"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
+  }
 }

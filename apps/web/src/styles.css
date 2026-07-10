@@ -1,0 +1,179 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: #f4f6f8;
+  color: #2c3e50;
+}
+
+.login-view {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+}
+
+.login-view form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 280px;
+  padding: 2rem;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+}
+
+.login-view label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.login-view input {
+  padding: 0.5rem;
+  border: 1px solid #ccd1d9;
+  border-radius: 4px;
+}
+
+.error-text {
+  color: #e74c3c;
+  font-size: 0.85rem;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.app-shell__top {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  background: white;
+  border-bottom: 1px solid #e1e5ea;
+}
+
+.app-shell__top h1 {
+  font-size: 1.1rem;
+  margin: 0;
+}
+
+.app-shell__user {
+  margin-left: auto;
+  font-size: 0.85rem;
+  color: #7f8c8d;
+}
+
+.app-shell__body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+.app-shell__map {
+  flex: 1;
+  padding: 1rem;
+  overflow: auto;
+}
+
+.app-shell__side {
+  width: 340px;
+  border-left: 1px solid #e1e5ea;
+  background: white;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.floor-map__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.device-drawer {
+  padding: 1rem;
+  border-bottom: 1px solid #e1e5ea;
+}
+
+.device-drawer header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.device-drawer__code {
+  color: #7f8c8d;
+  font-size: 0.8rem;
+  margin-top: -0.5rem;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  color: white;
+  font-size: 0.75rem;
+}
+
+.device-drawer__actions {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.device-drawer__pending {
+  font-size: 0.8rem;
+  color: #2980b9;
+}
+
+.device-drawer__history {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 0.8rem;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.device-drawer__history li {
+  padding: 0.25rem 0;
+  border-bottom: 1px dashed #ecf0f1;
+}
+
+.event-feed {
+  padding: 1rem;
+  flex: 1;
+}
+
+.event-feed ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.event-feed li {
+  padding: 0.3rem 0;
+  border-bottom: 1px dashed #ecf0f1;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.event-feed time {
+  color: #95a5a6;
+  flex-shrink: 0;
+}
+
+.event-feed__empty {
+  color: #95a5a6;
+}

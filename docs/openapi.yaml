@@ -96,6 +96,70 @@ paths:
                 $ref: "#/components/schemas/CommandRecord"
         "404":
           $ref: "#/components/responses/Problem"
+  /api/v1/devices:
+    get:
+      summary: List devices (area-scoped for non-ADMIN roles)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: areaId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Device list, filtered to the caller's permitted areas unless ADMIN.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeviceState"
+  /api/v1/spatial/floors:
+    get:
+      summary: List floors with floor_map metadata (area-scoped for non-ADMIN roles)
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Floor list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FloorSummary"
+  /api/v1/spatial/floors/{id}/overview:
+    get:
+      summary: Get a floor's floor_map, areas (with polygons), and devices in one call
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Floor overview.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FloorOverview"
+        "404":
+          $ref: "#/components/responses/Problem"
   /api/v1/devices/{id}/state:
     get:
       summary: Get current device state
@@ -299,6 +363,59 @@ components:
         updatedAt:
           type: string
           format: date-time
+    FloorSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        slug:
+          type: string
+        buildingName:
+          type: string
+        siteName:
+          type: string
+        topicPrefix:
+          type: string
+        floorMapUrl:
+          type: string
+          nullable: true
+        floorMapWidth:
+          type: integer
+          nullable: true
+        floorMapHeight:
+          type: integer
+          nullable: true
+    Area:
+      type: object
+      properties:
+        id:
+          type: string
+        floorId:
+          type: string
+        name:
+          type: string
+        slug:
+          type: string
+        topicPrefix:
+          type: string
+        polygon:
+          description: "[[x,y], ...] 픽셀 좌표"
+          type: array
+    FloorOverview:
+      type: object
+      properties:
+        floor:
+          $ref: "#/components/schemas/FloorSummary"
+        areas:
+          type: array
+          items:
+            $ref: "#/components/schemas/Area"
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceState"
     DeviceHistory:
       type: object
       properties:
