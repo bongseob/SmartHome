@@ -3,6 +3,7 @@ import type {
   AuthUser,
   BuildingRecord,
   CommandCreateResponse,
+  CreateDeviceRequest,
   CreateSchedulerRequest,
   DeviceHistory,
   DeviceListItem,
@@ -10,8 +11,10 @@ import type {
   FloorSummary,
   ScheduleRunRecord,
   SchedulerRecord,
+  SetDeviceConnectionRequest,
   SiteRecord,
   TokenPair,
+  UpdateDeviceRequest,
 } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:3000";
@@ -209,6 +212,38 @@ export function listDevices(filter?: {
 
 export function getDeviceHistory(deviceId: string, limit = 20): Promise<DeviceHistory> {
   return authedJson<DeviceHistory>(`/api/v1/devices/${deviceId}/history?limit=${limit}`);
+}
+
+// ─── 기기 등록/설정 (M16 Admin — ADMIN 전용) ──────────────────────────
+
+export function createDevice(body: CreateDeviceRequest): Promise<DeviceListItem> {
+  return authedJson<DeviceListItem>("/api/v1/devices", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateDevice(id: string, body: UpdateDeviceRequest): Promise<DeviceListItem> {
+  return authedJson<DeviceListItem>(`/api/v1/devices/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function decommissionDevice(id: string): Promise<DeviceListItem> {
+  return authedJson<DeviceListItem>(`/api/v1/devices/${id}/decommission`, {
+    method: "PATCH",
+  });
+}
+
+export function setDeviceConnection(
+  id: string,
+  body: SetDeviceConnectionRequest,
+): Promise<DeviceListItem> {
+  return authedJson<DeviceListItem>(`/api/v1/devices/${id}/connection`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
 }
 
 export function createCommand(

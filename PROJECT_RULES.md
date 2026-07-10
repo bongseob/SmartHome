@@ -226,4 +226,3 @@ CREATED → PENDING → IN_PROGRESS → SUCCEEDED
 - Notification Channel 구현체(push/email/SMS provider)
 - AI 추천 엔진 배치/서빙 방식(MLOps, SRS 7)
 - 배포/인프라(K8s, Mosquitto HA 구성)
-- Area/Floor Map/Device CRUD API — 현재 read-only 또는 API 자체가 없음(M16 구현 시 신설)

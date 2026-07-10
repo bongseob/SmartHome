@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { QueryResultRow } from "./pool.js";
 import type { QueryExecutor } from "./audit-repository.js";
-import { getDeviceHistory, getDeviceState } from "./device-repository.js";
+import { decommissionDevice, getAreaSlugPath, getDeviceHistory, getDeviceState } from "./device-repository.js";
 
 class FakeDeviceDb implements QueryExecutor {
   readonly statements: string[] = [];
@@ -78,5 +78,47 @@ describe("device repository", () => {
     expect(history?.commands[0]?.commandId).toBe("CMD-1");
     expect(db.statements.some((statement) => statement.includes("FROM audit_log"))).toBe(true);
     expect(db.statements.some((statement) => statement.includes("FROM alarm_log"))).toBe(true);
+  });
+
+  it("loads the canonical area slug path used to build UNS topics", async () => {
+    const db: QueryExecutor = {
+      async query<T extends QueryResultRow = QueryResultRow>(text: string) {
+        expect(text).toContain("JOIN floor");
+        return {
+          rows: [{ site_slug: "site1", building_slug: "bldg-a", floor_slug: "2f", area_slug: "living-room" } as unknown as T],
+          rowCount: 1,
+        };
+      },
+    };
+
+    await expect(getAreaSlugPath(db, "area-1")).resolves.toEqual({
+      siteSlug: "site1",
+      buildingSlug: "bldg-a",
+      floorSlug: "2f",
+      areaSlug: "living-room",
+    });
+  });
+
+  it("decommissions instead of deleting the device", async () => {
+    const db: QueryExecutor = {
+      async query<T extends QueryResultRow = QueryResultRow>(text: string) {
+        expect(text).toContain("lifecycle_status = 'DECOMMISSIONED'");
+        expect(text).not.toContain("DELETE FROM device");
+        return {
+          rows: [{
+            id: "device-1", code: "light-01", name: "Light", category: "DEVICE",
+            device_type: "light", manufacturer: null, model: null, firmware_version: null,
+            mqtt_topic: "enterprise/site1/bldg-a/2f/living-room/light-01",
+            current_status: "OFF", lifecycle_status: "DECOMMISSIONED", area_id: "area-1",
+            pos_x: null, pos_y: null, gateway_id: null, connection_protocol: null,
+            connection_config: null, updated_at: new Date("2026-07-10T00:00:00.000Z"),
+          } as unknown as T],
+          rowCount: 1,
+        };
+      },
+    };
+
+    const device = await decommissionDevice(db, "device-1");
+    expect(device?.lifecycleStatus).toBe("DECOMMISSIONED");
   });
 });

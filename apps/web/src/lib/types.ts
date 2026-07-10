@@ -15,7 +15,6 @@ export interface AuthUser {
   roles: Role[];
   topics: string[];
 }
-
 export interface TokenPair {
   accessToken: string;
   refreshToken: string;
@@ -65,7 +64,39 @@ export interface DeviceListItem {
   areaTopicPrefix: string | null;
   posX: string | null;
   posY: string | null;
+  gatewayId: string | null;
+  connectionProtocol: string | null;
+  connectionConfig: unknown;
   updatedAt: string;
+}
+
+// ─── 기기 등록/설정 (M16 Admin — ADMIN 전용) ──────────────────────────
+
+export interface CreateDeviceRequest {
+  code: string;
+  name: string;
+  category: string;
+  deviceType?: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  firmwareVersion?: string | null;
+  areaId: string;
+  gatewayId?: string | null;
+}
+
+export interface UpdateDeviceRequest {
+  name?: string;
+  deviceType?: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  firmwareVersion?: string | null;
+  gatewayId?: string | null;
+}
+
+export interface SetDeviceConnectionRequest {
+  /** null이면 설정 해제(레거시/직결 MQTT 기기로 되돌림). */
+  protocol: string | null;
+  config?: unknown;
 }
 
 export interface FloorOverview {

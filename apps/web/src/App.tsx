@@ -22,6 +22,7 @@ import { SchedulerAdmin } from "./components/SchedulerAdmin";
 import { SystemInfoAdmin } from "./components/SystemInfoAdmin";
 import { FloorMapAdmin } from "./components/FloorMapAdmin";
 import { AreaAdmin } from "./components/AreaAdmin";
+import { DeviceAdmin } from "./components/DeviceAdmin";
 
 const MAX_FEED_ENTRIES = 50;
 
@@ -44,7 +45,7 @@ export function App(): JSX.Element {
   const feedSeq = useRef(0);
 
   // 최상위 화면 전환(M16 Admin) — ADMIN 전용 스케줄러/시스템정보 화면과 기존 Floor Map 관제 화면을 오간다.
-  const [view, setView] = useState<"map" | "schedulers" | "systemInfo" | "floorMaps" | "areas">("map");
+  const [view, setView] = useState<"map" | "schedulers" | "systemInfo" | "floorMaps" | "areas" | "devices">("map");
 
   // 도면 편집 모드(ui-ux-design.md §4.1-mode) — ADMIN 전용. 실행 모드에서는 조회/제어만 가능하다.
   const [mode, setMode] = useState<"execute" | "edit">("execute");
@@ -312,6 +313,9 @@ export function App(): JSX.Element {
             <button type="button" className={view === "areas" ? "active" : ""} onClick={() => setView("areas")}>
               지역 관리
             </button>
+            <button type="button" className={view === "devices" ? "active" : ""} onClick={() => setView("devices")}>
+              기기 관리
+            </button>
           </div>
         )}
         <span className="app-shell__user">
@@ -353,6 +357,10 @@ export function App(): JSX.Element {
       ) : view === "areas" ? (
         <div className="app-shell__body app-shell__body--single">
           <AreaAdmin />
+        </div>
+      ) : view === "devices" ? (
+        <div className="app-shell__body app-shell__body--single">
+          <DeviceAdmin />
         </div>
       ) : (
         <div className="app-shell__body">

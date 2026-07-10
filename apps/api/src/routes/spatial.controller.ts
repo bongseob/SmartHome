@@ -13,13 +13,39 @@
 import { FileInterceptor } from "@nestjs/platform-express";
 import { diskStorage } from "multer";
 import { randomUUID } from "node:crypto";
+import { open, unlink } from "node:fs/promises";
 import { extname } from "node:path";
 import type { AuthContext } from "@smarthome/auth";
 import { CurrentAuth, Roles } from "../auth/auth.decorators.js";
 import { SpatialService, type SaveLayoutRequest } from "../services/spatial.service.js";
 import { ensureFloorMapsDir } from "../config/uploads.js";
 
-const ALLOWED_IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".webp", ".svg"]);
+const ALLOWED_IMAGE_TYPES = new Map([
+  [".png", "image/png"],
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
+  [".webp", "image/webp"],
+]);
+
+async function hasValidImageSignature(path: string, extension: string): Promise<boolean> {
+  const handle = await open(path, "r");
+  try {
+    const header = Buffer.alloc(12);
+    const { bytesRead } = await handle.read(header, 0, header.length, 0);
+    if (extension === ".png") {
+      return bytesRead >= 8 && header.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    }
+    if (extension === ".jpg" || extension === ".jpeg") {
+      return bytesRead >= 3 && header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff;
+    }
+    if (extension === ".webp") {
+      return bytesRead >= 12 && header.toString("ascii", 0, 4) === "RIFF" && header.toString("ascii", 8, 12) === "WEBP";
+    }
+    return false;
+  } finally {
+    await handle.close();
+  }
+}
 
 const floorMapStorage = diskStorage({
   destination: (_req, _file, cb) => cb(null, ensureFloorMapsDir()),
@@ -98,29 +124,39 @@ export class SpatialController {
       storage: floorMapStorage,
       limits: { fileSize: 10 * 1024 * 1024 },
       fileFilter: (_req, file, cb) => {
-        cb(null, ALLOWED_IMAGE_EXT.has(extname(file.originalname).toLowerCase()));
+        const extension = extname(file.originalname).toLowerCase();
+        cb(null, ALLOWED_IMAGE_TYPES.get(extension) === file.mimetype);
       },
     }),
   )
-  uploadFloorMap(
+  async uploadFloorMap(
     @Param("id") id: string,
     @UploadedFile() file: Express.Multer.File | undefined,
     @Body() body: { widthPx: string; heightPx: string; scaleMPerPx: string },
     @CurrentAuth() auth: AuthContext,
   ): Promise<unknown> {
     if (!file) {
-      throw new BadRequestException("file is required (png/jpg/jpeg/webp/svg only)");
+      throw new BadRequestException("file is required (png/jpg/jpeg/webp only)");
     }
-    return this.spatial.uploadFloorMap(
-      id,
-      `/uploads/floor-maps/${file.filename}`,
-      {
-        widthPx: Number(body.widthPx),
-        heightPx: Number(body.heightPx),
-        scaleMPerPx: Number(body.scaleMPerPx),
-      },
-      auth,
-    );
+    const extension = extname(file.originalname).toLowerCase();
+    try {
+      if (!(await hasValidImageSignature(file.path, extension))) {
+        throw new BadRequestException("uploaded file content does not match its image extension");
+      }
+      return await this.spatial.uploadFloorMap(
+        id,
+        `/uploads/floor-maps/${file.filename}`,
+        {
+          widthPx: Number(body.widthPx),
+          heightPx: Number(body.heightPx),
+          scaleMPerPx: Number(body.scaleMPerPx),
+        },
+        auth,
+      );
+    } catch (error) {
+      await unlink(file.path).catch(() => undefined);
+      throw error;
+    }
   }
 
   @Roles("ADMIN")

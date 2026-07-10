@@ -99,12 +99,24 @@ export class SpatialService {
    * 도면 편집 모드에서 변경된 기기 좌표를 한 번에 커밋한다(ui-ux-design.md §4.1-mode).
    * 위치 변경은 감사 대상(DEVICE_RELOCATE) — 전체를 한 transaction으로 묶어 부분 실패를 막는다.
    */
-  async saveLayout(_floorId: string, body: SaveLayoutRequest, auth: AuthContext): Promise<unknown> {
+  async saveLayout(floorId: string, body: SaveLayoutRequest, auth: AuthContext): Promise<unknown> {
     if (!body.positions || body.positions.length === 0) {
       throw new BadRequestException("positions is required");
     }
 
     return withTransaction(async (client) => {
+      const overview = await getFloorOverview(client, floorId);
+      if (!overview) {
+        throw new NotFoundException(`floor not found: ${floorId}`);
+      }
+      const floorDeviceIds = new Set(overview.devices.map((device) => device.id));
+      const invalidPosition = body.positions.find((position) => !floorDeviceIds.has(position.deviceId));
+      if (invalidPosition) {
+        throw new BadRequestException(
+          `device ${invalidPosition.deviceId} does not belong to floor ${floorId}`,
+        );
+      }
+
       const updated = [];
       for (const pos of body.positions) {
         const before = await getDeviceState(client, pos.deviceId);
@@ -142,27 +154,29 @@ export class SpatialService {
     if (!name || !name.trim()) {
       throw new BadRequestException("name is required");
     }
-    const before = await listSites(executor).then((sites) => sites.find((s) => s.id === id));
-    if (!before) {
-      throw new NotFoundException(`site not found: ${id}`);
-    }
-    const updated = await updateSiteName(executor, id, name);
-    if (!updated) {
-      throw new NotFoundException(`site not found: ${id}`);
-    }
-    await insertAuditLog(executor, {
+    return withTransaction(async (client) => {
+      const before = await listSites(client).then((sites) => sites.find((s) => s.id === id));
+      if (!before) {
+        throw new NotFoundException(`site not found: ${id}`);
+      }
+      const updated = await updateSiteName(client, id, name.trim());
+      if (!updated) {
+        throw new NotFoundException(`site not found: ${id}`);
+      }
+      await insertAuditLog(client, {
       actorType: "ADMIN",
       actorId: auth.userId,
       targetType: "SITE",
       targetId: id,
       command: "SITE_UPDATE_NAME",
-      reason: `name '${before.name}' → '${name}'`,
+      reason: `name '${before.name}' → '${name.trim()}'`,
       executionStatus: "SUCCEEDED",
       mqttReasonCode: null,
       sessionId: null,
       commandId: null,
+      });
+      return updated;
     });
-    return updated;
   }
 
   async listBuildings(): Promise<unknown> {
@@ -173,27 +187,29 @@ export class SpatialService {
     if (!name || !name.trim()) {
       throw new BadRequestException("name is required");
     }
-    const before = await listBuildings(executor).then((buildings) => buildings.find((b) => b.id === id));
-    if (!before) {
-      throw new NotFoundException(`building not found: ${id}`);
-    }
-    const updated = await updateBuildingName(executor, id, name);
-    if (!updated) {
-      throw new NotFoundException(`building not found: ${id}`);
-    }
-    await insertAuditLog(executor, {
+    return withTransaction(async (client) => {
+      const before = await listBuildings(client).then((buildings) => buildings.find((b) => b.id === id));
+      if (!before) {
+        throw new NotFoundException(`building not found: ${id}`);
+      }
+      const updated = await updateBuildingName(client, id, name.trim());
+      if (!updated) {
+        throw new NotFoundException(`building not found: ${id}`);
+      }
+      await insertAuditLog(client, {
       actorType: "ADMIN",
       actorId: auth.userId,
       targetType: "BUILDING",
       targetId: id,
       command: "BUILDING_UPDATE_NAME",
-      reason: `name '${before.name}' → '${name}'`,
+      reason: `name '${before.name}' → '${name.trim()}'`,
       executionStatus: "SUCCEEDED",
       mqttReasonCode: null,
       sessionId: null,
       commandId: null,
+      });
+      return updated;
     });
-    return updated;
   }
 
   /**
@@ -206,8 +222,12 @@ export class SpatialService {
     meta: { widthPx: number; heightPx: number; scaleMPerPx: number },
     auth: AuthContext,
   ): Promise<unknown> {
-    if (!Number.isFinite(meta.widthPx) || !Number.isFinite(meta.heightPx) || !Number.isFinite(meta.scaleMPerPx)) {
-      throw new BadRequestException("widthPx/heightPx/scaleMPerPx must be numbers");
+    if (
+      !Number.isFinite(meta.widthPx) || meta.widthPx <= 0 ||
+      !Number.isFinite(meta.heightPx) || meta.heightPx <= 0 ||
+      !Number.isFinite(meta.scaleMPerPx) || meta.scaleMPerPx <= 0
+    ) {
+      throw new BadRequestException("widthPx/heightPx/scaleMPerPx must be positive numbers");
     }
     const floors = await listFloors(executor);
     const floor = floors.find((f) => f.id === floorId);
@@ -215,15 +235,16 @@ export class SpatialService {
       throw new NotFoundException(`floor not found: ${floorId}`);
     }
 
-    const floorMap = await insertFloorMap(executor, {
-      imageUrl,
-      widthPx: meta.widthPx,
-      heightPx: meta.heightPx,
-      scaleMPerPx: meta.scaleMPerPx,
-      uploadedBy: auth.userId,
-    });
-    await setFloorFloorMap(executor, floorId, floorMap.id);
-    await insertAuditLog(executor, {
+    return withTransaction(async (client) => {
+      const floorMap = await insertFloorMap(client, {
+        imageUrl,
+        widthPx: meta.widthPx,
+        heightPx: meta.heightPx,
+        scaleMPerPx: meta.scaleMPerPx,
+        uploadedBy: auth.userId,
+      });
+      await setFloorFloorMap(client, floorId, floorMap.id);
+      await insertAuditLog(client, {
       actorType: "ADMIN",
       actorId: auth.userId,
       targetType: "FLOOR",
@@ -234,21 +255,23 @@ export class SpatialService {
       mqttReasonCode: null,
       sessionId: null,
       commandId: null,
-    });
+      });
 
-    const updatedFloors = await listFloors(executor);
-    return updatedFloors.find((f) => f.id === floorId);
+      const updatedFloors = await listFloors(client);
+      return updatedFloors.find((f) => f.id === floorId);
+    });
   }
 
   async updateFloorMapScale(floorMapId: string, scaleMPerPx: number, auth: AuthContext): Promise<unknown> {
     if (!Number.isFinite(scaleMPerPx) || scaleMPerPx <= 0) {
       throw new BadRequestException("scaleMPerPx must be a positive number");
     }
-    const updated = await updateFloorMapScale(executor, floorMapId, scaleMPerPx);
-    if (!updated) {
-      throw new NotFoundException(`floor_map not found: ${floorMapId}`);
-    }
-    await insertAuditLog(executor, {
+    return withTransaction(async (client) => {
+      const updated = await updateFloorMapScale(client, floorMapId, scaleMPerPx);
+      if (!updated) {
+        throw new NotFoundException(`floor_map not found: ${floorMapId}`);
+      }
+      await insertAuditLog(client, {
       actorType: "ADMIN",
       actorId: auth.userId,
       targetType: "FLOOR_MAP",
@@ -259,8 +282,9 @@ export class SpatialService {
       mqttReasonCode: null,
       sessionId: null,
       commandId: null,
+      });
+      return updated;
     });
-    return updated;
   }
 
   /** 지역(Area) 관리(M16, SRS 2.1.1) — 생성/수정/삭제. ADMIN 전용, 감사 대상. */
@@ -280,14 +304,15 @@ export class SpatialService {
       throw new NotFoundException(`floor not found: ${floorId}`);
     }
 
-    const area = await createArea(executor, {
-      floorId,
-      slug: body.slug?.trim() || slugify(body.name),
-      name: body.name.trim(),
-      polygon: body.polygon,
-      createdBy: auth.userId,
-    });
-    await insertAuditLog(executor, {
+    return withTransaction(async (client) => {
+      const area = await createArea(client, {
+        floorId,
+        slug: body.slug?.trim() || slugify(body.name),
+        name: body.name.trim(),
+        polygon: body.polygon,
+        createdBy: auth.userId,
+      });
+      await insertAuditLog(client, {
       actorType: "ADMIN",
       actorId: auth.userId,
       targetType: "AREA",
@@ -298,8 +323,9 @@ export class SpatialService {
       mqttReasonCode: null,
       sessionId: null,
       commandId: null,
+      });
+      return area;
     });
-    return area;
   }
 
   async updateArea(
@@ -307,10 +333,6 @@ export class SpatialService {
     body: { name?: string; polygon?: unknown },
     auth: AuthContext,
   ): Promise<unknown> {
-    const before = await getAreaById(executor, id);
-    if (!before) {
-      throw new NotFoundException(`area not found: ${id}`);
-    }
     if (body.name !== undefined && !body.name.trim()) {
       throw new BadRequestException("name must not be empty");
     }
@@ -318,14 +340,19 @@ export class SpatialService {
       throw new BadRequestException("polygon must be an array of at least 3 [x,y] points");
     }
 
-    const updated = await updateArea(executor, id, {
-      ...(body.name !== undefined ? { name: body.name.trim() } : {}),
-      ...(body.polygon !== undefined ? { polygon: body.polygon } : {}),
-    });
-    if (!updated) {
-      throw new NotFoundException(`area not found: ${id}`);
-    }
-    await insertAuditLog(executor, {
+    return withTransaction(async (client) => {
+      const before = await getAreaById(client, id);
+      if (!before) {
+        throw new NotFoundException(`area not found: ${id}`);
+      }
+      const updated = await updateArea(client, id, {
+        ...(body.name !== undefined ? { name: body.name.trim() } : {}),
+        ...(body.polygon !== undefined ? { polygon: body.polygon } : {}),
+      });
+      if (!updated) {
+        throw new NotFoundException(`area not found: ${id}`);
+      }
+      await insertAuditLog(client, {
       actorType: "ADMIN",
       actorId: auth.userId,
       targetType: "AREA",
@@ -336,20 +363,22 @@ export class SpatialService {
       mqttReasonCode: null,
       sessionId: null,
       commandId: null,
+      });
+      return updated;
     });
-    return updated;
   }
 
   async deleteArea(id: string, auth: AuthContext): Promise<unknown> {
-    const before = await getAreaById(executor, id);
-    if (!before) {
-      throw new NotFoundException(`area not found: ${id}`);
-    }
-    const deleted = await deleteArea(executor, id);
-    if (!deleted) {
-      throw new NotFoundException(`area not found: ${id}`);
-    }
-    await insertAuditLog(executor, {
+    return withTransaction(async (client) => {
+      const before = await getAreaById(client, id);
+      if (!before) {
+        throw new NotFoundException(`area not found: ${id}`);
+      }
+      const deleted = await deleteArea(client, id);
+      if (!deleted) {
+        throw new NotFoundException(`area not found: ${id}`);
+      }
+      await insertAuditLog(client, {
       actorType: "ADMIN",
       actorId: auth.userId,
       targetType: "AREA",
@@ -360,7 +389,8 @@ export class SpatialService {
       mqttReasonCode: null,
       sessionId: null,
       commandId: null,
+      });
+      return { deleted: true };
     });
-    return { deleted: true };
   }
 }

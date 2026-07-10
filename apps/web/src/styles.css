@@ -527,3 +527,174 @@ body {
   color: #95a5a6;
   font-family: monospace;
 }
+
+/* ─── 기기 관리 (M16 Admin) ────────────────────────────────────────── */
+
+.device-admin {
+  padding: 1.5rem;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.device-admin h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.1rem;
+}
+
+.device-admin__note {
+  color: #7f8c8d;
+  font-size: 0.85rem;
+  margin: 0 0 0.75rem;
+}
+
+.device-admin__floor-select {
+  display: block;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.device-admin__create {
+  padding: 1rem;
+  margin-bottom: 1.25rem;
+  background: white;
+  border: 1px solid #e1e5ea;
+  border-radius: 8px;
+}
+
+.device-admin__create h3 {
+  margin: 0 0 0.75rem;
+  font-size: 0.95rem;
+}
+
+.device-admin__form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.device-admin__form input,
+.device-admin__form select {
+  padding: 0.4rem;
+  border: 1px solid #ccd1d9;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  min-width: 140px;
+}
+
+.device-admin__table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+  font-size: 0.85rem;
+}
+
+.device-admin__table th,
+.device-admin__table td {
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid #ecf0f1;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.device-admin__table button {
+  padding: 0.25rem 0.6rem;
+  border: 1px solid #ccd1d9;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-right: 0.3rem;
+}
+
+.device-admin__code {
+  color: #95a5a6;
+  font-family: monospace;
+}
+
+.device-admin__topic {
+  color: #7f8c8d;
+  font-family: monospace;
+  font-size: 0.78rem;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-admin__row--decommissioned {
+  opacity: 0.5;
+}
+
+.device-admin__row--decommissioned button {
+  cursor: not-allowed;
+}
+
+.device-admin__connection-row td {
+  background: #f8f9fa;
+  padding: 0.75rem;
+}
+
+.lifecycle-badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+}
+
+.lifecycle-badge--active {
+  background: #d4edda;
+  color: #155724;
+}
+
+.lifecycle-badge--registered,
+.lifecycle-badge--provisioned,
+.lifecycle-badge--commissioned {
+  background: #cce5ff;
+  color: #004085;
+}
+
+.lifecycle-badge--maintenance {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.lifecycle-badge--decommissioned {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.connection-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.connection-fields input,
+.connection-fields select {
+  padding: 0.35rem;
+  border: 1px solid #ccd1d9;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  min-width: 100px;
+}
+
+.connection-fields button {
+  padding: 0.3rem 0.7rem;
+  border: 1px solid #ccd1d9;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.connection-fields button.primary {
+  background: #2980b9;
+  color: white;
+  border-color: #2980b9;
+}
+
+.success-text {
+  color: #27ae60;
+  font-size: 0.82rem;
+}

@@ -307,3 +307,157 @@ export async function getDeviceHistory(
     alarms: alarms.rows.map(toAlarmHistory),
   };
 }
+
+// ─── Area slug path (mqtt_topic 생성용) ──────────────────────────────
+
+export interface AreaSlugPath {
+  siteSlug: string;
+  buildingSlug: string;
+  floorSlug: string;
+  areaSlug: string;
+}
+
+/**
+ * area→floor→building→site 4-way join으로 slug 4개를 반환.
+ * buildDeviceBase()로 mqtt_topic을 생성할 때 사용한다(spatial-repository.ts의
+ * getAreaById와 동일한 join).
+ */
+export async function getAreaSlugPath(
+  db: QueryExecutor,
+  areaId: string,
+): Promise<AreaSlugPath | null> {
+  const r = await db.query<QueryResultRow>(
+    `SELECT s.slug AS site_slug, b.slug AS building_slug,
+            f.slug AS floor_slug, a.slug AS area_slug
+     FROM area a
+     JOIN floor f     ON f.id = a.floor_id
+     JOIN building b  ON b.id = f.building_id
+     JOIN site s      ON s.id = b.site_id
+     WHERE a.id::text = $1`,
+    [areaId],
+  );
+  const row = r.rows[0];
+  if (!row) return null;
+  return {
+    siteSlug: row.site_slug,
+    buildingSlug: row.building_slug,
+    floorSlug: row.floor_slug,
+    areaSlug: row.area_slug,
+  };
+}
+
+// ─── Device CRUD ─────────────────────────────────────────────────────
+
+export interface CreateDeviceInput {
+  code: string;
+  name: string;
+  category: DeviceCategory;
+  deviceType?: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  firmwareVersion?: string | null;
+  mqttTopic: string;
+  areaId: string;
+  gatewayId?: string | null;
+}
+
+/**
+ * 기기 생성. mqtt_topic은 호출부에서 buildDeviceBase()로 생성해 전달한다(하드코딩 금지).
+ * code/mqtt_topic UNIQUE 제약은 23505 에러로 발생하며, 서비스 레이어에서 처리한다.
+ */
+export async function createDevice(
+  db: QueryExecutor,
+  input: CreateDeviceInput,
+): Promise<DeviceStateRecord> {
+  const r = await db.query<{ id: string }>(
+    `INSERT INTO device (code, name, category, device_type, manufacturer, model,
+        firmware_version, mqtt_topic, area_id, gateway_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     RETURNING id::text`,
+    [
+      input.code,
+      input.name,
+      input.category,
+      input.deviceType ?? null,
+      input.manufacturer ?? null,
+      input.model ?? null,
+      input.firmwareVersion ?? null,
+      input.mqttTopic,
+      input.areaId,
+      input.gatewayId ?? null,
+    ],
+  );
+  const id = r.rows[0]?.id;
+  if (!id) throw new Error("device insert did not return an id");
+  const created = await getDeviceState(db, id);
+  if (!created) throw new Error("device insert did not return a row");
+  return created;
+}
+
+export interface UpdateDeviceInput {
+  name?: string | undefined;
+  deviceType?: string | null | undefined;
+  manufacturer?: string | null | undefined;
+  model?: string | null | undefined;
+  firmwareVersion?: string | null | undefined;
+  gatewayId?: string | null | undefined;
+}
+
+/**
+ * 기기 기본 필드 수정. area/code/mqtt_topic은 불변(위치 이동은 폐기 후 재등록).
+ * updateArea와 동일한 dynamic SET-list 패턴.
+ */
+export async function updateDevice(
+  db: QueryExecutor,
+  id: string,
+  input: UpdateDeviceInput,
+): Promise<DeviceStateRecord | null> {
+  const sets: string[] = [];
+  const params: unknown[] = [id];
+  if (input.name !== undefined) {
+    params.push(input.name);
+    sets.push(`name = $${params.length}`);
+  }
+  if (input.deviceType !== undefined) {
+    params.push(input.deviceType);
+    sets.push(`device_type = $${params.length}`);
+  }
+  if (input.manufacturer !== undefined) {
+    params.push(input.manufacturer);
+    sets.push(`manufacturer = $${params.length}`);
+  }
+  if (input.model !== undefined) {
+    params.push(input.model);
+    sets.push(`model = $${params.length}`);
+  }
+  if (input.firmwareVersion !== undefined) {
+    params.push(input.firmwareVersion);
+    sets.push(`firmware_version = $${params.length}`);
+  }
+  if (input.gatewayId !== undefined) {
+    params.push(input.gatewayId);
+    sets.push(`gateway_id = $${params.length}`);
+  }
+  if (sets.length === 0) return getDeviceState(db, id);
+
+  await db.query(`UPDATE device SET ${sets.join(", ")}, updated_at = now() WHERE id::text = $1`, params);
+  return getDeviceState(db, id);
+}
+
+/**
+ * 기기 폐기(소프트 전이). lifecycle_status → DECOMMISSIONED.
+ * 하드 DELETE 대신 감사 이력(telemetry/command/audit) 보존(설계 결정).
+ */
+export async function decommissionDevice(
+  db: QueryExecutor,
+  id: string,
+): Promise<DeviceStateRecord | null> {
+  const r = await db.query<DeviceStateRow>(
+    `UPDATE device SET lifecycle_status = 'DECOMMISSIONED', updated_at = now()
+     WHERE id::text = $1
+     RETURNING ${DEVICE_COLUMNS}`,
+    [id],
+  );
+  const row = r.rows[0];
+  return row ? toDeviceState(row) : null;
+}
