@@ -5,7 +5,8 @@
       "Read(//tmp/**)",
       "Bash(pnpm --filter @smarthome/gateway build)",
       "Bash(pnpm typecheck *)",
-      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\")"
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\")",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

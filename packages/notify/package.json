@@ -1,0 +1,21 @@
+{
+  "name": "@smarthome/notify",
+  "version": "0.1.0",
+  "private": true,
+  "description": "알람 Notification Channel 발송 단일 소스 (M9). WEBHOOK만 실제 HTTP 발송, PUSH/EMAIL/SMS는 provider 미정(PROJECT_RULES 부록 A.2)이라 로그 스텁.",
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rimraf dist .turbo"
+  },
+  "dependencies": {
+    "@smarthome/contracts": "workspace:*"
+  },
+  "devDependencies": { "rimraf": "^6.0.1" }
+}

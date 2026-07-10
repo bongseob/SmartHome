@@ -10,14 +10,23 @@ import {
 import { connect, type MqttClient } from "@smarthome/mqtt";
 import {
   closePool,
+  compareThreshold,
   completeCommandFromAck,
   getDeviceIdByCode,
+  getNotificationChannelById,
   insertTelemetryBatch,
+  listAlarmPolicies,
+  listChannelsForPolicy,
+  query,
+  raiseAlarmFromPolicy,
   raiseOfflineAlarm,
   setDeviceStatus,
+  sweepDueEscalations,
   transitionCommandWithAudit,
+  type AlarmPolicyRecord,
   type TelemetryRow,
 } from "@smarthome/db";
+import { dispatchNotification } from "@smarthome/notify";
 import {
   clearCorrelation,
   createRedisCommandClient,
@@ -31,6 +40,8 @@ import {
   publishRealtimeEvent,
   type RealtimePublisher,
 } from "@smarthome/realtime";
+
+const dbExecutor = { query };
 
 /**
  * @smarthome/gateway — MQTT 인제스트 (docs/architecture.md §8).
@@ -55,6 +66,133 @@ async function resolveDeviceId(code: string): Promise<string | null> {
 
 // 상태 변화 감지(retained 재수신·중복 억제)
 const lastStatus = new Map<string, string>();
+
+// ─── M9 Alarm Service: threshold 평가 + 에스컬레이션 ────────────────────
+// deviceId:metric → 해당 기기·지표를 감시하는 활성 정책들 (주기적으로 새로고침)
+let policyCache = new Map<string, AlarmPolicyRecord[]>();
+// policyId:deviceId → 최초 breach epoch ms (duration_sec 조건 추적, 회복 시 삭제)
+const breachSince = new Map<string, number>();
+
+async function refreshAlarmPolicyCache(): Promise<void> {
+  try {
+    const policies = await listAlarmPolicies(dbExecutor, { enabled: true, targetType: "DEVICE" });
+    const next = new Map<string, AlarmPolicyRecord[]>();
+    for (const policy of policies) {
+      if (!policy.targetId || !policy.metric || !policy.operator || policy.thresholdValue === null) continue;
+      const key = `${policy.targetId}:${policy.metric}`;
+      const list = next.get(key) ?? [];
+      list.push(policy);
+      next.set(key, list);
+    }
+    policyCache = next;
+  } catch (err) {
+    console.error("[gateway] alarm policy 캐시 갱신 실패:", err);
+  }
+}
+
+async function notifyPolicyChannels(policyId: string, alarmId: string, alarm: {
+  tier: string;
+  severity: string;
+  message: string | null;
+  deviceId: string | null;
+}): Promise<void> {
+  const channels = await listChannelsForPolicy(dbExecutor, policyId);
+  await Promise.all(
+    channels.map((channel) =>
+      dispatchNotification(channel, {
+        alarmId,
+        tier: alarm.tier,
+        severity: alarm.severity,
+        message: alarm.message,
+        deviceId: alarm.deviceId,
+        escalationLevel: 0,
+        ts: Date.now(),
+      }),
+    ),
+  );
+}
+
+async function evaluateAlarmPolicies(
+  events: RealtimePublisher,
+  deviceId: string,
+  metric: string,
+  value: number,
+): Promise<void> {
+  const policies = policyCache.get(`${deviceId}:${metric}`);
+  if (!policies || policies.length === 0) return;
+
+  for (const policy of policies) {
+    const breachKey = `${policy.id}:${deviceId}`;
+    const breached = compareThreshold(policy.operator!, value, policy.thresholdValue!);
+    if (!breached) {
+      breachSince.delete(breachKey);
+      continue;
+    }
+
+    const durationMs = (policy.durationSec ?? 0) * 1000;
+    const firstBreachAt = breachSince.get(breachKey);
+    if (firstBreachAt === undefined) {
+      breachSince.set(breachKey, Date.now());
+      if (durationMs > 0) continue; // 지속시간 조건이 있으면 다음 telemetry에서 재평가
+    } else if (Date.now() - firstBreachAt < durationMs) {
+      continue; // 아직 지속시간 미달
+    }
+
+    try {
+      const message = `${metric} ${policy.operator} ${policy.thresholdValue} 위반 (현재값 ${value})`;
+      const result = await raiseAlarmFromPolicy({ policy, deviceId, message });
+      if (result.raised) {
+        console.warn(`[gateway] alarm 발생 policy='${policy.name}' device=${deviceId} value=${value}`);
+        await publishRealtimeEvent(events, {
+          type: "alarm.raised",
+          deviceId,
+          tier: result.alarm.tier,
+          severity: result.alarm.severity,
+          message: result.alarm.message,
+          ts: Date.now(),
+        });
+        await notifyPolicyChannels(policy.id, result.alarm.id, {
+          tier: result.alarm.tier,
+          severity: result.alarm.severity,
+          message: result.alarm.message,
+          deviceId,
+        });
+      }
+    } catch (err) {
+      console.error(`[gateway] alarm policy 평가 오류 policy=${policy.id} device=${deviceId}:`, err);
+    }
+  }
+}
+
+async function sweepAlarmEscalations(): Promise<void> {
+  try {
+    const due = await sweepDueEscalations();
+    for (const item of due) {
+      console.warn(
+        `[gateway] alarm ${item.alarm.id} 에스컬레이션 level=${item.level} (raised_at=${item.alarm.raisedAt.toISOString()})`,
+      );
+      if (item.notifyChannelId) {
+        const channel = await getNotificationChannelById(dbExecutor, item.notifyChannelId);
+        if (channel) {
+          await dispatchNotification(channel, {
+            alarmId: item.alarm.id,
+            tier: item.alarm.tier,
+            severity: item.alarm.severity,
+            message: item.alarm.message,
+            deviceId: item.alarm.deviceId,
+            escalationLevel: item.level,
+            ts: Date.now(),
+          });
+        }
+      } else if (item.notifyRole) {
+        // 역할 기반 알림 팬아웃(사용자별 채널 결정)은 미구현 — 로그만 남긴다.
+        console.log(`[gateway] (stub) 역할 '${item.notifyRole}' 대상 에스컬레이션 알림 — 채널 미구현`);
+      }
+    }
+  } catch (err) {
+    console.error("[gateway] 에스컬레이션 sweep 오류:", err);
+  }
+}
 
 // 텔레메트리 배치 버퍼
 let buffer: TelemetryRow[] = [];
@@ -170,6 +308,9 @@ async function onMessage(
         valueNum: typeof value === "number" ? value : null,
         valueText: typeof value === "string" ? value : null,
       });
+      if (typeof value === "number") {
+        await evaluateAlarmPolicies(events, id, metric, value);
+      }
     }
     return;
   }
@@ -271,6 +412,8 @@ async function main(): Promise<void> {
   await events.connect();
   console.log("[gateway] redis 연결 — 실시간 이벤트 발행 활성화");
 
+  await refreshAlarmPolicyCache();
+
   const client: MqttClient = connect(url, { clientId: "svc:gateway-1" });
 
   client.on("connect", () => {
@@ -291,10 +434,14 @@ async function main(): Promise<void> {
 
   const flushTimer = setInterval(() => void flush(), 500);
   const timeoutTimer = setInterval(() => void sweepCommandTimeouts(redis, events), 1000);
+  const policyRefreshTimer = setInterval(() => void refreshAlarmPolicyCache(), 30_000);
+  const escalationTimer = setInterval(() => void sweepAlarmEscalations(), 5_000);
 
   const shutdown = (): void => {
     clearInterval(flushTimer);
     clearInterval(timeoutTimer);
+    clearInterval(policyRefreshTimer);
+    clearInterval(escalationTimer);
     void flush().then(() =>
       client.end(false, {}, () =>
         void redis

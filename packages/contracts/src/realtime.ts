@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AlarmTier, DeviceStatus, ExecutionStatus, Severity, TargetType } from "./enums.js";
+import { AlarmState, AlarmTier, DeviceStatus, ExecutionStatus, Severity, TargetType } from "./enums.js";
 
 /**
  * 대시보드 실시간 이벤트 스키마 (docs/architecture.md §11, docs/api-spec.md §10 /ws/realtime).
@@ -38,10 +38,21 @@ export const CommandStatusEvent = z.object({
 });
 export type CommandStatusEvent = z.infer<typeof CommandStatusEvent>;
 
+/** 알람 ack/snooze/resolve 등 상태 전이(M9). 최초 발생은 AlarmRaisedEvent, 이후 상태 변화는 이 이벤트. */
+export const AlarmUpdatedEvent = z.object({
+  type: z.literal("alarm.updated"),
+  alarmId: z.string(),
+  deviceId: z.string().nullable(),
+  state: AlarmState,
+  ts: epochMs,
+});
+export type AlarmUpdatedEvent = z.infer<typeof AlarmUpdatedEvent>;
+
 export const RealtimeEvent = z.discriminatedUnion("type", [
   DeviceStateEvent,
   AlarmRaisedEvent,
   CommandStatusEvent,
+  AlarmUpdatedEvent,
 ]);
 export type RealtimeEvent = z.infer<typeof RealtimeEvent>;
 

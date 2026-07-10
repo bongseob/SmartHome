@@ -7,4 +7,5 @@ export * from "./topics.js";
 export * from "./payloads.js";
 export * from "./userProperties.js";
 export * from "./lifecycle.js";
+export * from "./alarmLifecycle.js";
 export * from "./realtime.js";

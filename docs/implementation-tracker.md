@@ -25,7 +25,7 @@
 | Realtime bridge (M7) | 완료 | `packages/realtime`(Redis pub/sub) + gateway 발행 + api WS 브로드캐스트. E2E 검증됨 |
 | Auth/RBAC | 진행 중 | JWT 발급/검증, refresh token 저장/폐기, role/device access guard, MQTT topics claim, **로그인/refresh/logout audit 완료**. 권한변경 API 자체가 아직 없어 그 audit은 미완료 |
 | Scheduler | 미완료 | `apps/scheduler`는 스캐폴딩 |
-| Alarm service | 미완료 | 정책 평가/라우팅/에스컬레이션 미구현 |
+| Alarm service (M9) | 완료(MVP) | policy CRUD(ADMIN), threshold 평가(gateway), ack/snooze/resolve/note + audit, 에스컬레이션 sweep, WEBHOOK 실제 발송(PUSH/EMAIL/SMS는 provider 미정 스텁). E2E 검증됨 |
 | AI/HITL | 미완료 | 추천/승인/학습데이터 흐름 미구현 |
 | Web dashboard (M8) | 완료(MVP) | `apps/web` Vite+React+Konva. 로그인, Floor Map(area 폴리곤·기기 마커·zoom/pan), Device Drawer(ON/OFF·이력), 실시간 타임라인(WS). E2E 검증됨 |
 | 운영 보안 | 미완료 | TLS, Mosquitto auth/ACL plugin, service auth 미구현 |
@@ -47,6 +47,7 @@
 | **E2E 실시간 브리지(M7)** | **통과** | JWT 인증 WS 클라이언트 연결→`POST /commands`(turn_off)→`device.state`(OFF)·`command.status`(SUCCEEDED) 실시간 수신 확인 (2026-07-09) |
 | **E2E 인증 audit(M6)** | **통과** | 실인프라(Postgres+Redis+Mosquitto)에서 로그인 실패/성공, refresh 실패(형식 오류·이미 회전된 토큰 재사용)/성공, logout을 직접 호출 후 `audit_log`에 8행이 기대한 actor/target/status로 기록됨을 확인 (2026-07-10) |
 | **E2E 웹 대시보드(M8)** | **통과** | 실인프라(api+gateway+simulator+web dev server) 대상 Playwright로 로그인→Floor Map(area 폴리곤·기기 마커) 렌더→마커 클릭→Drawer ON/OFF→실제 MQTT ack로 SUCCEEDED→WS `device.state`/`command.status` 실시간 반영까지 확인, 콘솔 에러 없음 (2026-07-10) |
+| **E2E 알람 서비스(M9)** | **통과** | 실인프라에서 alarm_policy 생성(API)→시뮬레이터 telemetry가 threshold(temperature>23) 위반→gateway가 alarm_log RAISE+audit, 로컬 webhook 서버가 초기 알림 수신→8초 후 escalation_rule 발동, 두 번째 webhook(다른 채널) 수신+audit ESCALATE→API로 ACK(감사 기록)→재-ACK 시 409(불법 전이)→RESOLVE 성공. 동일 policy+device 중복 breach 동안 새 알람이 재발행되지 않음(중복 억제) 확인 (2026-07-10) |
 
 주의:
 - `pnpm test` 통과는 전체 기능 검증이 아니다. 대부분 앱/패키지에는 아직 테스트 파일이 없다.
@@ -308,20 +309,41 @@ MVP 범위 밖으로 의도적으로 제외한 것(ui-ux-design.md 전체 스펙
 
 ### M9. Alarm Service
 
-상태: 미완료
+상태: **완료(MVP)** (E2E 검증: policy 생성→threshold 위반→alarm 발생→webhook 발송→escalation→ack→resolve, 2026-07-10)
 
 작업:
-- alarm_policy CRUD
-- telemetry threshold evaluation
-- reactive/proactive/optimization 분류
-- alarm action: ack/snooze/resolve/note
-- escalation rule
-- notification channel provider 연동
+- alarm_policy CRUD 완료: `POST/GET /api/v1/alarm-policies`, `PATCH /:id/enabled` (ADMIN 전용, SRS 2.1.5)
+- telemetry threshold evaluation 완료: gateway가 활성 정책을 30초 주기로 캐시하고, telemetry 수신마다
+  `compareThreshold()`로 평가. `duration_sec` 지속시간 조건은 breach 시작 시각을 메모리에 추적해 지원
+  (gateway 단일 인스턴스 가정 — 재시작 시 추적 상태 초기화, 기존 idCache 등과 동일한 한계)
+- reactive/proactive/optimization 분류 완료: `alarm_policy.tier`를 그대로 `alarm_log.tier`에 반영
+- alarm action(ack/snooze/resolve/note) 완료: `packages/contracts/src/alarmLifecycle.ts` 상태 머신
+  (command lifecycle.ts와 동일 패턴) + `packages/db/src/alarm-service.ts`가 전이·alarm_action·audit_log를
+  한 transaction으로 처리. USER는 ack/snooze만, MONITOR/HITL_APPROVER는 resolve/note까지(SRS 2.2/2.3)
+- escalation rule 완료: gateway가 5초 주기로 `sweepDueEscalations()` 실행 — 알람별로 아직 발동하지 않은
+  가장 낮은 레벨 중 `after_sec` 경과분만 처리(SNOOZED는 snooze 해제 후에만 대상), `escalated_level` 갱신
+  + audit(`ESCALATE`)
+- notification channel: `packages/notify` 신설 — **WEBHOOK만 실제 HTTP POST 발송**(5초 타임아웃, 채널별
+  실패 격리). PUSH/EMAIL/SMS는 provider 미정(부록 A.2)이라 로그 스텁만 남김(사용자 확인 완료, 2026-07-10)
+- 목록/단건 조회·조치는 area 스코프 적용(devices/spatial과 동일하게 `hasAreaAccess()` 재사용 — 최초로
+  실사용됨)
 
 완료 조건:
-- 정책에 따라 alarm_log가 생성된다.
-- ack/snooze/resolve가 상태와 이력에 반영된다.
-- notification provider는 구현 전 사용자 결정 필요.
+- 정책에 따라 alarm_log가 생성된다. 완료 — 동일 policy+device로 이미 열린 알람이 있으면 재발행하지
+  않는다(`findOpenAlarm` 중복 억제, E2E로 확인)
+- ack/snooze/resolve가 상태와 이력에 반영된다. 완료 — 불법 전이(예: 이미 ACK인데 재-ACK)는 409로 거부
+- notification provider는 구현 전 사용자 결정 필요. 완료 — WEBHOOK만 구현하기로 결정(2026-07-10)
+
+알려진 단순화(후속 필요):
+- **Notification Channel / Escalation Rule에는 아직 API가 없다** — 이번 E2E 검증은 SQL로 직접
+  channel/escalation_rule을 만들어 확인했다. Admin 화면에서 관리하려면 CRUD API 추가 필요
+- **역할 기반 에스컬레이션 알림(`escalation_rule.notify_role`) 미구현** — 채널 지정(`notify_channel_id`)만
+  실제 동작하고, role 지정은 로그 스텁만 남긴다(역할별 사용자 조회 + 채널 결정 로직 필요)
+- **정책 캐시 갱신 지연** — gateway가 정책을 30초 주기로 캐시하므로, 정책 생성/비활성화가 최대 30초
+  지연 반영된다
+- **offline alarm(LWT 감지)은 이번 audit 강화 대상에서 제외** — `raiseOfflineAlarm`(기존 M2 경로)은
+  policy 기반이 아니라 audit_log를 남기지 않는다. 새 policy 기반 RAISE/ESCALATE만 audit 남김(비대칭,
+  일관성 개선은 후속)
 
 ### M10. Scheduler
 
@@ -435,9 +457,10 @@ MVP 범위 밖으로 의도적으로 제외한 것(ui-ux-design.md 전체 스펙
 ## 6. 다음 추천 작업
 
 M6(Auth/RBAC audit 보강), M7(Realtime Dashboard Bridge), M8a(devices/spatial 목록 API), M8(Web
-Dashboard MVP)까지 모두 완료됐다. 다음은 **M9 Alarm Service** 또는 **WS 브로드캐스트 area 스코프
-필터링(M7/M8에서 이월된 부채)** 중 하나부터 진행을 추천한다 — 전자는 SRS 3.3의 미구현 도메인 기능,
-후자는 이미 두 마일스톤에 걸쳐 알려진 보안/정합성 부채다.
+Dashboard MVP), M9(Alarm Service MVP)까지 모두 완료됐다. 다음은 **M10 Scheduler** 또는 **WS
+브로드캐스트 area 스코프 필터링(M7/M8에서 이월된 부채)** 중 하나부터 진행을 추천한다 — 전자는
+SRS 3.4의 미구현 도메인 기능, 후자는 이미 두 마일스톤에 걸쳐 알려진 보안/정합성 부채다. Scheduler는
+command path를 재사용하므로(§4 참조) command/audit 경로가 이미 안정화된 지금이 적기다.
 
 이유(과거 기록, 여전히 유효):
 - SRS/PROJECT_RULES에서 가장 강한 불변식은 "제어 명령은 audit 없이 실행될 수 없다"이다.
@@ -498,7 +521,26 @@ Dashboard MVP)까지 모두 완료됐다. 다음은 **M9 Alarm Service** 또는 
 8. E2E(Playwright, 실인프라): 로그인→Floor Map→마커 클릭→Drawer ON/OFF→MQTT ack→SUCCEEDED→
    WS `device.state`/`command.status` 실시간 반영, 콘솔 에러 없음 확인
 
+완료된 M9 작업 단위 (2026-07-10):
+1. `packages/contracts/src/alarmLifecycle.ts` — 알람 상태 머신(RAISED→ACK/SNOOZED→RESOLVED),
+   command lifecycle.ts와 동일 패턴으로 단일 소스화
+2. `packages/db/src/alarm-repository.ts` — alarm_policy/notification_channel/escalation_rule/
+   alarm_log/alarm_action CRUD, area 스코프용 topicPrefix 조인, `compareThreshold()`,
+   에스컬레이션 후보 조회(`listDueEscalations`, 알람별 미발동 최저 레벨 1건만 반환)
+3. `packages/db/src/alarm-service.ts` — ack/snooze/resolve/note 전이+alarm_action+audit_log를
+   한 transaction으로(`recordAlarmActionInTx`), policy 위반 시 중복 억제 raise(`raiseAlarmFromPolicyInTx`),
+   에스컬레이션 sweep(`sweepDueEscalations`, HTTP 발송은 tx 밖에서 호출부가 수행)
+4. `packages/notify` 신설 — WEBHOOK 실제 HTTP POST(5초 타임아웃, 채널별 실패 격리), 나머지는 로그 스텁
+5. gateway: 활성 policy 30초 캐시, telemetry 수신마다 threshold 평가(duration_sec 지속시간은
+   메모리로 breach 시작 시각 추적), 5초 주기 에스컬레이션 sweep
+6. api: `AlarmsController`(list/get/ack/snooze/resolve/note, area 스코프 — `hasAreaAccess()` 최초 실사용)
+   + `AlarmPoliciesController`(ADMIN 전용 CRUD, 정책 변경도 audit)
+7. E2E(실인프라): policy 생성 → 시뮬레이터 threshold 위반 → RAISE+초기 webhook → 8초 후 escalation_rule
+   발동+두 번째 webhook(다른 채널)+audit ESCALATE → ACK(감사)→재-ACK 409→RESOLVE. 지속 위반 동안 중복
+   알람 미생성 확인
+
 다음 작업 단위 후보:
-1. M9 Alarm Service — alarm_policy CRUD, threshold 평가, ack/snooze/resolve
-2. WS 브로드캐스트 area 스코프 필터링(M7/M8 이월 부채) — device→area 매핑 캐시 후 클라이언트별 필터
-3. 권한 변경 API 구현 시 audit 강제, Group API 추가 시 group access guard 적용(별도 트랙)
+1. M10 Scheduler — one-time/daily/weekly/monthly/cron/event, command path 재사용
+2. Notification Channel/Escalation Rule 관리 API(현재는 SQL 직접 조작으로만 검증됨)
+3. WS 브로드캐스트 area 스코프 필터링(M7/M8 이월 부채) — device→area 매핑 캐시 후 클라이언트별 필터
+4. 권한 변경 API 구현 시 audit 강제, Group API 추가 시 group access guard 적용(별도 트랙)
