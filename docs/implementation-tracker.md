@@ -306,10 +306,13 @@ MVP 범위 밖으로 의도적으로 제외한 것(ui-ux-design.md 전체 스펙
   구현(사용자 요청 범위)
 
 알려진 단순화(후속 필요):
-- **WS 브로드캐스트 미스코프 유지**: M7에서 남긴 한계가 그대로 남아 있다 — 인증된 전 연결에 전체
-  이벤트가 브로드캐스트되어, area 권한이 없는 기기의 `device.state`/`command.status`도 네트워크상
-  전달된다(화면에는 현재 선택한 층의 기기만 표시되므로 화면 노출은 없음). 서버측 area 필터링은
-  여전히 미해결.
+- ~~**WS 브로드캐스트 미스코프**~~ → **해소됨(2026-07-10)**: `RealtimeWsServer`가 연결별 `AuthContext`를
+  보관하고, device→area 매핑을 30초 캐시로 조회해 JWT `topics` claim과 대조한다(ADMIN은 전체 수신,
+  캐시 미반영·area 미배정 기기는 안전하게 숨김 — fail-closed). GROUP 대상 이벤트는 area로 스코프할
+  방법이 없어 비-ADMIN에게는 숨기고(현재 실제로는 발생하지 않음 — command 발행은 항상 DEVICE 단위로
+  fan-out), 기기 없는 알람(전사 공지성)은 전체에 알린다. E2E(실제 WS 클라이언트 2개, area 권한이
+  다른 사용자)로 검증: `living-room-user`는 거실 기기 이벤트만 수신하고 침실 기기 이벤트는 받지
+  못함을 확인
 - **시뮬레이터 단일 기기**: `apps/device-simulator`는 `thermostat-01`만 ack한다. seed의 `light-01`/
   `light-02`에 ON/OFF를 보내면 ack가 없어 SLA(30s) 후 `TIMED_OUT`으로 종결된다 — fleet 확장(M3 부채,
   §3.3)과 함께 해소 예정.
@@ -508,10 +511,10 @@ MVP 범위 밖으로 의도적으로 제외한 것(ui-ux-design.md 전체 스펙
 ## 6. 다음 추천 작업
 
 M6(Auth/RBAC audit 보강), M7(Realtime Dashboard Bridge), M8a(devices/spatial 목록 API), M8(Web
-Dashboard MVP), M9(Alarm Service MVP), M10(Scheduler MVP)까지 모두 완료됐다. 다음은 **M11 AI/HITL**
-또는 **WS 브로드캐스트 area 스코프 필터링(M7/M8에서 이월된 부채)** 중 하나부터 진행을 추천한다 —
-전자는 SRS 3.5의 미구현 도메인 기능(단, confidence threshold·고위험 장치 목록 등 정책값은 구현 전
-사용자 확인 필요), 후자는 이미 두 마일스톤에 걸쳐 알려진 보안/정합성 부채다.
+Dashboard MVP + 편집 모드), M9(Alarm Service MVP), M10(Scheduler MVP), WS 브로드캐스트 area 스코프
+필터링(M7/M8 이월 부채)까지 모두 완료됐다. 다음은 **M11 AI/HITL**을 추천한다 — SRS 3.5의 마지막
+미구현 핵심 도메인 기능이다(단, confidence threshold·고위험 장치 목록 등 정책값은 구현 전 사용자
+확인 필요).
 
 이유(과거 기록, 여전히 유효):
 - SRS/PROJECT_RULES에서 가장 강한 불변식은 "제어 명령은 audit 없이 실행될 수 없다"이다.
@@ -605,10 +608,23 @@ Dashboard MVP), M9(Alarm Service MVP), M10(Scheduler MVP)까지 모두 완료됐
    성공 후 backfill하도록 수정. ONE_TIME 정상 발화(1회만), GROUP 2개 기기 fan-out(각각 별도
    schedule_run), enable/disable/runs/delete 확인
 
+완료된 Floor Map 편집 모드 작업 단위 (2026-07-10):
+1. 실행/편집 모드 토글(ADMIN 전용), 기기 마커 드래그 이동, dirty 배지 + 저장/취소, 이탈 확인 다이얼로그
+2. api: `PATCH /api/v1/spatial/floors/:id/layout`(ADMIN 전용, 위치 일괄 저장 + `DEVICE_RELOCATE` audit)
+3. 실사용자 리포트로 실제 버그 2건 발견 및 수정: (a) Stage와 마커가 동시에 draggable이라 Stage가
+   드래그를 가로채 도면 전체가 팬되는 버그, (b) Konva 이벤트 버블링으로 마커의 dragend가 Stage까지
+   올라가 드롭 순간 도면이 기기 위치로 튀는 버그(`e.cancelBubble` + `e.target` 오리진 가드로 해결)
+4. `dragBoundFunc`로 마커가 도면 경계 밖으로 나가지 않도록 클램프
+
+완료된 WS 브로드캐스트 area 스코프 필터링 작업 단위 (2026-07-10):
+1. `RealtimeWsServer`가 연결별 `AuthContext`를 보관하고 device→area 매핑을 30초 캐시로 조회해
+   JWT `topics` claim과 대조(ADMIN 전체 수신, 캐시 미반영·area 미배정은 fail-closed로 숨김)
+2. E2E: 실제 WS 클라이언트 2개(ADMIN, area 권한이 거실로 한정된 신규 테스트 유저)로 검증 —
+   거실 기기 이벤트는 둘 다 수신, 침실 기기 이벤트는 area 권한 없는 유저에게만 미수신 확인
+
 다음 작업 단위 후보:
 1. M11 AI/HITL — 추천 저장, confidence threshold, 고위험 기기 게이트, approve/reject, 학습데이터 저장
    (정책값은 구현 전 사용자 확인 필요)
 2. EVENT 스케줄 트리거 — 이벤트 소스 정의 필요(구현 전 사용자 결정)
 3. Notification Channel/Escalation Rule 관리 API(현재는 SQL 직접 조작으로만 검증됨)
-4. WS 브로드캐스트 area 스코프 필터링(M7/M8 이월 부채) — device→area 매핑 캐시 후 클라이언트별 필터
-5. 권한 변경 API 구현 시 audit 강제, Group API 추가 시 group access guard 적용(별도 트랙)
+4. 권한 변경 API 구현 시 audit 강제, Group API 추가 시 group access guard 적용(별도 트랙)
