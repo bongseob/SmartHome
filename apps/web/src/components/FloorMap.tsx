@@ -9,6 +9,8 @@ const FALLBACK_WIDTH = 800;
 const FALLBACK_HEIGHT = 600;
 const MIN_SCALE = 0.3;
 const MAX_SCALE = 4;
+/** 마커가 도면 밖으로 나가지 않도록 반지름+여백만큼 안쪽으로 제한한다. */
+const MARKER_EDGE_MARGIN = 12;
 
 function polygonPoints(polygon: unknown): number[] | null {
   if (!Array.isArray(polygon)) return null;
@@ -173,6 +175,24 @@ export function FloorMap({
                 x={x}
                 y={y}
                 draggable={editMode}
+                dragBoundFunc={(absolutePos) => {
+                  // dragBoundFunc는 Stage 기준 절대좌표를 받는다 — 도면(Layer) 좌표로 변환해
+                  // [margin, width-margin] 범위로 클램프한 뒤 다시 절대좌표로 돌려준다.
+                  const localX = (absolutePos.x - pos.x) / scale;
+                  const localY = (absolutePos.y - pos.y) / scale;
+                  const clampedX = Math.min(
+                    Math.max(localX, MARKER_EDGE_MARGIN),
+                    width - MARKER_EDGE_MARGIN,
+                  );
+                  const clampedY = Math.min(
+                    Math.max(localY, MARKER_EDGE_MARGIN),
+                    height - MARKER_EDGE_MARGIN,
+                  );
+                  return {
+                    x: clampedX * scale + pos.x,
+                    y: clampedY * scale + pos.y,
+                  };
+                }}
                 onDragMove={(e) => {
                   e.cancelBubble = true; // Stage로 버블링되면 팬 핸들러가 오작동한다(아래 주석 참조)
                   setDragPreview({ id: device.id, x: e.target.x(), y: e.target.y() });
