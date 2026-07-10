@@ -227,3 +227,303 @@ body {
 .event-feed__empty {
   color: #95a5a6;
 }
+
+.app-shell__body--single {
+  overflow: auto;
+}
+
+.scheduler-admin {
+  padding: 1.5rem;
+  max-width: 960px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.scheduler-admin__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.scheduler-admin__header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.scheduler-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  margin-bottom: 1.25rem;
+  background: white;
+  border: 1px solid #e1e5ea;
+  border-radius: 8px;
+}
+
+.scheduler-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  flex: 1;
+}
+
+.scheduler-form input,
+.scheduler-form select {
+  padding: 0.4rem;
+  border: 1px solid #ccd1d9;
+  border-radius: 4px;
+}
+
+.scheduler-form__row {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.scheduler-form__weekdays {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.scheduler-form__weekdays button {
+  padding: 0.3rem 0.6rem;
+  border: 1px solid #ccd1d9;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.scheduler-form__weekdays button.active {
+  background: #2c3e50;
+  color: white;
+  border-color: #2c3e50;
+}
+
+.scheduler-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+  font-size: 0.85rem;
+}
+
+.scheduler-table th,
+.scheduler-table td {
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid #ecf0f1;
+  text-align: left;
+}
+
+.scheduler-table__actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.scheduler-table__actions button {
+  padding: 0.25rem 0.6rem;
+  border: 1px solid #ccd1d9;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.scheduler-table__runs {
+  background: #f8f9fa;
+}
+
+.scheduler-table__runs ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.scheduler-table__runs li {
+  padding: 0.2rem 0;
+}
+
+.system-info {
+  padding: 1.5rem;
+  max-width: 720px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.system-info h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.1rem;
+}
+
+.system-info h3 {
+  margin: 1.5rem 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.system-info__note {
+  color: #7f8c8d;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.system-info__table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+  font-size: 0.85rem;
+}
+
+.system-info__table th,
+.system-info__table td {
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid #ecf0f1;
+  text-align: left;
+}
+
+.system-info__table input {
+  padding: 0.3rem;
+  border: 1px solid #ccd1d9;
+  border-radius: 4px;
+}
+
+.system-info__table button {
+  padding: 0.25rem 0.6rem;
+  border: 1px solid #ccd1d9;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-right: 0.3rem;
+}
+
+.system-info__slug {
+  color: #95a5a6;
+  font-family: monospace;
+}
+
+.floor-map-admin {
+  padding: 1.5rem;
+  max-width: 960px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.floor-map-admin h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.1rem;
+}
+
+.floor-map-admin__note {
+  color: #7f8c8d;
+  font-size: 0.85rem;
+  margin: 0 0 1rem;
+}
+
+.floor-map-admin__table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+  font-size: 0.85rem;
+}
+
+.floor-map-admin__table th,
+.floor-map-admin__table td {
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid #ecf0f1;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.floor-map-admin__thumb {
+  width: 80px;
+  height: 60px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #ecf0f1;
+}
+
+.floor-map-admin__empty {
+  color: #95a5a6;
+}
+
+.floor-map-admin__scale-input {
+  width: 70px;
+  padding: 0.3rem;
+  border: 1px solid #ccd1d9;
+  border-radius: 4px;
+  margin-right: 0.4rem;
+}
+
+.area-admin {
+  padding: 1.5rem;
+  max-width: 1100px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.area-admin h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.1rem;
+}
+
+.area-admin__note {
+  color: #7f8c8d;
+  font-size: 0.85rem;
+  margin: 0 0 0.75rem;
+}
+
+.area-admin__floor-select {
+  display: block;
+  margin-bottom: 1rem;
+  font-size: 0.9rem;
+}
+
+.area-admin__body {
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
+}
+
+.area-admin__canvas {
+  flex-shrink: 0;
+}
+
+.area-admin__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+}
+
+.area-admin__toolbar input {
+  padding: 0.3rem;
+  border: 1px solid #ccd1d9;
+  border-radius: 4px;
+}
+
+.area-admin__table {
+  flex: 1;
+  border-collapse: collapse;
+  background: white;
+  font-size: 0.85rem;
+}
+
+.area-admin__table th,
+.area-admin__table td {
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid #ecf0f1;
+  text-align: left;
+}
+
+.area-admin__table button {
+  padding: 0.25rem 0.6rem;
+  border: 1px solid #ccd1d9;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-right: 0.3rem;
+}
+
+.area-admin__slug {
+  color: #95a5a6;
+  font-family: monospace;
+}

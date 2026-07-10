@@ -10,6 +10,9 @@ build/
 # turbo
 .turbo/
 
+# 업로드된 파일(도면 이미지 등) — 로컬 파일시스템 저장, 커밋 대상 아님(M16)
+apps/api/uploads/
+
 # test
 coverage/
 

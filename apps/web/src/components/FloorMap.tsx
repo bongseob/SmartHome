@@ -3,6 +3,7 @@ import type Konva from "konva";
 import { Circle, Group, Image as KonvaImage, Layer, Line, Stage, Text } from "react-konva";
 import type { Area, DeviceListItem, FloorOverview } from "../lib/types";
 import { DEVICE_STATUS_COLOR } from "../lib/status";
+import { apiAssetUrl } from "../lib/api";
 import { useHtmlImage } from "../lib/useHtmlImage";
 
 const FALLBACK_WIDTH = 800;
@@ -58,7 +59,7 @@ export function FloorMap({
 }: FloorMapProps): JSX.Element {
   const width = overview.floor.floorMapWidth ?? FALLBACK_WIDTH;
   const height = overview.floor.floorMapHeight ?? FALLBACK_HEIGHT;
-  const image = useHtmlImage(overview.floor.floorMapUrl);
+  const image = useHtmlImage(apiAssetUrl(overview.floor.floorMapUrl));
   const stageRef = useRef<Konva.Stage>(null);
   const [scale, setScale] = useState(1);
   const [pos, setPos] = useState({ x: 0, y: 0 });

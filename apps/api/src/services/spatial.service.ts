@@ -2,17 +2,44 @@
 import type { AuthContext } from "@smarthome/auth";
 import { isAdmin } from "@smarthome/auth";
 import {
+  createArea,
+  deleteArea,
+  getAreaById,
   getDeviceState,
   getFloorOverview,
   insertAuditLog,
+  insertFloorMap,
+  listBuildings,
   listFloors,
+  listSites,
   query,
+  setFloorFloorMap,
+  updateArea,
+  updateBuildingName,
   updateDevicePosition,
+  updateFloorMapScale,
+  updateSiteName,
   withTransaction,
   type FloorSummary,
 } from "@smarthome/db";
 
 const executor = { query };
+
+function slugify(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "area";
+}
+
+/** Area의 polygon은 [[x,y], ...] 최소 삼각형(3점)이어야 한다(FloorMap.tsx의 렌더링 요건과 동일). */
+function isValidPolygon(polygon: unknown): polygon is number[][] {
+  if (!Array.isArray(polygon) || polygon.length < 3) return false;
+  return polygon.every(
+    (vertex) => Array.isArray(vertex) && vertex.length >= 2 && vertex.every((n) => typeof n === "number"),
+  );
+}
 
 export interface LayoutPositionInput {
   deviceId: string;
@@ -104,5 +131,236 @@ export class SpatialService {
       }
       return updated;
     });
+  }
+
+  /** 시스템 기본정보 관리(M16) — Site/Building 이름만 수정. ADMIN 전용, 감사 대상. */
+  async listSites(): Promise<unknown> {
+    return listSites(executor);
+  }
+
+  async updateSiteName(id: string, name: string, auth: AuthContext): Promise<unknown> {
+    if (!name || !name.trim()) {
+      throw new BadRequestException("name is required");
+    }
+    const before = await listSites(executor).then((sites) => sites.find((s) => s.id === id));
+    if (!before) {
+      throw new NotFoundException(`site not found: ${id}`);
+    }
+    const updated = await updateSiteName(executor, id, name);
+    if (!updated) {
+      throw new NotFoundException(`site not found: ${id}`);
+    }
+    await insertAuditLog(executor, {
+      actorType: "ADMIN",
+      actorId: auth.userId,
+      targetType: "SITE",
+      targetId: id,
+      command: "SITE_UPDATE_NAME",
+      reason: `name '${before.name}' → '${name}'`,
+      executionStatus: "SUCCEEDED",
+      mqttReasonCode: null,
+      sessionId: null,
+      commandId: null,
+    });
+    return updated;
+  }
+
+  async listBuildings(): Promise<unknown> {
+    return listBuildings(executor);
+  }
+
+  async updateBuildingName(id: string, name: string, auth: AuthContext): Promise<unknown> {
+    if (!name || !name.trim()) {
+      throw new BadRequestException("name is required");
+    }
+    const before = await listBuildings(executor).then((buildings) => buildings.find((b) => b.id === id));
+    if (!before) {
+      throw new NotFoundException(`building not found: ${id}`);
+    }
+    const updated = await updateBuildingName(executor, id, name);
+    if (!updated) {
+      throw new NotFoundException(`building not found: ${id}`);
+    }
+    await insertAuditLog(executor, {
+      actorType: "ADMIN",
+      actorId: auth.userId,
+      targetType: "BUILDING",
+      targetId: id,
+      command: "BUILDING_UPDATE_NAME",
+      reason: `name '${before.name}' → '${name}'`,
+      executionStatus: "SUCCEEDED",
+      mqttReasonCode: null,
+      sessionId: null,
+      commandId: null,
+    });
+    return updated;
+  }
+
+  /**
+   * 도면(Floor Map) 업로드(M16, SRS 2.1.1) — 이미지는 로컬 파일시스템에 저장되고(컨트롤러의
+   * multer diskStorage), 여기서는 floor_map row 생성 + floor에 연결만 담당한다. ADMIN 전용, 감사 대상.
+   */
+  async uploadFloorMap(
+    floorId: string,
+    imageUrl: string,
+    meta: { widthPx: number; heightPx: number; scaleMPerPx: number },
+    auth: AuthContext,
+  ): Promise<unknown> {
+    if (!Number.isFinite(meta.widthPx) || !Number.isFinite(meta.heightPx) || !Number.isFinite(meta.scaleMPerPx)) {
+      throw new BadRequestException("widthPx/heightPx/scaleMPerPx must be numbers");
+    }
+    const floors = await listFloors(executor);
+    const floor = floors.find((f) => f.id === floorId);
+    if (!floor) {
+      throw new NotFoundException(`floor not found: ${floorId}`);
+    }
+
+    const floorMap = await insertFloorMap(executor, {
+      imageUrl,
+      widthPx: meta.widthPx,
+      heightPx: meta.heightPx,
+      scaleMPerPx: meta.scaleMPerPx,
+      uploadedBy: auth.userId,
+    });
+    await setFloorFloorMap(executor, floorId, floorMap.id);
+    await insertAuditLog(executor, {
+      actorType: "ADMIN",
+      actorId: auth.userId,
+      targetType: "FLOOR",
+      targetId: floorId,
+      command: "FLOOR_MAP_UPLOAD",
+      reason: `floor_map ${floorMap.id} (${meta.widthPx}x${meta.heightPx}px, ${meta.scaleMPerPx}m/px), 이전 floor_map ${floor.floorMapId ?? "null"}`,
+      executionStatus: "SUCCEEDED",
+      mqttReasonCode: null,
+      sessionId: null,
+      commandId: null,
+    });
+
+    const updatedFloors = await listFloors(executor);
+    return updatedFloors.find((f) => f.id === floorId);
+  }
+
+  async updateFloorMapScale(floorMapId: string, scaleMPerPx: number, auth: AuthContext): Promise<unknown> {
+    if (!Number.isFinite(scaleMPerPx) || scaleMPerPx <= 0) {
+      throw new BadRequestException("scaleMPerPx must be a positive number");
+    }
+    const updated = await updateFloorMapScale(executor, floorMapId, scaleMPerPx);
+    if (!updated) {
+      throw new NotFoundException(`floor_map not found: ${floorMapId}`);
+    }
+    await insertAuditLog(executor, {
+      actorType: "ADMIN",
+      actorId: auth.userId,
+      targetType: "FLOOR_MAP",
+      targetId: floorMapId,
+      command: "FLOOR_MAP_UPDATE_SCALE",
+      reason: `scale_m_per_px → ${scaleMPerPx}`,
+      executionStatus: "SUCCEEDED",
+      mqttReasonCode: null,
+      sessionId: null,
+      commandId: null,
+    });
+    return updated;
+  }
+
+  /** 지역(Area) 관리(M16, SRS 2.1.1) — 생성/수정/삭제. ADMIN 전용, 감사 대상. */
+  async createArea(
+    floorId: string,
+    body: { name: string; polygon: unknown; slug?: string },
+    auth: AuthContext,
+  ): Promise<unknown> {
+    if (!body.name || !body.name.trim()) {
+      throw new BadRequestException("name is required");
+    }
+    if (!isValidPolygon(body.polygon)) {
+      throw new BadRequestException("polygon must be an array of at least 3 [x,y] points");
+    }
+    const floors = await listFloors(executor);
+    if (!floors.find((f) => f.id === floorId)) {
+      throw new NotFoundException(`floor not found: ${floorId}`);
+    }
+
+    const area = await createArea(executor, {
+      floorId,
+      slug: body.slug?.trim() || slugify(body.name),
+      name: body.name.trim(),
+      polygon: body.polygon,
+      createdBy: auth.userId,
+    });
+    await insertAuditLog(executor, {
+      actorType: "ADMIN",
+      actorId: auth.userId,
+      targetType: "AREA",
+      targetId: area.id,
+      command: "AREA_CREATE",
+      reason: `area '${area.name}' (floor ${floorId})`,
+      executionStatus: "SUCCEEDED",
+      mqttReasonCode: null,
+      sessionId: null,
+      commandId: null,
+    });
+    return area;
+  }
+
+  async updateArea(
+    id: string,
+    body: { name?: string; polygon?: unknown },
+    auth: AuthContext,
+  ): Promise<unknown> {
+    const before = await getAreaById(executor, id);
+    if (!before) {
+      throw new NotFoundException(`area not found: ${id}`);
+    }
+    if (body.name !== undefined && !body.name.trim()) {
+      throw new BadRequestException("name must not be empty");
+    }
+    if (body.polygon !== undefined && !isValidPolygon(body.polygon)) {
+      throw new BadRequestException("polygon must be an array of at least 3 [x,y] points");
+    }
+
+    const updated = await updateArea(executor, id, {
+      ...(body.name !== undefined ? { name: body.name.trim() } : {}),
+      ...(body.polygon !== undefined ? { polygon: body.polygon } : {}),
+    });
+    if (!updated) {
+      throw new NotFoundException(`area not found: ${id}`);
+    }
+    await insertAuditLog(executor, {
+      actorType: "ADMIN",
+      actorId: auth.userId,
+      targetType: "AREA",
+      targetId: id,
+      command: "AREA_UPDATE",
+      reason: `name '${before.name}' → '${updated.name}'${body.polygon !== undefined ? ", polygon 변경" : ""}`,
+      executionStatus: "SUCCEEDED",
+      mqttReasonCode: null,
+      sessionId: null,
+      commandId: null,
+    });
+    return updated;
+  }
+
+  async deleteArea(id: string, auth: AuthContext): Promise<unknown> {
+    const before = await getAreaById(executor, id);
+    if (!before) {
+      throw new NotFoundException(`area not found: ${id}`);
+    }
+    const deleted = await deleteArea(executor, id);
+    if (!deleted) {
+      throw new NotFoundException(`area not found: ${id}`);
+    }
+    await insertAuditLog(executor, {
+      actorType: "ADMIN",
+      actorId: auth.userId,
+      targetType: "AREA",
+      targetId: id,
+      command: "AREA_DELETE",
+      reason: `area '${before.name}' deleted (기기 area 배정은 SET NULL 처리됨)`,
+      executionStatus: "SUCCEEDED",
+      mqttReasonCode: null,
+      sessionId: null,
+      commandId: null,
+    });
+    return { deleted: true };
   }
 }

@@ -18,6 +18,10 @@ import { LoginView } from "./components/LoginView";
 import { FloorMap } from "./components/FloorMap";
 import { DeviceDrawer } from "./components/DeviceDrawer";
 import { EventFeed, type FeedEntry } from "./components/EventFeed";
+import { SchedulerAdmin } from "./components/SchedulerAdmin";
+import { SystemInfoAdmin } from "./components/SystemInfoAdmin";
+import { FloorMapAdmin } from "./components/FloorMapAdmin";
+import { AreaAdmin } from "./components/AreaAdmin";
 
 const MAX_FEED_ENTRIES = 50;
 
@@ -38,6 +42,9 @@ export function App(): JSX.Element {
   const [feed, setFeed] = useState<FeedEntry[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const feedSeq = useRef(0);
+
+  // 최상위 화면 전환(M16 Admin) — ADMIN 전용 스케줄러/시스템정보 화면과 기존 Floor Map 관제 화면을 오간다.
+  const [view, setView] = useState<"map" | "schedulers" | "systemInfo" | "floorMaps" | "areas">("map");
 
   // 도면 편집 모드(ui-ux-design.md §4.1-mode) — ADMIN 전용. 실행 모드에서는 조회/제어만 가능하다.
   const [mode, setMode] = useState<"execute" | "edit">("execute");
@@ -67,6 +74,7 @@ export function App(): JSX.Element {
     setMode("execute");
     setPendingPositions({});
     setLayoutError(null);
+    setView("map");
   }, []);
 
   const handleLogin = useCallback(async (username: string, password: string) => {
@@ -277,13 +285,32 @@ export function App(): JSX.Element {
             ))}
           </select>
         </label>
-        {isAdmin && (
+        {isAdmin && view === "map" && (
           <div className="mode-toggle">
             <button type="button" className={mode === "execute" ? "active" : ""} onClick={() => mode !== "execute" && handleToggleMode()}>
               실행
             </button>
             <button type="button" className={mode === "edit" ? "active" : ""} onClick={() => mode !== "edit" && handleToggleMode()}>
               편집
+            </button>
+          </div>
+        )}
+        {isAdmin && (
+          <div className="mode-toggle">
+            <button type="button" className={view === "map" ? "active" : ""} onClick={() => setView("map")}>
+              관제
+            </button>
+            <button type="button" className={view === "schedulers" ? "active" : ""} onClick={() => setView("schedulers")}>
+              스케줄러
+            </button>
+            <button type="button" className={view === "systemInfo" ? "active" : ""} onClick={() => setView("systemInfo")}>
+              시스템 정보
+            </button>
+            <button type="button" className={view === "floorMaps" ? "active" : ""} onClick={() => setView("floorMaps")}>
+              도면 관리
+            </button>
+            <button type="button" className={view === "areas" ? "active" : ""} onClick={() => setView("areas")}>
+              지역 관리
             </button>
           </div>
         )}
@@ -295,7 +322,7 @@ export function App(): JSX.Element {
         </button>
       </header>
 
-      {mode === "edit" && (
+      {view === "map" && mode === "edit" && (
         <div className="layout-editbar">
           <span>편집 모드 — 마커를 드래그해 위치를 옮기세요.</span>
           {dirtyCount > 0 && <strong>변경 {dirtyCount}건</strong>}
@@ -311,36 +338,54 @@ export function App(): JSX.Element {
 
       {loadError && <p className="error-text">{loadError}</p>}
 
-      <div className="app-shell__body">
-        <main className="app-shell__map">
-          {overview ? (
-            <FloorMap
-              overview={overview}
-              selectedDeviceId={selectedDevice?.id ?? null}
-              onSelectDevice={handleSelectDevice}
-              editMode={mode === "edit"}
-              pendingPositions={pendingPositions}
-              onDeviceDragEnd={handleDeviceDragEnd}
-            />
-          ) : (
-            <p>층을 불러오는 중…</p>
-          )}
-        </main>
-        <div className="app-shell__side">
-          {selectedDevice && (
-            <DeviceDrawer
-              device={selectedDevice}
-              history={history}
-              historyError={historyError}
-              pendingCommand={pendingByDevice[selectedDevice.id] ?? null}
-              onClose={() => setSelectedDeviceId(null)}
-              onSendCommand={handleSendCommand}
-              editMode={mode === "edit"}
-            />
-          )}
-          <EventFeed entries={feed} />
+      {view === "schedulers" ? (
+        <div className="app-shell__body app-shell__body--single">
+          <SchedulerAdmin />
         </div>
-      </div>
+      ) : view === "systemInfo" ? (
+        <div className="app-shell__body app-shell__body--single">
+          <SystemInfoAdmin />
+        </div>
+      ) : view === "floorMaps" ? (
+        <div className="app-shell__body app-shell__body--single">
+          <FloorMapAdmin />
+        </div>
+      ) : view === "areas" ? (
+        <div className="app-shell__body app-shell__body--single">
+          <AreaAdmin />
+        </div>
+      ) : (
+        <div className="app-shell__body">
+          <main className="app-shell__map">
+            {overview ? (
+              <FloorMap
+                overview={overview}
+                selectedDeviceId={selectedDevice?.id ?? null}
+                onSelectDevice={handleSelectDevice}
+                editMode={mode === "edit"}
+                pendingPositions={pendingPositions}
+                onDeviceDragEnd={handleDeviceDragEnd}
+              />
+            ) : (
+              <p>층을 불러오는 중…</p>
+            )}
+          </main>
+          <div className="app-shell__side">
+            {selectedDevice && (
+              <DeviceDrawer
+                device={selectedDevice}
+                history={history}
+                historyError={historyError}
+                pendingCommand={pendingByDevice[selectedDevice.id] ?? null}
+                onClose={() => setSelectedDeviceId(null)}
+                onSendCommand={handleSendCommand}
+                editMode={mode === "edit"}
+              />
+            )}
+            <EventFeed entries={feed} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -8,6 +8,165 @@ import type {
 import type { QueryResultRow } from "./pool.js";
 import type { QueryExecutor } from "./audit-repository.js";
 
+// ─── 시스템 기본정보 (Site/Building 이름) ──────────────────────────────
+// M16 Admin — 범위는 이름 수정만(2026-07-10 합의, PROJECT_RULES 부록 A.1). 조직 계층
+// (enterprise/site/building) 생성·삭제는 범위 밖 — enterprise는 단일 고정.
+
+export interface SiteRecord {
+  id: string;
+  slug: string;
+  name: string;
+}
+
+interface SiteRow extends QueryResultRow {
+  id: string;
+  slug: string;
+  name: string;
+}
+
+function toSite(row: SiteRow): SiteRecord {
+  return { id: row.id, slug: row.slug, name: row.name };
+}
+
+export async function listSites(db: QueryExecutor): Promise<SiteRecord[]> {
+  const r = await db.query<SiteRow>(`SELECT id::text, slug, name FROM site ORDER BY name`);
+  return r.rows.map(toSite);
+}
+
+export async function updateSiteName(
+  db: QueryExecutor,
+  id: string,
+  name: string,
+): Promise<SiteRecord | null> {
+  const r = await db.query<SiteRow>(
+    `UPDATE site SET name = $2 WHERE id::text = $1 RETURNING id::text, slug, name`,
+    [id, name],
+  );
+  const row = r.rows[0];
+  return row ? toSite(row) : null;
+}
+
+export interface BuildingRecord {
+  id: string;
+  siteId: string;
+  slug: string;
+  name: string;
+}
+
+interface BuildingRow extends QueryResultRow {
+  id: string;
+  site_id: string;
+  slug: string;
+  name: string;
+}
+
+function toBuilding(row: BuildingRow): BuildingRecord {
+  return { id: row.id, siteId: row.site_id, slug: row.slug, name: row.name };
+}
+
+export async function listBuildings(db: QueryExecutor): Promise<BuildingRecord[]> {
+  const r = await db.query<BuildingRow>(
+    `SELECT id::text, site_id::text, slug, name FROM building ORDER BY name`,
+  );
+  return r.rows.map(toBuilding);
+}
+
+export async function updateBuildingName(
+  db: QueryExecutor,
+  id: string,
+  name: string,
+): Promise<BuildingRecord | null> {
+  const r = await db.query<BuildingRow>(
+    `UPDATE building SET name = $2 WHERE id::text = $1 RETURNING id::text, site_id::text, slug, name`,
+    [id, name],
+  );
+  const row = r.rows[0];
+  return row ? toBuilding(row) : null;
+}
+
+// ─── 도면(Floor Map) 관리 (M16 — 로컬 파일시스템 저장, PROJECT_RULES 부록 A.1) ─────
+
+export interface FloorMapRecord {
+  id: string;
+  imageUrl: string;
+  widthPx: number | null;
+  heightPx: number | null;
+  scaleMPerPx: string | null;
+  uploadedBy: string | null;
+  uploadedAt: Date;
+}
+
+interface FloorMapRow extends QueryResultRow {
+  id: string;
+  image_url: string;
+  width_px: number | null;
+  height_px: number | null;
+  scale_m_per_px: string | null;
+  uploaded_by: string | null;
+  uploaded_at: Date;
+}
+
+function toFloorMap(row: FloorMapRow): FloorMapRecord {
+  return {
+    id: row.id,
+    imageUrl: row.image_url,
+    widthPx: row.width_px,
+    heightPx: row.height_px,
+    scaleMPerPx: row.scale_m_per_px,
+    uploadedBy: row.uploaded_by,
+    uploadedAt: row.uploaded_at,
+  };
+}
+
+const FLOOR_MAP_COLUMNS = `
+  id::text, image_url, width_px, height_px, scale_m_per_px::text, uploaded_by::text, uploaded_at
+`;
+
+export interface InsertFloorMapInput {
+  imageUrl: string;
+  widthPx: number;
+  heightPx: number;
+  scaleMPerPx: number;
+  uploadedBy: string | null;
+}
+
+export async function insertFloorMap(
+  db: QueryExecutor,
+  input: InsertFloorMapInput,
+): Promise<FloorMapRecord> {
+  const r = await db.query<FloorMapRow>(
+    `INSERT INTO floor_map (image_url, width_px, height_px, scale_m_per_px, uploaded_by)
+     VALUES ($1,$2,$3,$4,$5)
+     RETURNING ${FLOOR_MAP_COLUMNS}`,
+    [input.imageUrl, input.widthPx, input.heightPx, input.scaleMPerPx, input.uploadedBy],
+  );
+  const row = r.rows[0];
+  if (!row) throw new Error("floor_map insert did not return a row");
+  return toFloorMap(row);
+}
+
+export async function updateFloorMapScale(
+  db: QueryExecutor,
+  id: string,
+  scaleMPerPx: number,
+): Promise<FloorMapRecord | null> {
+  const r = await db.query<FloorMapRow>(
+    `UPDATE floor_map SET scale_m_per_px = $2 WHERE id::text = $1 RETURNING ${FLOOR_MAP_COLUMNS}`,
+    [id, scaleMPerPx],
+  );
+  const row = r.rows[0];
+  return row ? toFloorMap(row) : null;
+}
+
+/** 층에 새/기존 floor_map을 연결한다(도면 업로드·교체). */
+export async function setFloorFloorMap(
+  db: QueryExecutor,
+  floorId: string,
+  floorMapId: string,
+): Promise<void> {
+  await db.query(`UPDATE floor SET floor_map_id = $2 WHERE id::text = $1`, [floorId, floorMapId]);
+}
+
 // ─── 공간 계층 (Spatial) ──────────────────────────────────────────────
 
 export interface FloorSummary {
@@ -138,6 +297,77 @@ export async function listAreasByFloor(
     [floorId],
   );
   return r.rows.map(toArea);
+}
+
+export async function getAreaById(db: QueryExecutor, id: string): Promise<Area | null> {
+  const r = await db.query<AreaRow>(
+    `SELECT a.id::text, a.floor_id::text, a.name, a.slug, a.polygon,
+            s.slug AS site_slug, b.slug AS building_slug,
+            f.slug AS floor_slug, a.slug AS area_slug
+     FROM area a
+     JOIN floor f     ON f.id = a.floor_id
+     JOIN building b  ON b.id = f.building_id
+     JOIN site s      ON s.id = b.site_id
+     WHERE a.id::text = $1`,
+    [id],
+  );
+  const row = r.rows[0];
+  return row ? toArea(row) : null;
+}
+
+/** M16 Admin — Area 생성(SRS 2.1.1). polygon은 최소 삼각형([[x,y],...] 3점 이상)을 기대하지만
+ *  DB는 jsonb라 형태 검증은 API 레이어(zod)에서 한다. */
+export interface CreateAreaInput {
+  floorId: string;
+  slug: string;
+  name: string;
+  polygon: unknown;
+  createdBy: string | null;
+}
+
+export async function createArea(db: QueryExecutor, input: CreateAreaInput): Promise<Area> {
+  const r = await db.query<{ id: string }>(
+    `INSERT INTO area (floor_id, slug, name, polygon, created_by)
+     VALUES ($1,$2,$3,$4,$5)
+     RETURNING id::text`,
+    [input.floorId, input.slug, input.name, JSON.stringify(input.polygon), input.createdBy],
+  );
+  const id = r.rows[0]?.id;
+  if (!id) throw new Error("area insert did not return an id");
+  const created = await getAreaById(db, id);
+  if (!created) throw new Error("area insert did not return a row");
+  return created;
+}
+
+export interface UpdateAreaInput {
+  name?: string;
+  polygon?: unknown;
+}
+
+export async function updateArea(
+  db: QueryExecutor,
+  id: string,
+  input: UpdateAreaInput,
+): Promise<Area | null> {
+  const sets: string[] = [];
+  const params: unknown[] = [id];
+  if (input.name !== undefined) {
+    params.push(input.name);
+    sets.push(`name = $${params.length}`);
+  }
+  if (input.polygon !== undefined) {
+    params.push(JSON.stringify(input.polygon));
+    sets.push(`polygon = $${params.length}`);
+  }
+  if (sets.length === 0) return getAreaById(db, id);
+
+  await db.query(`UPDATE area SET ${sets.join(", ")} WHERE id::text = $1`, params);
+  return getAreaById(db, id);
+}
+
+export async function deleteArea(db: QueryExecutor, id: string): Promise<boolean> {
+  const r = await db.query(`DELETE FROM area WHERE id::text = $1`, [id]);
+  return (r.rowCount ?? 0) > 0;
 }
 
 // ─── Device (목록/필터) ───────────────────────────────────────────────

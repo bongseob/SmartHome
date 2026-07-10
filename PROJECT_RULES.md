@@ -216,8 +216,14 @@ CREATED → PENDING → IN_PROGRESS → SUCCEEDED
   이 필드는 어떤 물리 프로토콜의 기기를 어떤 Gateway가 브리징하는지 기록/관리하는 용도다. enum은
   `packages/contracts`에서만 정의(§1 단일 소스 원칙), 연결 파라미터는 프로토콜마다 모양이 달라
   jsonb로 유연하게 저장한다.
+- **Admin 관리 화면(2026-07-10 합의, SRS 2.1.1·2.1.2·2.1.4, 구현 계획 → docs/implementation-tracker.md
+  M16)**: 평면도 이미지는 **로컬 파일시스템**에 저장한다(S3 등 오브젝트 스토리지·DB bytea 아님) —
+  별도 인프라 없이 단일 서버 배포 전제와 일치. "시스템 기본정보 관리"는 **Site/Building 이름 수정만**
+  포함하고 조직 계층(enterprise/site/building) 생성·삭제는 범위에서 제외한다 — enterprise는 단일
+  고정이며 멀티테넌시 확장(SRS 7)은 후속 과제로 남긴다.
 
 ### A.2 남은 열린 항목 (구현 진행하며 결정)
 - Notification Channel 구현체(push/email/SMS provider)
 - AI 추천 엔진 배치/서빙 방식(MLOps, SRS 7)
 - 배포/인프라(K8s, Mosquitto HA 구성)
+- Area/Floor Map/Device CRUD API — 현재 read-only 또는 API 자체가 없음(M16 구현 시 신설)
