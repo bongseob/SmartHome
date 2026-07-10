@@ -314,12 +314,20 @@ MVP 범위 밖으로 의도적으로 제외한 것(ui-ux-design.md 전체 스펙
   `light-02`에 ON/OFF를 보내면 ack가 없어 SLA(30s) 후 `TIMED_OUT`으로 종결된다 — fleet 확장(M3 부채,
   §3.3)과 함께 해소 예정.
 - **큰 번들 경고**: `vite build` 결과 단일 청크 512KB(konva 포함) — 코드 스플리팅은 성능 튜닝(M15)과 병행.
-- **편집 모드 드래그 버그 발견 및 수정(2026-07-10)**: Konva `<Stage>`가 팬(pan)을 위해 항상
-  `draggable`이었는데, 편집 모드에서 기기 마커도 `draggable`이 되면서 같은 드래그 제스처를 Stage가
-  가로채 마커 대신 도면 전체가 팬되는 버그를 실제 브라우저(Playwright)로 발견 — 편집 모드에서는
-  Stage의 `draggable`을 꺼서 해결(`draggable={!editMode}`). 추가로, 실시간(WS) 갱신처럼 드래그 도중
-  끼어드는 리렌더가 Konva의 드래그 중 위치를 되돌려쓰는 문제를 막기 위해 `onDragMove`로 드래그 중
-  위치를 별도 state(`dragPreview`)로 추적해 항상 최신 위치를 넘기도록 방어적으로 처리.
+- **편집 모드 드래그 버그 2건 발견 및 수정(2026-07-10)**:
+  1. Konva `<Stage>`가 팬(pan)을 위해 항상 `draggable`이었는데, 편집 모드에서 기기 마커도
+     `draggable`이 되면서 같은 드래그 제스처를 Stage가 가로채 마커 대신 도면 전체가 팬되는 버그.
+     편집 모드에서는 Stage의 `draggable`을 꺼서 해결(`draggable={!editMode}`).
+  2. **(실사용자 리포트로 발견)** 드래그 도중에는 멀쩡하다가 드롭하는 순간 배경(도면)이 기기 위치로
+     튀는 버그. 원인은 Konva 이벤트 버블링 — 기기 `Group`의 `dragend`가 `Stage`까지 버블링되어
+     Stage의 `onDragEnd`(팬 상태 갱신용)가 다시 실행되는데, 이때 `e.target`은 Stage가 아니라 그
+     Group이라 좌표가 기기의 드롭 위치가 되어버려 그 값으로 캔버스를 패닝했다. `e.target !==
+     e.target.getStage()`면 무시하도록 가드하고, Group 쪽에서도 `e.cancelBubble = true`로 전파를
+     막아 근본 차단. Playwright 자동화로는 stage pos가 그대로 있음을 재현/검증했지만, 최초 발견은
+     사용자의 실제 브라우저 사용 중 리포트였다 — 자동화 재현이 어려운 유형의 버그였다.
+  3. 실시간(WS) 갱신처럼 드래그 도중 끼어드는 리렌더가 Konva의 드래그 중 위치를 되돌려쓰는 문제를
+     막기 위해 `onDragMove`로 드래그 중 위치를 별도 state(`dragPreview`)로 추적해 항상 최신 위치를
+     넘기도록 방어적으로 처리.
 - **테스트 한계**: 같은 Playwright 세션에서 첫 번째 드래그 제스처는 항상 정상 동작하지만, 이후 반복되는
   합성 마우스 드래그는 캔버스에 `mousedown` 네이티브 이벤트 자체가 전달되지 않는 현상을 확인했다
   (Konva `DD.isDragging`은 정상적으로 `false`, JS 에러 없음 — 앱 코드가 아니라 headless Chromium의

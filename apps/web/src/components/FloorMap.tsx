@@ -125,7 +125,14 @@ export function FloorMap({
         // Stage가 드래그를 가로채 마커 대신 도면 전체가 팬됨) — 편집 모드에서는 팬을 비활성화한다.
         draggable={!editMode}
         onWheel={handleWheel}
-        onDragEnd={(e) => setPos({ x: e.target.x(), y: e.target.y() })}
+        onDragEnd={(e) => {
+          // Konva 이벤트는 버블링된다 — 기기 Group의 dragend가 Stage까지 올라와 이 핸들러를
+          // 다시 태울 수 있다. 그때 e.target은 Stage가 아니라 그 Group이라 좌표가 기기 위치가
+          // 되어버려, 드롭 순간 도면이 그 기기 위치로 튀는 버그가 났다. Stage 자신의 드래그일
+          // 때만 처리한다.
+          if (e.target !== e.target.getStage()) return;
+          setPos({ x: e.target.x(), y: e.target.y() });
+        }}
       >
         <Layer listening={false}>
           {image && <KonvaImage image={image} width={width} height={height} opacity={0.9} />}
@@ -166,8 +173,12 @@ export function FloorMap({
                 x={x}
                 y={y}
                 draggable={editMode}
-                onDragMove={(e) => setDragPreview({ id: device.id, x: e.target.x(), y: e.target.y() })}
+                onDragMove={(e) => {
+                  e.cancelBubble = true; // Stage로 버블링되면 팬 핸들러가 오작동한다(아래 주석 참조)
+                  setDragPreview({ id: device.id, x: e.target.x(), y: e.target.y() });
+                }}
                 onDragEnd={(e) => {
+                  e.cancelBubble = true;
                   setDragPreview(null);
                   onDeviceDragEnd?.(device.id, e.target.x(), e.target.y());
                   // 프로그래밍적 위치 갱신 후 히트 그래프가 갱신되지 않아 다음 드래그가 안 먹는 사례 방지.
