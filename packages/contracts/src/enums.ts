@@ -26,6 +26,20 @@ export type DeviceLifecycle = z.infer<typeof DeviceLifecycle>;
 export const CameraProtocol = z.enum(["RTSP", "WEBRTC", "HLS", "ONVIF"]);
 export type CameraProtocol = z.infer<typeof CameraProtocol>;
 
+/**
+ * Device↔Gateway 구간의 물리/네트워크 연결 방식(SRS 2.1.2·3.1.1, PROJECT_RULES 부록 A.1).
+ * Gateway↔플랫폼 구간은 이 값과 무관하게 항상 MQTT다 — 이 enum은 그걸 대체하지 않는다.
+ */
+export const DeviceConnectionProtocol = z.enum([
+  "TCP_IP",
+  "SERIAL",
+  "MODBUS_TCP",
+  "MODBUS_RTU",
+  "ZIGBEE",
+  "ZWAVE",
+]);
+export type DeviceConnectionProtocol = z.infer<typeof DeviceConnectionProtocol>;
+
 export const ActorType = z.enum(["ADMIN", "USER", "AI", "SYSTEM"]);
 export type ActorType = z.infer<typeof ActorType>;
 

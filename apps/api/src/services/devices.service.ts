@@ -1,9 +1,23 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import type { AuthContext } from "@smarthome/auth";
 import { isAdmin } from "@smarthome/auth";
-import { getDeviceHistory, getDeviceState, listDevices, query } from "@smarthome/db";
+import { DeviceConnectionConfig, type DeviceConnectionProtocol } from "@smarthome/contracts";
+import {
+  getDeviceHistory,
+  getDeviceState,
+  insertAuditLog,
+  listDevices,
+  query,
+  updateDeviceConnection,
+} from "@smarthome/db";
 
 const deviceExecutor = { query };
+
+export interface SetDeviceConnectionRequest {
+  /** null이면 설정 해제(레거시/직결 MQTT 기기로 되돌림). */
+  protocol: string | null;
+  config?: unknown;
+}
 
 @Injectable()
 export class DevicesService {
@@ -42,5 +56,54 @@ export class DevicesService {
       throw new NotFoundException(`device not found: ${id}`);
     }
     return deviceHistory;
+  }
+
+  /**
+   * Device↔Gateway 연결 프로토콜/파라미터 설정(SRS 2.1.2·3.1.1, PROJECT_RULES 부록 A.1).
+   * Gateway↔플랫폼 구간은 항상 MQTT — 이 값과 무관하다. ADMIN 전용, 변경은 감사 대상.
+   */
+  async setConnection(
+    id: string,
+    body: SetDeviceConnectionRequest,
+    auth: AuthContext,
+  ): Promise<unknown> {
+    const before = await getDeviceState(deviceExecutor, id);
+    if (!before) {
+      throw new NotFoundException(`device not found: ${id}`);
+    }
+
+    let protocol: DeviceConnectionProtocol | null = null;
+    let config: unknown = null;
+    if (body.protocol !== null && body.protocol !== undefined) {
+      const parsed = DeviceConnectionConfig.safeParse({
+        protocol: body.protocol,
+        config: body.config ?? {},
+      });
+      if (!parsed.success) {
+        throw new BadRequestException(`invalid connection config: ${parsed.error.message}`);
+      }
+      protocol = parsed.data.protocol;
+      config = parsed.data.config;
+    }
+
+    const updated = await updateDeviceConnection(deviceExecutor, id, protocol, config);
+    if (!updated) {
+      throw new NotFoundException(`device not found: ${id}`);
+    }
+
+    await insertAuditLog(deviceExecutor, {
+      actorType: "ADMIN",
+      actorId: auth.userId,
+      targetType: "DEVICE",
+      targetId: id,
+      command: "DEVICE_CONNECTION_UPDATE",
+      reason: `connectionProtocol ${before.connectionProtocol ?? "null"} → ${protocol ?? "null"}`,
+      executionStatus: "SUCCEEDED",
+      mqttReasonCode: null,
+      sessionId: null,
+      commandId: null,
+    });
+
+    return updated;
   }
 }

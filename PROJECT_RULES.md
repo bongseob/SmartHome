@@ -210,6 +210,12 @@ CREATED → PENDING → IN_PROGRESS → SUCCEEDED
 - **DB = ORM 미사용**: `pg` + repository로 SQL을 직접 통제. 스키마는 node-pg-migrate로만 변경(§11).
 - **인증 = JWT 자체 발급 우선**: 외부 IdP 의존 없이 시작. OAuth2/OIDC는 Multi-tenant 확장(SRS 7) 시점.
 - **모노레포 = pnpm + Turborepo**: `packages/contracts` 공유 + Turborepo 태스크 캐시/병렬 빌드.
+- **Device 연결 프로토콜(2026-07-10 합의, SRS 2.1.2·3.1.1)**: Device↔Gateway 구간의 물리/네트워크
+  연결 방식(`TCP_IP`/`SERIAL`/`MODBUS_TCP`/`MODBUS_RTU`/`ZIGBEE`/`ZWAVE`)과 연결 파라미터를 Device에
+  선택적으로 기록한다. **Gateway↔플랫폼 구간은 그대로 MQTT 전용**이며 이 결정으로 대체되지 않는다 —
+  이 필드는 어떤 물리 프로토콜의 기기를 어떤 Gateway가 브리징하는지 기록/관리하는 용도다. enum은
+  `packages/contracts`에서만 정의(§1 단일 소스 원칙), 연결 파라미터는 프로토콜마다 모양이 달라
+  jsonb로 유연하게 저장한다.
 
 ### A.2 남은 열린 항목 (구현 진행하며 결정)
 - Notification Channel 구현체(push/email/SMS provider)

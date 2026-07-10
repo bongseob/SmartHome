@@ -2,6 +2,7 @@ import type {
   AlarmState,
   AlarmTier,
   DeviceCategory,
+  DeviceConnectionProtocol,
   DeviceLifecycle,
   DeviceStatus,
   ExecutionStatus,
@@ -26,6 +27,9 @@ export interface DeviceStateRecord {
   posX: string | null;
   posY: string | null;
   gatewayId: string | null;
+  /** Device↔Gateway 연결 프로토콜(선택). Gateway↔플랫폼 구간은 항상 MQTT — 이 값과 무관하다. */
+  connectionProtocol: DeviceConnectionProtocol | null;
+  connectionConfig: unknown;
   updatedAt: Date;
 }
 
@@ -88,6 +92,8 @@ interface DeviceStateRow extends QueryResultRow {
   pos_x: string | null;
   pos_y: string | null;
   gateway_id: string | null;
+  connection_protocol: DeviceConnectionProtocol | null;
+  connection_config: unknown;
   updated_at: Date;
 }
 
@@ -127,7 +133,7 @@ interface DeviceAlarmHistoryRow extends QueryResultRow {
 const DEVICE_COLUMNS = `
   id::text, code, name, category, device_type, manufacturer, model, firmware_version,
   mqtt_topic, current_status, lifecycle_status, area_id::text, pos_x::text, pos_y::text,
-  gateway_id::text, updated_at
+  gateway_id::text, connection_protocol, connection_config, updated_at
 `;
 
 function toDeviceState(row: DeviceStateRow): DeviceStateRecord {
@@ -147,6 +153,8 @@ function toDeviceState(row: DeviceStateRow): DeviceStateRecord {
     posX: row.pos_x,
     posY: row.pos_y,
     gatewayId: row.gateway_id,
+    connectionProtocol: row.connection_protocol,
+    connectionConfig: row.connection_config,
     updatedAt: row.updated_at,
   };
 }
@@ -221,6 +229,28 @@ export async function updateDevicePosition(
      WHERE id::text = $1
      RETURNING ${DEVICE_COLUMNS}`,
     [deviceId, posX, posY],
+  );
+  const row = result.rows[0];
+  return row ? toDeviceState(row) : null;
+}
+
+/**
+ * Device↔Gateway 연결 프로토콜/파라미터 설정(SRS 2.1.2·3.1.1, PROJECT_RULES 부록 A.1).
+ * Gateway↔플랫폼 구간(MQTT)에는 영향 없음 — 어떤 물리 프로토콜의 기기를 Gateway가 브리징하는지
+ * 기록/관리하는 용도다. null을 넘기면 설정을 해제한다(레거시/직결 MQTT 기기로 되돌림).
+ */
+export async function updateDeviceConnection(
+  db: QueryExecutor,
+  deviceId: string,
+  connectionProtocol: DeviceConnectionProtocol | null,
+  connectionConfig: unknown,
+): Promise<DeviceStateRecord | null> {
+  const result = await db.query<DeviceStateRow>(
+    `UPDATE device
+     SET connection_protocol = $2, connection_config = $3, updated_at = now()
+     WHERE id::text = $1
+     RETURNING ${DEVICE_COLUMNS}`,
+    [deviceId, connectionProtocol, connectionConfig === null ? null : JSON.stringify(connectionConfig)],
   );
   const row = result.rows[0];
   return row ? toDeviceState(row) : null;

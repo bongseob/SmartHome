@@ -1,5 +1,10 @@
 ﻿import { UNS_ROOT } from "@smarthome/contracts";
-import type { DeviceCategory, DeviceLifecycle, DeviceStatus } from "@smarthome/contracts";
+import type {
+  DeviceCategory,
+  DeviceConnectionProtocol,
+  DeviceLifecycle,
+  DeviceStatus,
+} from "@smarthome/contracts";
 import type { QueryResultRow } from "./pool.js";
 import type { QueryExecutor } from "./audit-repository.js";
 
@@ -153,6 +158,8 @@ export interface DeviceListItem {
   areaTopicPrefix: string | null; // "enterprise/site1/bldg-a/2f/living-room"
   posX: string | null;
   posY: string | null;
+  connectionProtocol: DeviceConnectionProtocol | null;
+  connectionConfig: unknown;
   updatedAt: Date;
 }
 
@@ -172,6 +179,8 @@ interface DeviceListRow extends QueryResultRow {
   area_topic_prefix: string | null;
   pos_x: string | null;
   pos_y: string | null;
+  connection_protocol: DeviceConnectionProtocol | null;
+  connection_config: unknown;
   updated_at: Date;
 }
 
@@ -192,6 +201,8 @@ function toDeviceListItem(row: DeviceListRow): DeviceListItem {
     areaTopicPrefix: row.area_topic_prefix,
     posX: row.pos_x,
     posY: row.pos_y,
+    connectionProtocol: row.connection_protocol,
+    connectionConfig: row.connection_config,
     updatedAt: row.updated_at,
   };
 }
@@ -199,7 +210,8 @@ function toDeviceListItem(row: DeviceListRow): DeviceListItem {
 const DEVICE_SELECT_COLUMNS = `
   d.id::text, d.code, d.name, d.category, d.device_type, d.manufacturer, d.model,
   d.firmware_version, d.mqtt_topic, d.current_status, d.lifecycle_status,
-  d.area_id::text, d.pos_x::text, d.pos_y::text, d.updated_at,
+  d.area_id::text, d.pos_x::text, d.pos_y::text, d.connection_protocol, d.connection_config,
+  d.updated_at,
   CASE
     WHEN a.id IS NOT NULL THEN
       CONCAT('enterprise/', s.slug, '/', b.slug, '/', f.slug, '/', a.slug)

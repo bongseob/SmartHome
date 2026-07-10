@@ -59,6 +59,10 @@
 - Device 위치 지정(x,y)
 - Area 매핑
 - Device 상태 확인
+- Device 연결 프로토콜 설정 — 기기가 자신의 Gateway와 물리적으로 연결되는 방식(TCP/IP, 시리얼
+  RS-232/RS-485, Modbus TCP/RTU, Zigbee/Z-Wave 등 무선 메쉬)과 그에 필요한 연결 파라미터(IP/포트,
+  시리얼 포트/보율, Modbus Unit ID 등)를 기기별로 지정한다. Gateway가 플랫폼과 통신하는 방식(§4.1
+  MQTT)과는 별개이며, 이를 대체하지 않는다.
 
 #### 2.1.3 그룹 관리
 
@@ -166,6 +170,13 @@ Device는 다음 정보를 가진다.
 - Firmware Version
 - MQTT Topic
 - Current Status
+- Connection Protocol (선택) — Device↔Gateway 구간의 물리/네트워크 연결 방식. 지원 값:
+  `TCP_IP`(TCP/IP 소켓), `SERIAL`(RS-232/RS-485), `MODBUS_TCP`, `MODBUS_RTU`,
+  `ZIGBEE`, `ZWAVE`. 값이 없으면(레거시 기기 등) 연결 방식 정보 없이 MQTT Topic만으로 동작한다.
+- Connection Config (선택) — Connection Protocol에 대응하는 연결 파라미터. 예:
+  `TCP_IP`/`MODBUS_TCP` → host, port(+Modbus는 Unit ID); `SERIAL`/`MODBUS_RTU` → COM 포트,
+  보율(+Modbus는 Unit ID); `ZIGBEE`/`ZWAVE` → 해당 메쉬 네트워크 식별자(PAN ID, Node ID 등).
+  Gateway↔플랫폼 구간은 이 값과 무관하게 항상 MQTT다(§4.1 QoS/LWT/Retained 규칙 그대로 적용).
 
 #### 3.1.2 Device Group
 

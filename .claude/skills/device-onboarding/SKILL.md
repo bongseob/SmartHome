@@ -16,6 +16,11 @@ description: Onboard a new device or sensor type into the SmartHome system — D
 ### 1. 데이터 모델 (PostgreSQL)
 - [ ] Device 필수 속성: `deviceId, name, type, manufacturer, model, firmwareVersion, mqttTopic, currentStatus`
 - [ ] 위치 `(x, y)` + Area 매핑, Device↔Group **N:M** (`Device_Group_Mapping`)
+- [ ] (선택) Device↔Gateway 연결 프로토콜: `connectionProtocol`(`TCP_IP`/`SERIAL`/`MODBUS_TCP`/
+      `MODBUS_RTU`/`ZIGBEE`/`ZWAVE`) + `connectionConfig`(jsonb, 프로토콜별 파라미터 — 예:
+      TCP_IP·MODBUS_TCP는 host/port, SERIAL·MODBUS_RTU는 COM포트/보율, Modbus는 Unit ID 추가).
+      **이 필드는 Gateway가 실제 기기와 연결되는 방식을 기록할 뿐이다 — Gateway↔플랫폼 구간은
+      항상 MQTT다(대체 금지, PROJECT_RULES 부록 A.1).** enum은 `packages/contracts`에서만 정의.
 - [ ] 마이그레이션 파일로만 스키마 변경 (수동 DDL 금지)
 
 ### 2. UNS 토픽 배선 (하드코딩 금지, `buildTopic()`)

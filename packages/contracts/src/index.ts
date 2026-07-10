@@ -9,3 +9,4 @@ export * from "./userProperties.js";
 export * from "./lifecycle.js";
 export * from "./alarmLifecycle.js";
 export * from "./realtime.js";
+export * from "./deviceConnection.js";
