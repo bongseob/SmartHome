@@ -14,6 +14,7 @@ export * from "./spatial-repository.js";
 export * from "./alarm-repository.js";
 export * from "./alarm-service.js";
 export * from "./scheduler-repository.js";
+export * from "./holiday-repository.js";
 
 /** 명령 상태전이 + audit_log 는 반드시 동일 트랜잭션(withTransaction)으로 기록한다. */
 export const AUDIT_REQUIRED_IN_TX = true as const;
