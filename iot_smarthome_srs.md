@@ -588,3 +588,12 @@ Device 선택 시 다음 정보를 Drawer 형태로 제공한다.
 - 화면(UI/UX) 설계서
 - 시퀀스 다이어그램
 - 시스템 아키텍처 설계서(HLD/LLD)
+
+---
+
+## 9. 부속 요구사항
+
+도메인 특화 요구사항은 별도 부속 문서로 관리한다. 본 SRS의 상위 정의가 우선한다.
+
+- 조명/부하 제어 도메인(차단기·분전반·감시장비 → Device·Area·Gateway 범용화):
+  [docs/srs-lighting-control-addendum.md](docs/srs-lighting-control-addendum.md)
