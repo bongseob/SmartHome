@@ -19,7 +19,7 @@
 
 | # | 그룹 | 핵심 테이블 |
 |---|---|---|
-| A | 공간 (Spatial) | `enterprise, site, building, floor, floor_map, area` |
+| A | 공간 (Spatial) | `enterprise, site, building, floor, floor_map, area, image` |
 | B | 기기·그룹 (Device) | `device, device_group, device_group_mapping` |
 | B-cam | PTZ 카메라 (옵션) | `camera, camera_preset, camera_coverage` |
 | C | 사용자·권한 (RBAC) | `app_user, user_role, user_area_permission, user_device_permission, user_group_permission` |
@@ -29,6 +29,7 @@
 | G | AI·HITL | `ai_recommendation, hitl_decision, ai_training_sample` |
 | H | 텔레메트리 (TimescaleDB) | `telemetry` (hypertable) |
 | I | 프로비저닝·OTA | `device_credential, firmware_artifact, ota_job, ota_target` |
+| J | 조명/부하 제어 (Lighting) | `holiday, time_program, time_program_slot, time_program_group, system_setting` (→ [addendum](srs-lighting-control-addendum.md)) |
 
 ---
 
@@ -113,6 +114,7 @@ erDiagram
 | building_id | uuid | FK→building | |
 | slug / name | text | | (building_id, slug) UNIQUE |
 | floor_map_id | uuid | FK→floor_map (nullable) | 평면도 |
+| pos_x / pos_y | numeric | | 배경 표시 좌표(addendum §2.2, 마이그레이션 0016) |
 
 **floor_map** — 평면도 업로드·스케일(SRS 2.1.1)
 | id | uuid | PK | |
@@ -122,11 +124,22 @@ erDiagram
 | uploaded_by | uuid | FK→app_user | |
 | uploaded_at | timestamptz | | |
 
-**area** — Polygon 기반 공간(SRS 2.1.1)
+**image** — 재사용 이미지 라이브러리(addendum §2.1, 마이그레이션 0016). 레거시 이미지관리.
+| id | uuid | PK | |
+| name | text | | 이미지 이름 |
+| image_url | text | UQ | 저장 경로(로컬 파일시스템) |
+| width_px / height_px | int | | 원본 픽셀 크기 |
+| uploaded_by | uuid | FK→app_user | |
+| uploaded_at | timestamptz | | |
+
+**area** — Polygon 기반 공간(SRS 2.1.1) + 분전반형(addendum §2.3)
 | id | uuid | PK | |
 | floor_id | uuid | FK→floor | |
 | slug / name | text | | UNS 세그먼트, (floor_id, slug) UNIQUE |
 | polygon | jsonb | | Polygon 좌표 배열 `[[x,y],...]` |
+| kind | enum | | `ROOM / PANEL`(분전반형), 기본 ROOM (마이그레이션 0016) |
+| image_id | uuid | FK→image (nullable) | 분전반 배경이미지 |
+| pos_x / pos_y | numeric | | 분전반 표시 좌표 |
 | created_by | uuid | FK→app_user | |
 
 ---
@@ -149,7 +162,11 @@ erDiagram
 | lifecycle_status | enum | | `REGISTERED / PROVISIONED / COMMISSIONED / ACTIVE / MAINTENANCE / DECOMMISSIONED` (§device-lifecycle-ota) |
 | area_id | uuid | FK→area | 위치 공간 |
 | pos_x / pos_y | numeric | | 도면 좌표 |
-| gateway_id | uuid | FK→device (self, nullable) | 소속 게이트웨이 |
+| gateway_id | uuid | FK→device (self, nullable) | 소속 게이트웨이(레거시 RMU) |
+| connection_protocol | enum | | `TCP_IP / SERIAL / MODBUS_TCP / MODBUS_RTU / ZIGBEE / ZWAVE` (선택, 마이그레이션 0014) |
+| connection_config | jsonb | | 연결 파라미터. 레거시 차단기 Address(06~)·Gateway IP/PORT를 여기 저장(addendum §3.1·§3.2) |
+| load_class | enum | | `NORMAL / EMERGENCY / RESERVE`(부하 구분, 마이그레이션 0017). RESERVE는 관제 화면 미표시 |
+| description | text | | 차단기 설명 |
 | created_at / updated_at | timestamptz | | |
 
 > `mqtt_topic`은 하드코딩이 아니라 공간 계층+code로부터 `buildTopic()`으로 생성해 저장(§PROJECT_RULES 2).
@@ -439,6 +456,49 @@ erDiagram
 
 ---
 
+### J. 조명/부하 제어 (Lighting, → [addendum](srs-lighting-control-addendum.md))
+
+레거시 차단기 조명제어 도메인. 예약(One-Time)은 기존 `scheduler`(schedule_type=ONE_TIME)를
+재사용하고, 장애이력은 `audit_log`+`alarm_log` 조회 뷰로 제공하므로 신규 테이블이 없다.
+
+**holiday** — 휴일 달력(addendum §7, 마이그레이션 0018). 타임프로그램 공휴일 판정에 사용.
+| 컬럼 | 타입 | 키 | 설명 |
+|---|---|---|---|
+| id | uuid | PK | |
+| month / day | smallint | | 월(1–12)·일(1–31) |
+| lunar_solar | enum | | `SOLAR / LUNAR`(음력은 스케줄 시 양력 변환) |
+| name | text | | 휴일명. (month, day, lunar_solar, name) UNIQUE |
+| created_at | timestamptz | | |
+
+**time_program** — 정기 운영 스케줄 템플릿(addendum §6.2, 마이그레이션 0019). 최대 300개.
+| id | uuid | PK | |
+| program_no | smallint | UQ | 1–300 (CHECK) |
+| name | text | | |
+| enabled | bool | | |
+| created_by | uuid | FK→app_user | |
+| created_at | timestamptz | | |
+
+**time_program_slot** — 프로그램의 (요일 또는 공휴일) × 시각 × ON/OFF 슬롯.
+| id | uuid | PK | |
+| time_program_id | uuid | FK→time_program | |
+| day_of_week | smallint | | 0=일 ~ 6=토(공휴일 슬롯이면 NULL) |
+| is_holiday | bool | | 공휴일 슬롯 여부. day_of_week와 XOR(CHECK) |
+| at_time | time | | 운영 시각 |
+| power_on | bool | | ON(true)/OFF(false) |
+
+**time_program_group** — 스케줄 등록(프로그램 ↔ Device_Group N:M, addendum §6.3).
+| time_program_id | uuid | PK, FK→time_program | |
+| group_id | uuid | PK, FK→device_group | |
+
+**system_setting** — 운영 설정 key/value(addendum §1·§4·§5, 마이그레이션 0020). 하드코딩 금지 원칙.
+| key | text | PK | 예 `control.sequential_interval_ms`(순차 제어 1.5초), `legacy.server_endpoint` |
+| value | jsonb | | 설정값 |
+| description | text | | 설명 |
+| updated_by | uuid | FK→app_user | |
+| updated_at | timestamptz | | |
+
+---
+
 ## 4. Enum 목록 (→ `packages/contracts` 단일 소스)
 
 | Enum | 값 |
@@ -464,6 +524,10 @@ erDiagram
 | RecommendationType | ANOMALY, ENERGY, AWAY, SLEEP, RISK |
 | RecommendationStatus | PENDING_APPROVAL, APPROVED, REJECTED, EXECUTED, EXPIRED |
 | HitlDecision | APPROVE, REJECT |
+| DeviceConnectionProtocol | TCP_IP, SERIAL, MODBUS_TCP, MODBUS_RTU, ZIGBEE, ZWAVE |
+| LoadClass | NORMAL, EMERGENCY, RESERVE |
+| LunarSolar | SOLAR, LUNAR |
+| AreaKind | ROOM, PANEL |
 
 ---
 

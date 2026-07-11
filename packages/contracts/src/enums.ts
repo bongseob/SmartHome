@@ -125,3 +125,20 @@ export const OtaStatus = z.enum([
   "ROLLED_BACK",
 ]);
 export type OtaStatus = z.infer<typeof OtaStatus>;
+
+/**
+ * 조명/부하 제어 도메인 (docs/srs-lighting-control-addendum.md).
+ * 레거시 차단기 조명제어 시스템을 범용화해 추가한 enum들.
+ */
+
+/** 부하 구분(레거시 조명구분). RESERVE(예비)는 관제 화면에 표시하지 않는다(addendum §3.2). */
+export const LoadClass = z.enum(["NORMAL", "EMERGENCY", "RESERVE"]);
+export type LoadClass = z.infer<typeof LoadClass>;
+
+/** 휴일 음/양력 구분(addendum §7). LUNAR는 스케줄 판정 시 해당 연도 양력으로 변환한다. */
+export const LunarSolar = z.enum(["SOLAR", "LUNAR"]);
+export type LunarSolar = z.infer<typeof LunarSolar>;
+
+/** Area 유형(addendum §2.3). PANEL = 분전반형(배경이미지·좌표), ROOM = 일반 공간. */
+export const AreaKind = z.enum(["ROOM", "PANEL"]);
+export type AreaKind = z.infer<typeof AreaKind>;
