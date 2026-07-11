@@ -12,6 +12,7 @@ import { AlarmsController } from "../routes/alarms.controller.js";
 import { AlarmPoliciesController } from "../routes/alarm-policies.controller.js";
 import { SchedulersController } from "../routes/schedulers.controller.js";
 import { HolidaysController } from "../routes/holidays.controller.js";
+import { TimeProgramsController } from "../routes/time-programs.controller.js";
 import { AuthService } from "../services/auth.service.js";
 import { CommandsService } from "../services/commands.service.js";
 import { DevicesService } from "../services/devices.service.js";
@@ -20,6 +21,7 @@ import { AlarmsService } from "../services/alarms.service.js";
 import { AlarmPoliciesService } from "../services/alarm-policies.service.js";
 import { SchedulersService } from "../services/schedulers.service.js";
 import { HolidaysService } from "../services/holidays.service.js";
+import { TimeProgramsService } from "../services/time-programs.service.js";
 
 @Module({
   controllers: [
@@ -32,6 +34,7 @@ import { HolidaysService } from "../services/holidays.service.js";
     AlarmPoliciesController,
     SchedulersController,
     HolidaysController,
+    TimeProgramsController,
   ],
   providers: [
     AuthService,
@@ -42,6 +45,7 @@ import { HolidaysService } from "../services/holidays.service.js";
     AlarmPoliciesService,
     SchedulersService,
     HolidaysService,
+    TimeProgramsService,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: DeviceAccessGuard },
