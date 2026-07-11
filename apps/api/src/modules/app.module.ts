@@ -14,6 +14,7 @@ import { SchedulersController } from "../routes/schedulers.controller.js";
 import { HolidaysController } from "../routes/holidays.controller.js";
 import { TimeProgramsController } from "../routes/time-programs.controller.js";
 import { ImagesController } from "../routes/images.controller.js";
+import { EventHistoryController } from "../routes/event-history.controller.js";
 import { AuthService } from "../services/auth.service.js";
 import { CommandsService } from "../services/commands.service.js";
 import { DevicesService } from "../services/devices.service.js";
@@ -24,6 +25,7 @@ import { SchedulersService } from "../services/schedulers.service.js";
 import { HolidaysService } from "../services/holidays.service.js";
 import { TimeProgramsService } from "../services/time-programs.service.js";
 import { ImagesService } from "../services/images.service.js";
+import { EventHistoryService } from "../services/event-history.service.js";
 
 @Module({
   controllers: [
@@ -38,6 +40,7 @@ import { ImagesService } from "../services/images.service.js";
     HolidaysController,
     TimeProgramsController,
     ImagesController,
+    EventHistoryController,
   ],
   providers: [
     AuthService,
@@ -50,6 +53,7 @@ import { ImagesService } from "../services/images.service.js";
     HolidaysService,
     TimeProgramsService,
     ImagesService,
+    EventHistoryService,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: DeviceAccessGuard },
