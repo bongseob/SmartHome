@@ -1,6 +1,7 @@
 ﻿import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import type { AuthContext } from "@smarthome/auth";
 import { isAdmin } from "@smarthome/auth";
+import { AreaKind } from "@smarthome/contracts";
 import {
   createArea,
   deleteArea,
@@ -31,6 +32,61 @@ function slugify(name: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9가-힣]+/g, "-")
     .replace(/^-+|-+$/g, "") || "area";
+}
+
+/** 분전반형 area 선택 필드(addendum §2.3). */
+interface PanelAreaFields {
+  kind?: string;
+  imageId?: string | null;
+  posX?: number | null;
+  posY?: number | null;
+}
+
+interface ParsedPanelFields {
+  kind?: "ROOM" | "PANEL";
+  imageId?: string | null;
+  posX?: number | null;
+  posY?: number | null;
+}
+
+/** kind/imageId/posX/posY를 검증·정규화. 미지정 필드는 결과에서 생략(부분 업데이트 유지). */
+function parsePanelFields(body: PanelAreaFields): ParsedPanelFields {
+  const out: ParsedPanelFields = {};
+  if (body.kind !== undefined) {
+    const parsed = AreaKind.safeParse(body.kind);
+    if (!parsed.success) throw new BadRequestException(`kind must be ROOM or PANEL: ${body.kind}`);
+    out.kind = parsed.data;
+  }
+  if (body.imageId !== undefined) {
+    if (body.imageId !== null && typeof body.imageId !== "string") {
+      throw new BadRequestException("imageId must be a string or null");
+    }
+    out.imageId = body.imageId;
+  }
+  for (const axis of ["posX", "posY"] as const) {
+    if (body[axis] !== undefined) {
+      if (body[axis] !== null && typeof body[axis] !== "number") {
+        throw new BadRequestException(`${axis} must be a number or null`);
+      }
+      out[axis] = body[axis];
+    }
+  }
+  return out;
+}
+
+const PG_FK_VIOLATION = "23503";
+
+/** area.image_id FK 위반(존재하지 않는 imageId)을 400으로 매핑. */
+async function mapImageFkError<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (typeof err === "object" && err !== null && "code" in err &&
+      (err as { code?: unknown }).code === PG_FK_VIOLATION) {
+      throw new BadRequestException("imageId not found");
+    }
+    throw err;
+  }
 }
 
 /** Area의 polygon은 [[x,y], ...] 최소 삼각형(3점)이어야 한다(FloorMap.tsx의 렌더링 요건과 동일). */
@@ -287,10 +343,11 @@ export class SpatialService {
     });
   }
 
-  /** 지역(Area) 관리(M16, SRS 2.1.1) — 생성/수정/삭제. ADMIN 전용, 감사 대상. */
+  /** 지역(Area) 관리(M16, SRS 2.1.1) — 생성/수정/삭제. ADMIN 전용, 감사 대상.
+   *  분전반형(addendum §2.3): kind=PANEL·imageId(배경)·posX/posY 선택 지정. */
   async createArea(
     floorId: string,
-    body: { name: string; polygon: unknown; slug?: string },
+    body: { name: string; polygon: unknown; slug?: string } & PanelAreaFields,
     auth: AuthContext,
   ): Promise<unknown> {
     if (!body.name || !body.name.trim()) {
@@ -299,18 +356,21 @@ export class SpatialService {
     if (!isValidPolygon(body.polygon)) {
       throw new BadRequestException("polygon must be an array of at least 3 [x,y] points");
     }
+    const panel = parsePanelFields(body);
     const floors = await listFloors(executor);
     if (!floors.find((f) => f.id === floorId)) {
       throw new NotFoundException(`floor not found: ${floorId}`);
     }
 
-    return withTransaction(async (client) => {
+    return mapImageFkError(() =>
+    withTransaction(async (client) => {
       const area = await createArea(client, {
         floorId,
         slug: body.slug?.trim() || slugify(body.name),
         name: body.name.trim(),
         polygon: body.polygon,
         createdBy: auth.userId,
+        ...panel,
       });
       await insertAuditLog(client, {
       actorType: "ADMIN",
@@ -318,19 +378,19 @@ export class SpatialService {
       targetType: "AREA",
       targetId: area.id,
       command: "AREA_CREATE",
-      reason: `area '${area.name}' (floor ${floorId})`,
+      reason: `area '${area.name}' (floor ${floorId})${panel.kind === "PANEL" ? " [PANEL]" : ""}`,
       executionStatus: "SUCCEEDED",
       mqttReasonCode: null,
       sessionId: null,
       commandId: null,
       });
       return area;
-    });
+    }));
   }
 
   async updateArea(
     id: string,
-    body: { name?: string; polygon?: unknown },
+    body: { name?: string; polygon?: unknown } & PanelAreaFields,
     auth: AuthContext,
   ): Promise<unknown> {
     if (body.name !== undefined && !body.name.trim()) {
@@ -339,8 +399,10 @@ export class SpatialService {
     if (body.polygon !== undefined && !isValidPolygon(body.polygon)) {
       throw new BadRequestException("polygon must be an array of at least 3 [x,y] points");
     }
+    const panel = parsePanelFields(body);
 
-    return withTransaction(async (client) => {
+    return mapImageFkError(() =>
+    withTransaction(async (client) => {
       const before = await getAreaById(client, id);
       if (!before) {
         throw new NotFoundException(`area not found: ${id}`);
@@ -348,6 +410,7 @@ export class SpatialService {
       const updated = await updateArea(client, id, {
         ...(body.name !== undefined ? { name: body.name.trim() } : {}),
         ...(body.polygon !== undefined ? { polygon: body.polygon } : {}),
+        ...panel,
       });
       if (!updated) {
         throw new NotFoundException(`area not found: ${id}`);
@@ -365,7 +428,7 @@ export class SpatialService {
       commandId: null,
       });
       return updated;
-    });
+    }));
   }
 
   async deleteArea(id: string, auth: AuthContext): Promise<unknown> {

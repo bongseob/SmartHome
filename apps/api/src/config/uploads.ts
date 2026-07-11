@@ -8,8 +8,15 @@ import { fileURLToPath } from "node:url";
  */
 export const UPLOADS_ROOT = fileURLToPath(new URL("../../uploads", import.meta.url));
 export const FLOOR_MAPS_DIR = join(UPLOADS_ROOT, "floor-maps");
+/** 재사용 이미지 라이브러리 저장 경로(addendum §2.1, 부록 A.1 로컬 파일시스템). */
+export const IMAGES_DIR = join(UPLOADS_ROOT, "images");
 
 export function ensureFloorMapsDir(): string {
   mkdirSync(FLOOR_MAPS_DIR, { recursive: true });
   return FLOOR_MAPS_DIR;
+}
+
+export function ensureImagesDir(): string {
+  mkdirSync(IMAGES_DIR, { recursive: true });
+  return IMAGES_DIR;
 }

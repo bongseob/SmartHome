@@ -1,5 +1,6 @@
 ﻿import { UNS_ROOT } from "@smarthome/contracts";
 import type {
+  AreaKind,
   DeviceCategory,
   DeviceConnectionProtocol,
   DeviceLifecycle,
@@ -254,6 +255,10 @@ export interface Area {
   slug: string;
   topicPrefix: string; // "enterprise/site1/bldg-a/2f/living-room"
   polygon: unknown;
+  kind: AreaKind;
+  imageId: string | null;
+  posX: number | null;
+  posY: number | null;
 }
 
 interface AreaRow extends QueryResultRow {
@@ -262,6 +267,10 @@ interface AreaRow extends QueryResultRow {
   name: string;
   slug: string;
   polygon: unknown;
+  kind: AreaKind;
+  image_id: string | null;
+  pos_x: number | null;
+  pos_y: number | null;
   site_slug: string;
   building_slug: string;
   floor_slug: string;
@@ -276,8 +285,18 @@ function toArea(row: AreaRow): Area {
     slug: row.slug,
     topicPrefix: [UNS_ROOT, row.site_slug, row.building_slug, row.floor_slug, row.area_slug].join("/"),
     polygon: row.polygon,
+    kind: row.kind,
+    imageId: row.image_id,
+    posX: row.pos_x,
+    posY: row.pos_y,
   };
 }
+
+/** listAreasByFloor / getAreaById 공통 SELECT 컬럼(분전반 필드 포함). */
+const AREA_SELECT = `a.id::text, a.floor_id::text, a.name, a.slug, a.polygon,
+            a.kind, a.image_id::text, a.pos_x, a.pos_y,
+            s.slug AS site_slug, b.slug AS building_slug,
+            f.slug AS floor_slug, a.slug AS area_slug`;
 
 /** 특정 층의 Area 목록 (polygon 포함) */
 export async function listAreasByFloor(
@@ -285,9 +304,7 @@ export async function listAreasByFloor(
   floorId: string,
 ): Promise<Area[]> {
   const r = await db.query<AreaRow>(
-    `SELECT a.id::text, a.floor_id::text, a.name, a.slug, a.polygon,
-            s.slug AS site_slug, b.slug AS building_slug,
-            f.slug AS floor_slug, a.slug AS area_slug
+    `SELECT ${AREA_SELECT}
      FROM area a
      JOIN floor f     ON f.id = a.floor_id
      JOIN building b  ON b.id = f.building_id
@@ -301,9 +318,7 @@ export async function listAreasByFloor(
 
 export async function getAreaById(db: QueryExecutor, id: string): Promise<Area | null> {
   const r = await db.query<AreaRow>(
-    `SELECT a.id::text, a.floor_id::text, a.name, a.slug, a.polygon,
-            s.slug AS site_slug, b.slug AS building_slug,
-            f.slug AS floor_slug, a.slug AS area_slug
+    `SELECT ${AREA_SELECT}
      FROM area a
      JOIN floor f     ON f.id = a.floor_id
      JOIN building b  ON b.id = f.building_id
@@ -323,14 +338,29 @@ export interface CreateAreaInput {
   name: string;
   polygon: unknown;
   createdBy: string | null;
+  /** 분전반형 area(addendum §2.3). 미지정 시 DB 기본값 ROOM. */
+  kind?: AreaKind;
+  imageId?: string | null;
+  posX?: number | null;
+  posY?: number | null;
 }
 
 export async function createArea(db: QueryExecutor, input: CreateAreaInput): Promise<Area> {
   const r = await db.query<{ id: string }>(
-    `INSERT INTO area (floor_id, slug, name, polygon, created_by)
-     VALUES ($1,$2,$3,$4,$5)
+    `INSERT INTO area (floor_id, slug, name, polygon, created_by, kind, image_id, pos_x, pos_y)
+     VALUES ($1,$2,$3,$4,$5,COALESCE($6,'ROOM')::area_kind,$7,$8,$9)
      RETURNING id::text`,
-    [input.floorId, input.slug, input.name, JSON.stringify(input.polygon), input.createdBy],
+    [
+      input.floorId,
+      input.slug,
+      input.name,
+      JSON.stringify(input.polygon),
+      input.createdBy,
+      input.kind ?? null,
+      input.imageId ?? null,
+      input.posX ?? null,
+      input.posY ?? null,
+    ],
   );
   const id = r.rows[0]?.id;
   if (!id) throw new Error("area insert did not return an id");
@@ -342,6 +372,10 @@ export async function createArea(db: QueryExecutor, input: CreateAreaInput): Pro
 export interface UpdateAreaInput {
   name?: string;
   polygon?: unknown;
+  kind?: AreaKind;
+  imageId?: string | null;
+  posX?: number | null;
+  posY?: number | null;
 }
 
 export async function updateArea(
@@ -358,6 +392,22 @@ export async function updateArea(
   if (input.polygon !== undefined) {
     params.push(JSON.stringify(input.polygon));
     sets.push(`polygon = $${params.length}`);
+  }
+  if (input.kind !== undefined) {
+    params.push(input.kind);
+    sets.push(`kind = $${params.length}::area_kind`);
+  }
+  if (input.imageId !== undefined) {
+    params.push(input.imageId);
+    sets.push(`image_id = $${params.length}`);
+  }
+  if (input.posX !== undefined) {
+    params.push(input.posX);
+    sets.push(`pos_x = $${params.length}`);
+  }
+  if (input.posY !== undefined) {
+    params.push(input.posY);
+    sets.push(`pos_y = $${params.length}`);
   }
   if (sets.length === 0) return getAreaById(db, id);
 

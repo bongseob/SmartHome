@@ -174,7 +174,16 @@ export class SpatialController {
   @Post("floors/:id/areas")
   createArea(
     @Param("id") id: string,
-    @Body() body: { name: string; polygon: unknown; slug?: string },
+    @Body()
+    body: {
+      name: string;
+      polygon: unknown;
+      slug?: string;
+      kind?: string;
+      imageId?: string | null;
+      posX?: number | null;
+      posY?: number | null;
+    },
     @CurrentAuth() auth: AuthContext,
   ): Promise<unknown> {
     return this.spatial.createArea(id, body, auth);
@@ -184,7 +193,15 @@ export class SpatialController {
   @Patch("areas/:id")
   updateArea(
     @Param("id") id: string,
-    @Body() body: { name?: string; polygon?: unknown },
+    @Body()
+    body: {
+      name?: string;
+      polygon?: unknown;
+      kind?: string;
+      imageId?: string | null;
+      posX?: number | null;
+      posY?: number | null;
+    },
     @CurrentAuth() auth: AuthContext,
   ): Promise<unknown> {
     return this.spatial.updateArea(id, body, auth);
