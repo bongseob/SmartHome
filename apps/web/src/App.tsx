@@ -50,6 +50,8 @@ export function App(): JSX.Element {
 
   // 최상위 화면 전환(M16 Admin) — ADMIN 전용 스케줄러/시스템정보 화면과 기존 Floor Map 관제 화면을 오간다.
   const [view, setView] = useState<"dashboard" | "fullMonitoring" | "map" | "groupControl" | "schedulers" | "systemInfo" | "floorMaps" | "areas" | "devices">("dashboard");
+  // 전체 모니터링에서 감시장비 선택 → 관제 화면에서 그 감시장비의 접점별 개별 제어를 펼치기 위한 포커스.
+  const [focusEquipmentId, setFocusEquipmentId] = useState<string | null>(null);
 
   // 도면 편집 모드(ui-ux-design.md §4.1-mode) — ADMIN 전용. 실행 모드에서는 조회/제어만 가능하다.
   const [mode, setMode] = useState<"execute" | "edit">("execute");
@@ -131,6 +133,17 @@ export function App(): JSX.Element {
       cancelled = true;
     };
   }, [selectedFloorId, handleLogout]);
+
+  const handleSelectEquipment = useCallback((equipment: DeviceListItem, floor: FloorSummary) => {
+    // 관제(map) 화면으로 이동해 해당 감시장비의 접점별 개별 제어를 펼친다.
+    if (dirtyCount > 0) setPendingPositions({});
+    setLayoutError(null);
+    setMode("execute");
+    setSelectedFloorId(floor.id);
+    setSelectedDeviceId(null);
+    setFocusEquipmentId(equipment.id);
+    setView("map");
+  }, [dirtyCount]);
 
   const handleSelectDevice = useCallback((device: DeviceListItem) => {
     setSelectedDeviceId(device.id);
@@ -397,7 +410,7 @@ export function App(): JSX.Element {
         </div>
       ) : view === "fullMonitoring" ? (
         <div className="app-shell__body app-shell__body--single">
-          <FullMonitoring />
+          <FullMonitoring onSelectEquipment={handleSelectEquipment} />
         </div>
       ) : view === "groupControl" ? (
         <div className="app-shell__body app-shell__body--single">
@@ -434,6 +447,8 @@ export function App(): JSX.Element {
                 editMode={mode === "edit"}
                 pendingPositions={pendingPositions}
                 onDeviceDragEnd={handleDeviceDragEnd}
+                focusEquipmentId={focusEquipmentId}
+                onFocusHandled={() => setFocusEquipmentId(null)}
               />
             ) : (
               <p>층을 불러오는 중…</p>

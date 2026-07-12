@@ -93,6 +93,10 @@ interface FloorMapProps {
   /** 저장 전 임시 위치(드래그했지만 아직 저장하지 않은 좌표) — deviceId별 override. */
   pendingPositions?: Record<string, { x: number; y: number }>;
   onDeviceDragEnd?: (deviceId: string, x: number, y: number) => void;
+  /** 외부(전체 모니터링)에서 특정 감시장비의 접점별 개별 제어를 펼치라는 요청. */
+  focusEquipmentId?: string | null;
+  /** 포커스를 적용한 뒤 부모의 상태를 비우도록 알린다(중복 적용 방지). */
+  onFocusHandled?: () => void;
 }
 
 export function FloorMap({
@@ -102,6 +106,8 @@ export function FloorMap({
   editMode = false,
   pendingPositions = {},
   onDeviceDragEnd,
+  focusEquipmentId = null,
+  onFocusHandled,
 }: FloorMapProps): JSX.Element {
   const width = overview.floor.floorMapWidth ?? FALLBACK_WIDTH;
   const height = overview.floor.floorMapHeight ?? FALLBACK_HEIGHT;
@@ -147,6 +153,19 @@ export function FloorMap({
     () => activeDevices.filter((device) => device.deviceRole === "MONITORING_EQUIPMENT"),
     [activeDevices],
   );
+
+  // 외부(전체 모니터링)에서 감시장비를 선택하면 그 감시장비의 지역으로 필터하고 접점별 패널을 펼친다.
+  // 층 변경 → overview 로드 완료(해당 감시장비가 equipments에 존재) 시점에 적용한다.
+  useEffect(() => {
+    if (!focusEquipmentId) return;
+    const target = equipments.find((device) => device.id === focusEquipmentId);
+    if (!target) return; // 아직 해당 층 overview가 로드되지 않음 → 다음 렌더에서 재시도
+    setSelectedAreaId(target.areaId);
+    setMonitoringLevel("equipment");
+    setHoveredEquipmentId(null);
+    setContactsEquipmentId(focusEquipmentId);
+    onFocusHandled?.();
+  }, [focusEquipmentId, equipments, onFocusHandled]);
 
   const sensorsByEquipment = useMemo(() => {
     const result = new Map<string, DeviceListItem[]>();

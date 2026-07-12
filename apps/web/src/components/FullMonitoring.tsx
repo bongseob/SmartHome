@@ -62,12 +62,23 @@ function floorPrefixFromArea(topic: string | null): string | null {
   return parts.length >= 5 ? parts.slice(0, 4).join("/") : null;
 }
 
-interface FloorRow {
-  floor: FloorSummary;
+interface EquipmentGroup {
+  key: string;
+  equipment: DeviceListItem | null;
   contacts: DeviceListItem[];
 }
 
-export function FullMonitoring(): JSX.Element {
+interface FloorRow {
+  floor: FloorSummary;
+  groups: EquipmentGroup[];
+}
+
+interface FullMonitoringProps {
+  /** 감시장비(RMU) 선택 → 해당 감시장비의 개별 제어(접점별) 화면으로 이동. */
+  onSelectEquipment?: (equipment: DeviceListItem, floor: FloorSummary) => void;
+}
+
+export function FullMonitoring({ onSelectEquipment }: FullMonitoringProps): JSX.Element {
   const [floors, setFloors] = useState<FloorSummary[]>([]);
   const [devices, setDevices] = useState<DeviceListItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -100,8 +111,17 @@ export function FullMonitoring(): JSX.Element {
     return map;
   }, [floors]);
 
+  // 접점 → 소속 감시장비(RMU) 매핑용.
+  const equipmentById = useMemo(() => {
+    const map = new Map<string, DeviceListItem>();
+    for (const device of devices) {
+      if (device.deviceRole === "MONITORING_EQUIPMENT") map.set(device.id, device);
+    }
+    return map;
+  }, [devices]);
+
   const rows = useMemo<FloorRow[]>(() => {
-    const byFloor = new Map<string, FloorRow>();
+    const byFloor = new Map<string, { floor: FloorSummary; groups: Map<string, EquipmentGroup> }>();
     for (const device of devices) {
       if (device.deviceRole !== "SENSOR") continue;
       if (!(device.monitoringVisible && device.enabled && device.lifecycleStatus !== "DECOMMISSIONED")) continue;
@@ -109,30 +129,44 @@ export function FullMonitoring(): JSX.Element {
       if (!prefix) continue;
       const floor = floorByPrefix.get(prefix);
       if (!floor) continue;
-      const entry = byFloor.get(floor.id) ?? { floor, contacts: [] };
-      entry.contacts.push(device);
-      byFloor.set(floor.id, entry);
+      const floorEntry = byFloor.get(floor.id) ?? { floor, groups: new Map<string, EquipmentGroup>() };
+      const key = device.parentDeviceId ?? "__none__";
+      const group =
+        floorEntry.groups.get(key) ??
+        ({ key, equipment: device.parentDeviceId ? equipmentById.get(device.parentDeviceId) ?? null : null, contacts: [] } as EquipmentGroup);
+      group.contacts.push(device);
+      floorEntry.groups.set(key, group);
+      byFloor.set(floor.id, floorEntry);
     }
-    const list = [...byFloor.values()];
-    for (const entry of list) {
-      entry.contacts.sort(
-        (a, b) =>
-          (a.areaTopicPrefix ?? "").localeCompare(b.areaTopicPrefix ?? "") ||
-          (a.parentDeviceId ?? "").localeCompare(b.parentDeviceId ?? "") ||
+    const list: FloorRow[] = [];
+    for (const { floor, groups } of byFloor.values()) {
+      const groupList = [...groups.values()];
+      for (const group of groupList) {
+        group.contacts.sort((a, b) =>
           (a.channelAddress ?? a.name).localeCompare(b.channelAddress ?? b.name, undefined, { numeric: true }),
+        );
+      }
+      // 감시장비를 지역/이름 순으로 정렬(도트 클러스터 순서 안정화).
+      groupList.sort((a, b) =>
+        (a.equipment?.areaTopicPrefix ?? "").localeCompare(b.equipment?.areaTopicPrefix ?? "") ||
+        (a.equipment?.name ?? "~").localeCompare(b.equipment?.name ?? "~"),
       );
+      list.push({ floor, groups: groupList });
     }
     list.sort((a, b) => floorRank(b.floor.name) - floorRank(a.floor.name));
     return list;
-  }, [devices, floorByPrefix]);
+  }, [devices, floorByPrefix, equipmentById]);
 
   const totals = useMemo(() => {
     const acc: Record<ContactClass, number> = { EMG_ON: 0, NRM_ON: 0, EMG_OFF: 0, NRM_OFF: 0, SP: 0, ALARM: 0 };
-    for (const row of rows) for (const contact of row.contacts) acc[contactClass(contact)] += 1;
+    for (const row of rows) for (const group of row.groups) for (const contact of group.contacts) acc[contactClass(contact)] += 1;
     return acc;
   }, [rows]);
 
-  const contactCount = rows.reduce((sum, row) => sum + row.contacts.length, 0);
+  const contactCount = rows.reduce(
+    (sum, row) => sum + row.groups.reduce((s, g) => s + g.contacts.length, 0),
+    0,
+  );
 
   if (loading) return <p>전체 상태를 불러오는 중…</p>;
   if (error) return <p className="error-text">{error}</p>;
@@ -160,23 +194,44 @@ export function FullMonitoring(): JSX.Element {
         <p className="full-monitoring__empty">표시할 접점이 없습니다.</p>
       ) : (
         <div className="full-monitoring__grid">
-          {rows.map(({ floor, contacts }) => (
+          {rows.map(({ floor, groups }) => (
             <div key={floor.id} className="full-monitoring__row">
               <span className="full-monitoring__floor" title={`${floor.siteName} · ${floor.buildingName}`}>
                 {floor.name}
               </span>
-              <div className="full-monitoring__dots">
-                {contacts.map((contact) => {
-                  const cls = contactClass(contact);
-                  return (
-                    <i
-                      key={contact.id}
-                      className={`fm-dot ${cls === "SP" ? "hollow" : ""}`}
-                      style={{ background: CONTACT_COLOR[cls] }}
-                      title={`${floor.name} · ${contact.name} · ${CONTACT_LABEL[cls]}${
-                        contact.channelAddress ? ` · 접점 ${contact.channelAddress}` : ""
-                      } (${contact.currentStatus})`}
-                    />
+              <div className="full-monitoring__equipments">
+                {groups.map((group) => {
+                  const clickable = group.equipment !== null && onSelectEquipment !== undefined;
+                  const dots = group.contacts.map((contact) => {
+                    const cls = contactClass(contact);
+                    return (
+                      <i
+                        key={contact.id}
+                        className={`fm-dot ${cls === "SP" ? "hollow" : ""}`}
+                        style={{ background: CONTACT_COLOR[cls] }}
+                        title={`${contact.name} · ${CONTACT_LABEL[cls]}${
+                          contact.channelAddress ? ` · 접점 ${contact.channelAddress}` : ""
+                        } (${contact.currentStatus})`}
+                      />
+                    );
+                  });
+                  const title = group.equipment
+                    ? `${group.equipment.name} — 클릭하면 개별 제어`
+                    : "미지정 감시장비";
+                  return clickable ? (
+                    <button
+                      key={group.key}
+                      type="button"
+                      className="full-monitoring__equipment is-clickable"
+                      title={title}
+                      onClick={() => onSelectEquipment?.(group.equipment as DeviceListItem, floor)}
+                    >
+                      {dots}
+                    </button>
+                  ) : (
+                    <span key={group.key} className="full-monitoring__equipment" title={title}>
+                      {dots}
+                    </span>
                   );
                 })}
               </div>

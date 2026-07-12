@@ -371,6 +371,42 @@ body {
   flex: 1;
 }
 
+/* 감시장비(RMU) 단위 접점 클러스터 — 클릭 시 개별 제어로 이동 */
+.full-monitoring__equipments {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  gap: 6px;
+  padding: 5px 8px;
+  min-height: 24px;
+  flex: 1;
+}
+
+.full-monitoring__equipment {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 5px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+}
+
+.full-monitoring__equipment + .full-monitoring__equipment {
+  border-left: 1px solid #b9c2cc;
+}
+
+.full-monitoring__equipment.is-clickable {
+  cursor: pointer;
+}
+
+.full-monitoring__equipment.is-clickable:hover {
+  background: #ffffff;
+  border-color: #2563eb;
+  box-shadow: 0 1px 4px rgba(37, 99, 235, 0.25);
+}
+
 .fm-dot {
   width: 13px;
   height: 13px;
