@@ -51,7 +51,12 @@ pnpm --filter @smarthome/db seed             # 기본 시드(admin/admin1234)
 pnpm --filter @smarthome/db seed:building-sample  # 20층 샘플 데이터(권장)
 
 pnpm --filter @smarthome/api start           # :3000  (dist 실행 → 코드 변경 후 재빌드 필요)
+pnpm --filter @smarthome/gateway start       # MQTT ingest/command/ack (명령 완료·상태 반영에 필요)
 pnpm --filter @smarthome/web dev             # :5173
+
+# (선택) 데모: 실기기 없이 모든 제어 명령을 SUCCEEDED로 완료시키는 전역 목 응답기.
+#         게이트웨이는 브리지만 유지하고, 응답 위조는 시뮬레이터에서만 한다.
+SIM_MOCK_ALL=1 pnpm --filter @smarthome/device-simulator start
 ```
 
 - **로그인**: `admin` / `admin1234`.
