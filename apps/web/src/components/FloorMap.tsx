@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type Konva from "konva";
 import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } from "react-konva";
 import type { DeviceStatus } from "@smarthome/contracts";
@@ -77,6 +77,13 @@ function sensorLabel(device: DeviceListItem): string {
   return device.channelAddress ? `${device.channelAddress} ${device.name}` : device.name;
 }
 
+/** 접점(자식 센서)을 접점주소 기준으로 안정 정렬한다. */
+function sortContacts(sensors: DeviceListItem[]): DeviceListItem[] {
+  return [...sensors].sort((a, b) =>
+    (a.channelAddress ?? a.name).localeCompare(b.channelAddress ?? b.name, undefined, { numeric: true }),
+  );
+}
+
 interface FloorMapProps {
   overview: FloorOverview;
   selectedDeviceId: string | null;
@@ -103,11 +110,20 @@ export function FloorMap({
   const [scale, setScale] = useState(1);
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const [monitoringLevel, setMonitoringLevel] = useState<MonitoringLevel>("equipment");
-  // 드래그 중인 기기의 실시간 위치. 실시간 이벤트(WS) 등으로 드래그 도중 부모가 리렌더되면
-  // devicePosition()이 아직 커밋되지 않은 device.posX/posY(옛 값)로 되돌아가 Konva의 드래그 중
-  // 내부 위치와 충돌한다 — onDragMove로 이 state를 계속 갱신해 어떤 리렌더가 끼어들어도
-  // 항상 "드래그가 지금 있는 자리"를 좌표로 넘기게 한다.
+  // 지역(Area) 선택 — 선택 시 해당 지역 감시장비만 보여준다(요구: 지역 선택 → 감시장비 레벨).
+  const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
+  // 감시장비 호버 → 일괄 상태 툴팁. 클릭(접점별 패널)과 분리된 상호작용이다.
+  const [hoveredEquipmentId, setHoveredEquipmentId] = useState<string | null>(null);
+  // 감시장비 클릭 → 접점별 상태 패널 대상.
+  const [contactsEquipmentId, setContactsEquipmentId] = useState<string | null>(null);
   const [dragPreview, setDragPreview] = useState<{ id: string; x: number; y: number } | null>(null);
+
+  // 층이 바뀌면 지역/호버/접점 선택을 초기화한다(이전 층의 잔상 방지).
+  useEffect(() => {
+    setSelectedAreaId(null);
+    setHoveredEquipmentId(null);
+    setContactsEquipmentId(null);
+  }, [overview.floor.id]);
 
   const areasWithPoints = useMemo(
     () =>
@@ -143,15 +159,43 @@ export function FloorMap({
     return result;
   }, [sensors]);
 
-  const selectedEquipment =
-    monitoringLevel === "equipment"
-      ? equipments.find((device) => device.id === selectedDeviceId) ?? null
-      : null;
-  const selectedEquipmentSensors = selectedEquipment ? sensorsByEquipment.get(selectedEquipment.id) ?? [] : [];
-  const selectedEquipmentSummary = selectedEquipment
-    ? summarizeSensors(selectedEquipment, selectedEquipmentSensors)
+  // 지역 필터: 선택된 지역이 있으면 그 지역 소속 기기만 렌더한다.
+  const areaMatch = (device: DeviceListItem): boolean =>
+    selectedAreaId === null || device.areaId === selectedAreaId;
+  const visibleEquipments = useMemo(() => equipments.filter(areaMatch), [equipments, selectedAreaId]);
+  const visibleSensors = useMemo(() => sensors.filter(areaMatch), [sensors, selectedAreaId]);
+
+  const renderedDevices = monitoringLevel === "equipment" ? visibleEquipments : visibleSensors;
+
+  const hoveredEquipment = hoveredEquipmentId
+    ? equipments.find((device) => device.id === hoveredEquipmentId) ?? null
     : null;
-  const renderedDevices = monitoringLevel === "equipment" ? equipments : sensors;
+  const hoveredSummary = hoveredEquipment
+    ? summarizeSensors(hoveredEquipment, sensorsByEquipment.get(hoveredEquipment.id) ?? [])
+    : null;
+
+  const contactsEquipment = contactsEquipmentId
+    ? equipments.find((device) => device.id === contactsEquipmentId) ?? null
+    : null;
+  const contactsSensors = contactsEquipment
+    ? sortContacts(sensorsByEquipment.get(contactsEquipment.id) ?? [])
+    : [];
+  const contactsSummary = contactsEquipment
+    ? summarizeSensors(contactsEquipment, contactsSensors)
+    : null;
+
+  function selectArea(areaId: string | null): void {
+    setSelectedAreaId(areaId);
+    setContactsEquipmentId(null);
+    setHoveredEquipmentId(null);
+    // 요구: 지역을 선택하면 감시장비 레벨로 본다.
+    if (areaId !== null) setMonitoringLevel("equipment");
+  }
+
+  function setCursor(event: Konva.KonvaEventObject<MouseEvent>, cursor: string): void {
+    const container = event.target.getStage()?.container();
+    if (container) container.style.cursor = cursor;
+  }
 
   function handleWheel(event: Konva.KonvaEventObject<WheelEvent>): void {
     event.evt.preventDefault();
@@ -178,9 +222,24 @@ export function FloorMap({
     });
   }
 
+  const selectedAreaName = selectedAreaId
+    ? overview.areas.find((area) => area.id === selectedAreaId)?.name ?? null
+    : null;
+
   return (
     <div className="floor-map">
       <div className="floor-map__toolbar">
+        <label className="floor-map__area-select">
+          지역{" "}
+          <select value={selectedAreaId ?? ""} onChange={(e) => selectArea(e.target.value || null)}>
+            <option value="">전체</option>
+            {overview.areas.map((area) => (
+              <option key={area.id} value={area.id}>
+                {area.name}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="floor-map__level-toggle">
           <button
             type="button"
@@ -208,10 +267,16 @@ export function FloorMap({
         </button>
         <span>{Math.round(scale * 100)}%</span>
         <span className="floor-map__level-summary">
+          {selectedAreaName ? `${selectedAreaName} · ` : ""}
           {monitoringLevel === "equipment"
-            ? `감시장비 ${equipments.length}대 / 센서 ${sensors.length}개`
-            : `개별 센서 ${sensors.length}개`}
+            ? `감시장비 ${visibleEquipments.length}대 / 센서 ${visibleSensors.length}개`
+            : `개별 센서 ${visibleSensors.length}개`}
         </span>
+        {selectedAreaId && (
+          <button type="button" className="floor-map__area-clear" onClick={() => selectArea(null)}>
+            전체 보기
+          </button>
+        )}
       </div>
       <Stage
         ref={stageRef}
@@ -221,15 +286,9 @@ export function FloorMap({
         scaleY={scale}
         x={pos.x}
         y={pos.y}
-        // 편집 모드에서는 캔버스 팬과 마커 드래그가 같은 제스처를 두고 충돌한다(둘 다 draggable이면
-        // Stage가 드래그를 가로채 마커 대신 도면 전체가 팬됨) — 편집 모드에서는 팬을 비활성화한다.
         draggable={!editMode}
         onWheel={handleWheel}
         onDragEnd={(e) => {
-          // Konva 이벤트는 버블링된다 — 기기 Group의 dragend가 Stage까지 올라와 이 핸들러를
-          // 다시 태울 수 있다. 그때 e.target은 Stage가 아니라 그 Group이라 좌표가 기기 위치가
-          // 되어버려, 드롭 순간 도면이 그 기기 위치로 튀는 버그가 났다. Stage 자신의 드래그일
-          // 때만 처리한다.
           if (e.target !== e.target.getStage()) return;
           setPos({ x: e.target.x(), y: e.target.y() });
         }}
@@ -238,16 +297,24 @@ export function FloorMap({
           {image && <KonvaImage image={image} width={width} height={height} opacity={0.9} />}
         </Layer>
         <Layer>
-          {areasWithPoints.map(({ area, points }) => (
-            <Line
-              key={area.id}
-              points={points}
-              closed
-              fill="rgba(52, 152, 219, 0.12)"
-              stroke="#3498db"
-              strokeWidth={1.5}
-            />
-          ))}
+          {areasWithPoints.map(({ area, points }) => {
+            const isSelected = area.id === selectedAreaId;
+            const dimmed = selectedAreaId !== null && !isSelected;
+            return (
+              <Line
+                key={area.id}
+                points={points}
+                closed
+                fill={isSelected ? "rgba(37, 99, 235, 0.22)" : dimmed ? "rgba(148, 163, 184, 0.08)" : "rgba(52, 152, 219, 0.12)"}
+                stroke={isSelected ? "#2563eb" : "#3498db"}
+                strokeWidth={isSelected ? 2.5 : 1.5}
+                onMouseEnter={(e) => setCursor(e, "pointer")}
+                onMouseLeave={(e) => setCursor(e, "default")}
+                onClick={() => selectArea(isSelected ? null : area.id)}
+                onTap={() => selectArea(isSelected ? null : area.id)}
+              />
+            );
+          })}
           {areasWithPoints.map(({ area, points }) => (
             <Text
               key={`${area.id}-label`}
@@ -255,7 +322,9 @@ export function FloorMap({
               y={(points[1] ?? 0) - 18}
               text={area.name}
               fontSize={13}
-              fill="#2c3e50"
+              fontStyle={area.id === selectedAreaId ? "bold" : "normal"}
+              fill={area.id === selectedAreaId ? "#1d4ed8" : "#2c3e50"}
+              listening={false}
             />
           ))}
         </Layer>
@@ -265,64 +334,64 @@ export function FloorMap({
               dragPreview?.id === device.id
                 ? { x: dragPreview.x, y: dragPreview.y }
                 : devicePosition(device, index, pendingPositions[device.id]);
-            const selected = device.id === selectedDeviceId;
+            const isEquipment = device.deviceRole === "MONITORING_EQUIPMENT";
+            const selected = isEquipment
+              ? device.id === contactsEquipmentId
+              : device.id === selectedDeviceId;
+            const hovered = isEquipment && device.id === hoveredEquipmentId;
             const childSensors = sensorsByEquipment.get(device.id) ?? [];
-            const summary = device.deviceRole === "MONITORING_EQUIPMENT"
-              ? summarizeSensors(device, childSensors)
-              : null;
-            const markerColor = summary ? DEVICE_STATUS_COLOR[summary.status] : DEVICE_STATUS_COLOR[device.currentStatus];
+            const summary = isEquipment ? summarizeSensors(device, childSensors) : null;
+            const markerColor = summary
+              ? DEVICE_STATUS_COLOR[summary.status]
+              : DEVICE_STATUS_COLOR[device.currentStatus];
+            const emphasized = selected || hovered;
             return (
-              // Group 자체를 기기 좌표로 두고 드래그해야 Circle+Text가 함께 움직인다.
               <Group
                 key={device.id}
                 x={x}
                 y={y}
                 draggable={editMode}
                 dragBoundFunc={(absolutePos) => {
-                  // dragBoundFunc는 Stage 기준 절대좌표를 받는다 — 도면(Layer) 좌표로 변환해
-                  // [margin, width-margin] 범위로 클램프한 뒤 다시 절대좌표로 돌려준다.
                   const localX = (absolutePos.x - pos.x) / scale;
                   const localY = (absolutePos.y - pos.y) / scale;
-                  const clampedX = Math.min(
-                    Math.max(localX, MARKER_EDGE_MARGIN),
-                    width - MARKER_EDGE_MARGIN,
-                  );
-                  const clampedY = Math.min(
-                    Math.max(localY, MARKER_EDGE_MARGIN),
-                    height - MARKER_EDGE_MARGIN,
-                  );
-                  return {
-                    x: clampedX * scale + pos.x,
-                    y: clampedY * scale + pos.y,
-                  };
+                  const clampedX = Math.min(Math.max(localX, MARKER_EDGE_MARGIN), width - MARKER_EDGE_MARGIN);
+                  const clampedY = Math.min(Math.max(localY, MARKER_EDGE_MARGIN), height - MARKER_EDGE_MARGIN);
+                  return { x: clampedX * scale + pos.x, y: clampedY * scale + pos.y };
+                }}
+                onMouseEnter={(e) => {
+                  setCursor(e, "pointer");
+                  if (isEquipment) setHoveredEquipmentId(device.id);
+                }}
+                onMouseLeave={(e) => {
+                  setCursor(e, "default");
+                  if (isEquipment) setHoveredEquipmentId((current) => (current === device.id ? null : current));
                 }}
                 onDragMove={(e) => {
-                  e.cancelBubble = true; // Stage로 버블링되면 팬 핸들러가 오작동한다(아래 주석 참조)
+                  e.cancelBubble = true;
                   setDragPreview({ id: device.id, x: e.target.x(), y: e.target.y() });
                 }}
                 onDragEnd={(e) => {
                   e.cancelBubble = true;
                   setDragPreview(null);
                   onDeviceDragEnd?.(device.id, e.target.x(), e.target.y());
-                  // 프로그래밍적 위치 갱신 후 히트 그래프가 갱신되지 않아 다음 드래그가 안 먹는 사례 방지.
                   e.target.getStage()?.batchDraw();
                 }}
               >
-                {device.deviceRole === "MONITORING_EQUIPMENT" ? (
+                {isEquipment ? (
                   <>
                     <Rect
-                      x={selected ? -14 : -12}
-                      y={selected ? -14 : -12}
-                      width={selected ? 28 : 24}
-                      height={selected ? 28 : 24}
+                      x={emphasized ? -14 : -12}
+                      y={emphasized ? -14 : -12}
+                      width={emphasized ? 28 : 24}
+                      height={emphasized ? 28 : 24}
                       cornerRadius={5}
                       fill={markerColor}
-                      stroke={selected ? "#111827" : "#ffffff"}
-                      strokeWidth={selected ? 2.5 : 1.5}
+                      stroke={selected ? "#111827" : hovered ? "#2563eb" : "#ffffff"}
+                      strokeWidth={emphasized ? 2.5 : 1.5}
                       shadowColor="rgba(15, 23, 42, 0.35)"
-                      shadowBlur={6}
-                      onClick={() => onSelectDevice(device)}
-                      onTap={() => onSelectDevice(device)}
+                      shadowBlur={emphasized ? 9 : 6}
+                      onClick={() => !editMode && setContactsEquipmentId((cur) => (cur === device.id ? null : device.id))}
+                      onTap={() => !editMode && setContactsEquipmentId((cur) => (cur === device.id ? null : device.id))}
                     />
                     <Text
                       x={-22}
@@ -359,36 +428,95 @@ export function FloorMap({
               </Group>
             );
           })}
-          {selectedEquipment && selectedEquipmentSummary && (() => {
-            const selectedIndex = renderedDevices.findIndex((device) => device.id === selectedEquipment.id);
+          {/* 호버 툴팁 — 감시장비의 일괄 상태(집계)만 간결하게 보여준다. */}
+          {hoveredEquipment && hoveredSummary && (() => {
+            const hoveredIndex = renderedDevices.findIndex((device) => device.id === hoveredEquipment.id);
             const { x, y } = devicePosition(
-              selectedEquipment,
-              Math.max(selectedIndex, 0),
-              pendingPositions[selectedEquipment.id],
+              hoveredEquipment,
+              Math.max(hoveredIndex, 0),
+              pendingPositions[hoveredEquipment.id],
             );
-            const previewRows = selectedEquipmentSensors
-              .slice(0, 12)
-              .map((sensor) => `${sensor.channelAddress ?? "--"}  ${sensor.name}  ${sensor.currentStatus}`)
-              .join("\n");
-            const text = [
-              selectedEquipment.name,
-              `전체 ${selectedEquipmentSummary.total} / ON ${selectedEquipmentSummary.on} / OFF ${selectedEquipmentSummary.off}`,
-              selectedEquipmentSummary.alarm > 0 ? `ALARM ${selectedEquipmentSummary.alarm}` : null,
-              previewRows,
-              selectedEquipmentSensors.length > 12 ? `외 ${selectedEquipmentSensors.length - 12}개` : null,
-            ].filter(Boolean).join("\n");
+            const lines = [
+              hoveredEquipment.name,
+              `전체 ${hoveredSummary.total} · ON ${hoveredSummary.on} · OFF ${hoveredSummary.off}`,
+              [
+                hoveredSummary.warning > 0 ? `WARNING ${hoveredSummary.warning}` : null,
+                hoveredSummary.alarm > 0 ? `ALARM ${hoveredSummary.alarm}` : null,
+                hoveredSummary.offline > 0 ? `OFFLINE ${hoveredSummary.offline}` : null,
+              ].filter(Boolean).join(" · ") || "이상 없음",
+              "클릭하면 접점별 상태",
+            ];
+            const text = lines.join("\n");
             return (
-              <Group x={Math.min(x + 20, width - 260)} y={Math.max(y - 28, 12)} listening={false}>
-                <Rect width={250} height={88 + Math.min(selectedEquipmentSensors.length, 12) * 17} fill="#f0ffd8" stroke="#6b7280" strokeWidth={1.5} shadowBlur={5} shadowColor="rgba(0,0,0,0.18)" />
-                <Text x={10} y={9} width={230} text={text} fontSize={12} lineHeight={1.35} fill="#1f2937" />
+              <Group x={Math.min(x + 18, width - 210)} y={Math.max(y - 24, 10)} listening={false}>
+                <Rect width={200} height={78} cornerRadius={6} fill="#111827" opacity={0.92} shadowBlur={6} shadowColor="rgba(0,0,0,0.3)" />
+                <Rect x={0} y={0} width={200} height={4} cornerRadius={2} fill={DEVICE_STATUS_COLOR[hoveredSummary.status]} />
+                <Text x={12} y={12} width={176} text={text} fontSize={12} lineHeight={1.4} fill="#f9fafb" />
               </Group>
             );
           })()}
         </Layer>
       </Stage>
+
+      {/* 클릭 → 접점별 상태 패널. 선택된 감시장비의 자식 접점(센서)을 접점주소/단자/IO/상태로 나열. */}
+      {contactsEquipment && contactsSummary && (
+        <div className="floor-map__contacts">
+          <div className="floor-map__contacts-head">
+            <div>
+              <strong>{contactsEquipment.name}</strong>
+              <span className="floor-map__contacts-sub">
+                {contactsEquipment.channelAddress ? `${contactsEquipment.channelAddress} · ` : ""}
+                접점 {contactsSummary.total}개
+              </span>
+            </div>
+            <div className="floor-map__contacts-agg">
+              <span className="badge badge--on">ON {contactsSummary.on}</span>
+              <span className="badge badge--off">OFF {contactsSummary.off}</span>
+              {contactsSummary.warning > 0 && <span className="badge badge--warning">WARNING {contactsSummary.warning}</span>}
+              {contactsSummary.alarm > 0 && <span className="badge badge--alarm">ALARM {contactsSummary.alarm}</span>}
+              {contactsSummary.offline > 0 && <span className="badge badge--offline">OFFLINE {contactsSummary.offline}</span>}
+            </div>
+            <button type="button" className="floor-map__contacts-close" onClick={() => setContactsEquipmentId(null)}>
+              ✕
+            </button>
+          </div>
+          {contactsSensors.length === 0 ? (
+            <p className="floor-map__contacts-empty">이 감시장비에 등록된 접점이 없습니다.</p>
+          ) : (
+            <div className="floor-map__contacts-grid" role="table">
+              <div className="floor-map__contacts-row floor-map__contacts-row--head" role="row">
+                <span>상태</span>
+                <span>접점</span>
+                <span>단자</span>
+                <span>I/O</span>
+                <span>이름</span>
+              </div>
+              {contactsSensors.map((sensor) => (
+                <button
+                  key={sensor.id}
+                  type="button"
+                  role="row"
+                  className={`floor-map__contacts-row ${sensor.id === selectedDeviceId ? "active" : ""}`}
+                  onClick={() => onSelectDevice(sensor)}
+                >
+                  <span className="floor-map__contacts-status">
+                    <i style={{ background: DEVICE_STATUS_COLOR[sensor.currentStatus] }} aria-hidden="true" />
+                    {sensor.currentStatus}
+                  </span>
+                  <span>{sensor.channelAddress ?? "—"}</span>
+                  <span>{sensor.terminalBlock ?? "—"}</span>
+                  <span>{sensor.sensorIoType ?? "—"}</span>
+                  <span className="floor-map__contacts-name">{sensor.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {monitoringLevel === "sensor" && (
         <div className="floor-map__sensor-grid">
-          {sensors.map((sensor) => (
+          {visibleSensors.map((sensor) => (
             <button
               key={sensor.id}
               type="button"
