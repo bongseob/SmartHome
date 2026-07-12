@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import type { DeviceRole, SensorIoType, SensorSignalType } from "@smarthome/contracts";
 import {
   ApiError,
   createDevice,
@@ -6,6 +7,7 @@ import {
   getFloorOverview,
   listDevices,
   listFloors,
+  setDeviceMonitoring,
   updateDevice,
 } from "../lib/api";
 import type {
@@ -17,6 +19,12 @@ import type {
 import { ConnectionProtocolFields } from "./ConnectionProtocolFields";
 
 const CATEGORIES = ["DEVICE", "SENSOR", "GATEWAY"] as const;
+const DEVICE_ROLES: Array<{ value: DeviceRole; label: string }> = [
+  { value: "MONITORING_EQUIPMENT", label: "감시장비" },
+  { value: "SENSOR", label: "센서" },
+];
+const SENSOR_SIGNAL_TYPES: SensorSignalType[] = ["DIGITAL", "ANALOG"];
+const SENSOR_IO_TYPES: SensorIoType[] = ["DI", "DO", "AI", "AO"];
 
 export function DeviceAdmin(): JSX.Element {
   const [floors, setFloors] = useState<FloorSummary[]>([]);
@@ -29,13 +37,20 @@ export function DeviceAdmin(): JSX.Element {
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [category, setCategory] = useState<string>("DEVICE");
+  const [deviceRole, setDeviceRole] = useState<DeviceRole>("SENSOR");
   const [deviceType, setDeviceType] = useState("");
   const [manufacturer, setManufacturer] = useState("");
   const [model, setModel] = useState("");
   const [firmwareVersion, setFirmwareVersion] = useState("");
   const [areaId, setAreaId] = useState("");
   const [gatewayId, setGatewayId] = useState("");
+  const [parentDeviceId, setParentDeviceId] = useState("");
+  const [sensorSignalType, setSensorSignalType] = useState<SensorSignalType>("DIGITAL");
+  const [sensorIoType, setSensorIoType] = useState<SensorIoType>("DI");
+  const [channelAddress, setChannelAddress] = useState("");
+  const [terminalBlock, setTerminalBlock] = useState("");
   const [gateways, setGateways] = useState<DeviceListItem[]>([]);
+  const [monitoringEquipments, setMonitoringEquipments] = useState<DeviceListItem[]>([]);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
@@ -60,11 +75,19 @@ export function DeviceAdmin(): JSX.Element {
       .catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    listDevices()
+      .then((result) => setMonitoringEquipments(result.filter((device) => device.deviceRole === "MONITORING_EQUIPMENT")))
+      .catch(() => undefined);
+  }, []);
+
   const reloadOverview = useCallback((floorId: string) => {
-    getFloorOverview(floorId)
-      .then((result) => {
+    Promise.all([getFloorOverview(floorId), listDevices()])
+      .then(([result, allDevices]) => {
+        const areaIds = new Set(result.areas.map((area) => area.id));
+        setMonitoringEquipments(allDevices.filter((device) => device.deviceRole === "MONITORING_EQUIPMENT"));
         setOverview(result);
-        setDevices(result.devices);
+        setDevices(allDevices.filter((device) => device.areaId !== null && areaIds.has(device.areaId)));
         setLoadError(null);
       })
       .catch((err: unknown) =>
@@ -90,12 +113,18 @@ export function DeviceAdmin(): JSX.Element {
       code: code.trim(),
       name: name.trim(),
       category,
+      deviceRole,
       deviceType: deviceType.trim() || null,
       manufacturer: manufacturer.trim() || null,
       model: model.trim() || null,
       firmwareVersion: firmwareVersion.trim() || null,
       areaId,
       gatewayId: gatewayId || null,
+      parentDeviceId: deviceRole === "SENSOR" ? parentDeviceId || null : null,
+      sensorSignalType: deviceRole === "SENSOR" ? sensorSignalType : null,
+      sensorIoType: deviceRole === "SENSOR" ? sensorIoType : null,
+      channelAddress: deviceRole === "SENSOR" ? channelAddress.trim() || null : null,
+      terminalBlock: terminalBlock.trim() || null,
     };
 
     createDevice(body)
@@ -108,6 +137,9 @@ export function DeviceAdmin(): JSX.Element {
         setModel("");
         setFirmwareVersion("");
         setGatewayId("");
+        setParentDeviceId("");
+        setChannelAddress("");
+        setTerminalBlock("");
         if (selectedFloorId) reloadOverview(selectedFloorId);
       })
       .catch((err: unknown) =>
@@ -167,6 +199,20 @@ export function DeviceAdmin(): JSX.Element {
               </option>
             ))}
           </select>
+          <select
+            value={deviceRole}
+            onChange={(e) => {
+              const next = e.target.value as DeviceRole;
+              setDeviceRole(next);
+              setCategory(next === "MONITORING_EQUIPMENT" ? "GATEWAY" : "SENSOR");
+            }}
+          >
+            {DEVICE_ROLES.map((role) => (
+              <option key={role.value} value={role.value}>
+                {role.label}
+              </option>
+            ))}
+          </select>
           <select value={areaId} onChange={(e) => setAreaId(e.target.value)}>
             <option value="">Area 선택 (필수)</option>
             {areas.map((a) => (
@@ -187,6 +233,41 @@ export function DeviceAdmin(): JSX.Element {
               </option>
             ))}
           </select>
+          {deviceRole === "SENSOR" && (
+            <>
+              <select value={parentDeviceId} onChange={(e) => setParentDeviceId(e.target.value)}>
+                <option value="">상위 감시장비 (선택)</option>
+                {monitoringEquipments.map((equipment) => (
+                  <option key={equipment.id} value={equipment.id}>
+                    {equipment.name} ({equipment.code})
+                  </option>
+                ))}
+              </select>
+              <select value={sensorSignalType} onChange={(e) => setSensorSignalType(e.target.value as SensorSignalType)}>
+                {SENSOR_SIGNAL_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type === "DIGITAL" ? "디지털" : "아날로그"}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={sensorIoType}
+                onChange={(e) => {
+                  const next = e.target.value as SensorIoType;
+                  setSensorIoType(next);
+                  setSensorSignalType(next.startsWith("D") ? "DIGITAL" : "ANALOG");
+                }}
+              >
+                {SENSOR_IO_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+              <input placeholder="ADDR (예: 06)" value={channelAddress} onChange={(e) => setChannelAddress(e.target.value)} />
+            </>
+          )}
+          <input placeholder="분전함/단자함 (예: A-20-1)" value={terminalBlock} onChange={(e) => setTerminalBlock(e.target.value)} />
         </div>
         {createError && <p className="error-text">{createError}</p>}
         <button type="button" className="primary" onClick={handleCreate} disabled={creating}>
@@ -200,9 +281,15 @@ export function DeviceAdmin(): JSX.Element {
           <tr>
             <th>이름</th>
             <th>code</th>
+            <th>구분</th>
+            <th>상위 감시장비</th>
+            <th>ADDR</th>
+            <th>I/O</th>
             <th>카테고리</th>
             <th>mqtt_topic</th>
             <th>lifecycle</th>
+            <th>모니터링</th>
+            <th>사용</th>
             <th>연결</th>
             <th></th>
           </tr>
@@ -223,6 +310,7 @@ export function DeviceAdmin(): JSX.Element {
               onUpdated={() => {
                 if (selectedFloorId) reloadOverview(selectedFloorId);
               }}
+              monitoringEquipments={monitoringEquipments}
             />
           ))}
         </tbody>
@@ -238,6 +326,7 @@ interface DeviceRowProps {
   showConnection: boolean;
   onConnectionSaved: () => void;
   onUpdated: () => void;
+  monitoringEquipments: DeviceListItem[];
 }
 
 function DeviceRow({
@@ -247,6 +336,7 @@ function DeviceRow({
   showConnection,
   onConnectionSaved,
   onUpdated,
+  monitoringEquipments,
 }: DeviceRowProps): JSX.Element {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(device.name);
@@ -254,6 +344,11 @@ function DeviceRow({
   const [manufacturer, setManufacturer] = useState(device.manufacturer ?? "");
   const [model, setModel] = useState(device.model ?? "");
   const [firmwareVersion, setFirmwareVersion] = useState(device.firmwareVersion ?? "");
+  const [parentDeviceId, setParentDeviceId] = useState(device.parentDeviceId ?? "");
+  const [sensorSignalType, setSensorSignalType] = useState<SensorSignalType>(device.sensorSignalType ?? "DIGITAL");
+  const [sensorIoType, setSensorIoType] = useState<SensorIoType>(device.sensorIoType ?? "DI");
+  const [channelAddress, setChannelAddress] = useState(device.channelAddress ?? "");
+  const [terminalBlock, setTerminalBlock] = useState(device.terminalBlock ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -266,6 +361,11 @@ function DeviceRow({
       manufacturer: manufacturer.trim() || null,
       model: model.trim() || null,
       firmwareVersion: firmwareVersion.trim() || null,
+      parentDeviceId: device.deviceRole === "SENSOR" ? parentDeviceId || null : undefined,
+      sensorSignalType: device.deviceRole === "SENSOR" ? sensorSignalType : undefined,
+      sensorIoType: device.deviceRole === "SENSOR" ? sensorIoType : undefined,
+      channelAddress: device.deviceRole === "SENSOR" ? channelAddress.trim() || null : undefined,
+      terminalBlock: terminalBlock.trim() || null,
     })
       .then(() => {
         setEditing(false);
@@ -290,11 +390,72 @@ function DeviceRow({
           )}
         </td>
         <td className="device-admin__code">{device.code}</td>
+        <td>{device.deviceRole === "MONITORING_EQUIPMENT" ? "감시장비" : "센서"}</td>
+        <td>
+          {editing && device.deviceRole === "SENSOR" ? (
+            <select value={parentDeviceId} onChange={(e) => setParentDeviceId(e.target.value)}>
+              <option value="">미지정</option>
+              {monitoringEquipments.map((equipment) => (
+                <option key={equipment.id} value={equipment.id}>
+                  {equipment.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            monitoringEquipments.find((equipment) => equipment.id === device.parentDeviceId)?.name ?? "—"
+          )}
+        </td>
+        <td>
+          {editing && device.deviceRole === "SENSOR" ? (
+            <input value={channelAddress} onChange={(e) => setChannelAddress(e.target.value)} />
+          ) : (
+            device.channelAddress ?? "—"
+          )}
+        </td>
+        <td>
+          {editing && device.deviceRole === "SENSOR" ? (
+            <div className="device-admin__inline-fields">
+              <select value={sensorSignalType} onChange={(e) => setSensorSignalType(e.target.value as SensorSignalType)}>
+                {SENSOR_SIGNAL_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={sensorIoType}
+                onChange={(e) => {
+                  const next = e.target.value as SensorIoType;
+                  setSensorIoType(next);
+                  setSensorSignalType(next.startsWith("D") ? "DIGITAL" : "ANALOG");
+                }}
+              >
+                {SENSOR_IO_TYPES.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            device.sensorIoType ?? "—"
+          )}
+        </td>
         <td>{device.category}</td>
         <td className="device-admin__topic">{device.mqttTopic}</td>
         <td>
           <span className={`lifecycle-badge lifecycle-badge--${device.lifecycleStatus.toLowerCase()}`}>
             {device.lifecycleStatus}
+          </span>
+        </td>
+        <td>
+          <span className={device.monitoringVisible ? "status-chip status-chip--ok" : "status-chip status-chip--muted"}>
+            {device.monitoringVisible ? "표시" : "숨김"}
+          </span>
+        </td>
+        <td>
+          <span className={device.enabled ? "status-chip status-chip--ok" : "status-chip status-chip--muted"}>
+            {device.enabled ? "사용" : "미사용"}
           </span>
         </td>
         <td>{device.connectionProtocol ?? "—"}</td>
@@ -312,6 +473,11 @@ function DeviceRow({
                   setManufacturer(device.manufacturer ?? "");
                   setModel(device.model ?? "");
                   setFirmwareVersion(device.firmwareVersion ?? "");
+                  setParentDeviceId(device.parentDeviceId ?? "");
+                  setSensorSignalType(device.sensorSignalType ?? "DIGITAL");
+                  setSensorIoType(device.sensorIoType ?? "DI");
+                  setChannelAddress(device.channelAddress ?? "");
+                  setTerminalBlock(device.terminalBlock ?? "");
                   setEditing(false);
                 }}
               >
@@ -326,6 +492,34 @@ function DeviceRow({
               <button type="button" onClick={onToggleConnection} disabled={isDecommissioned}>
                 연결 설정
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setDeviceMonitoring(device.id, { monitoringVisible: !device.monitoringVisible })
+                    .then(onUpdated)
+                    .catch((err: unknown) =>
+                      setError(err instanceof ApiError ? err.detail : "모니터링 표시 변경에 실패했습니다."),
+                    );
+                }}
+                disabled={isDecommissioned}
+              >
+                {device.monitoringVisible ? "숨김" : "표시"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setDeviceMonitoring(device.id, { enabled: !device.enabled })
+                    .then(onUpdated)
+                    .catch((err: unknown) =>
+                      setError(err instanceof ApiError ? err.detail : "사용 여부 변경에 실패했습니다."),
+                    );
+                }}
+                disabled={isDecommissioned}
+              >
+                {device.enabled ? "미사용" : "사용"}
+              </button>
               <button type="button" onClick={onDecommission} disabled={isDecommissioned}>
                 폐기
               </button>
@@ -336,7 +530,7 @@ function DeviceRow({
       </tr>
       {showConnection && (
         <tr className="device-admin__connection-row">
-          <td colSpan={7}>
+          <td colSpan={13}>
             <ConnectionProtocolFields
               deviceId={device.id}
               currentProtocol={device.connectionProtocol}

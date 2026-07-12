@@ -1,11 +1,14 @@
 import type {
   DeviceCategory,
   DeviceLifecycle,
+  DeviceRole,
   DeviceStatus,
   ExecutionStatus,
   Role,
   ScheduleRunStatus,
   ScheduleType,
+  SensorIoType,
+  SensorSignalType,
   TargetType,
 } from "@smarthome/contracts";
 
@@ -38,6 +41,15 @@ export interface FloorSummary {
   floorMapScale: string | null;
 }
 
+export interface ImageRecord {
+  id: string;
+  name: string;
+  imageUrl: string;
+  widthPx: number | null;
+  heightPx: number | null;
+  uploadedAt: string;
+}
+
 export interface Area {
   id: string;
   floorId: string;
@@ -53,6 +65,7 @@ export interface DeviceListItem {
   code: string;
   name: string;
   category: DeviceCategory;
+  deviceRole: DeviceRole;
   deviceType: string | null;
   manufacturer: string | null;
   model: string | null;
@@ -60,6 +73,13 @@ export interface DeviceListItem {
   mqttTopic: string;
   currentStatus: DeviceStatus;
   lifecycleStatus: DeviceLifecycle;
+  monitoringVisible: boolean;
+  enabled: boolean;
+  parentDeviceId: string | null;
+  sensorSignalType: SensorSignalType | null;
+  sensorIoType: SensorIoType | null;
+  channelAddress: string | null;
+  terminalBlock: string | null;
   areaId: string | null;
   areaTopicPrefix: string | null;
   posX: string | null;
@@ -76,12 +96,18 @@ export interface CreateDeviceRequest {
   code: string;
   name: string;
   category: string;
+  deviceRole?: DeviceRole;
   deviceType?: string | null;
   manufacturer?: string | null;
   model?: string | null;
   firmwareVersion?: string | null;
   areaId: string;
   gatewayId?: string | null;
+  parentDeviceId?: string | null;
+  sensorSignalType?: SensorSignalType | null;
+  sensorIoType?: SensorIoType | null;
+  channelAddress?: string | null;
+  terminalBlock?: string | null;
 }
 
 export interface UpdateDeviceRequest {
@@ -91,12 +117,22 @@ export interface UpdateDeviceRequest {
   model?: string | null;
   firmwareVersion?: string | null;
   gatewayId?: string | null;
+  parentDeviceId?: string | null;
+  sensorSignalType?: SensorSignalType | null;
+  sensorIoType?: SensorIoType | null;
+  channelAddress?: string | null;
+  terminalBlock?: string | null;
 }
 
 export interface SetDeviceConnectionRequest {
   /** null이면 설정 해제(레거시/직결 MQTT 기기로 되돌림). */
   protocol: string | null;
   config?: unknown;
+}
+
+export interface SetDeviceMonitoringRequest {
+  monitoringVisible?: boolean;
+  enabled?: boolean;
 }
 
 export interface FloorOverview {
@@ -121,6 +157,42 @@ export interface CommandCreateResponse {
   commandId: string;
   status: ExecutionStatus;
   published?: boolean;
+}
+
+export interface CommandRecord {
+  commandId: string;
+  status: ExecutionStatus;
+  targetId: string;
+  command: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface GroupControlSummary {
+  id: string;
+  slug: string;
+  name: string;
+  isDynamic: boolean;
+  totalCount: number;
+  onCount: number;
+  offCount: number;
+  unknownCount: number;
+}
+
+export interface GroupCommandItem {
+  deviceId: string;
+  commandId?: string;
+  status?: ExecutionStatus;
+  published?: boolean;
+  error?: string;
+}
+
+export interface GroupCommandResponse {
+  groupId: string;
+  command: string;
+  intervalMs: number;
+  count: number;
+  results: GroupCommandItem[];
 }
 
 // ─── Scheduler (M16 Admin — SRS 2.1.4, 백엔드는 M10에서 완료) ────────────

@@ -1,4 +1,5 @@
-import type { DeviceStatus } from "@smarthome/contracts";
+import type { ActorType, DeviceStatus, ExecutionStatus } from "@smarthome/contracts";
+import type { QueryResultRow } from "./pool.js";
 import { query } from "./pool.js";
 
 /**
@@ -11,11 +12,103 @@ export async function getDeviceIdByCode(code: string): Promise<string | null> {
   return r.rows[0]?.id ?? null;
 }
 
-export async function setDeviceStatus(code: string, status: DeviceStatus): Promise<void> {
-  await query("UPDATE device SET current_status = $1, updated_at = now() WHERE code = $2", [
-    status,
-    code,
-  ]);
+export interface DeviceStatusUpdateResult {
+  deviceId: string | null;
+  previousStatus: DeviceStatus | null;
+  currentStatus: DeviceStatus | null;
+  changed: boolean;
+}
+
+interface DeviceStatusUpdateRow extends QueryResultRow {
+  device_id: string | null;
+  previous_status: DeviceStatus | null;
+  current_status: DeviceStatus | null;
+  changed: boolean;
+}
+
+export async function setDeviceStatus(
+  code: string,
+  status: DeviceStatus,
+): Promise<DeviceStatusUpdateResult> {
+  const r = await query<DeviceStatusUpdateRow>(
+    `WITH before AS (
+       SELECT id::text, current_status
+       FROM device
+       WHERE code = $2
+     ),
+     updated AS (
+       UPDATE device
+       SET current_status = $1, updated_at = now()
+       WHERE code = $2
+         AND current_status IS DISTINCT FROM $1
+       RETURNING id::text, current_status
+     )
+     SELECT
+       before.id AS device_id,
+       before.current_status AS previous_status,
+       COALESCE(updated.current_status, before.current_status) AS current_status,
+       (updated.id IS NOT NULL) AS changed
+     FROM before
+     LEFT JOIN updated ON true`,
+    [status, code],
+  );
+  const row = r.rows[0];
+  return {
+    deviceId: row?.device_id ?? null,
+    previousStatus: row?.previous_status ?? null,
+    currentStatus: row?.current_status ?? null,
+    changed: row?.changed ?? false,
+  };
+}
+
+export interface IntentionalStateCommand {
+  commandId: string;
+  command: string;
+  actorType: ActorType;
+  status: ExecutionStatus;
+}
+
+interface IntentionalStateCommandRow extends QueryResultRow {
+  command_id: string;
+  command: string;
+  actor_type: ActorType;
+  status: ExecutionStatus;
+}
+
+function commandsForStatus(status: DeviceStatus): string[] {
+  if (status === "ON") return ["turn_on", "on"];
+  if (status === "OFF") return ["turn_off", "off"];
+  return [];
+}
+
+export async function findRecentIntentionalStateCommand(
+  deviceId: string,
+  status: DeviceStatus,
+  windowMs: number,
+): Promise<IntentionalStateCommand | null> {
+  const commands = commandsForStatus(status);
+  if (commands.length === 0) return null;
+  const r = await query<IntentionalStateCommandRow>(
+    `SELECT command_id, command, actor_type, status
+     FROM command
+     WHERE target_type = 'DEVICE'
+       AND target_id::text = $1
+       AND command = ANY($2::text[])
+       AND status IN ('PENDING', 'IN_PROGRESS', 'SUCCEEDED')
+       AND updated_at >= now() - ($3::int * interval '1 millisecond')
+     ORDER BY updated_at DESC
+     LIMIT 1`,
+    [deviceId, commands, Math.trunc(windowMs)],
+  );
+  const row = r.rows[0];
+  return row
+    ? {
+        commandId: row.command_id,
+        command: row.command,
+        actorType: row.actor_type,
+        status: row.status,
+      }
+    : null;
 }
 
 export interface TelemetryRow {
@@ -48,4 +141,25 @@ export async function raiseOfflineAlarm(deviceId: string, message: string): Prom
      VALUES ($1, 'REACTIVE', 'WARNING', $2, 'RAISED')`,
     [deviceId, message],
   );
+}
+
+export async function raiseUnexpectedStateChangeAlarm(
+  deviceId: string,
+  message: string,
+  severity: "WARNING" | "CRITICAL" = "WARNING",
+): Promise<boolean> {
+  const r = await query<{ id: string }>(
+    `INSERT INTO alarm_log (device_id, tier, severity, message, state)
+     SELECT $1, 'REACTIVE', $3::severity, $2, 'RAISED'
+     WHERE NOT EXISTS (
+       SELECT 1
+       FROM alarm_log
+       WHERE device_id = $1
+         AND state IN ('RAISED', 'ACK', 'SNOOZED')
+         AND message = $2
+     )
+     RETURNING id::text`,
+    [deviceId, message, severity],
+  );
+  return r.rows.length > 0;
 }

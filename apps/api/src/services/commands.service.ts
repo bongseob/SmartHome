@@ -20,7 +20,7 @@ import {
   getDeviceAccessLevel,
   getDeviceState,
   getSequentialIntervalMs,
-  listGroupDeviceIds,
+  listDevices,
   query,
 } from "@smarthome/db";
 
@@ -171,7 +171,16 @@ export class CommandsService implements OnModuleInit, OnModuleDestroy {
     }
     const groupId = body.target.id;
 
-    const deviceIds = await listGroupDeviceIds(commandExecutor, groupId);
+    const groupDevices = await listDevices(commandExecutor, { groupId });
+    const deviceIds = groupDevices
+      .filter(
+        (device) =>
+          device.deviceRole === "SENSOR" &&
+          device.monitoringVisible &&
+          device.enabled &&
+          device.lifecycleStatus !== "DECOMMISSIONED",
+      )
+      .map((device) => device.id);
     if (deviceIds.length === 0) {
       throw new NotFoundException(`group not found or has no devices: ${groupId}`);
     }

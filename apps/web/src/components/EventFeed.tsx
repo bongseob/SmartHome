@@ -9,7 +9,9 @@ export interface FeedEntry {
 function describe(event: RealtimeEvent): { text: string; color?: string } {
   switch (event.type) {
     case "device.state":
-      return { text: `${event.deviceCode} → ${event.status}` };
+      return {
+        text: `${event.deviceCode} → ${event.status}${event.originLabel ? ` · ${event.originLabel}` : ""}`,
+      };
     case "command.status":
       return { text: `명령 ${event.commandId.slice(0, 12)}… → ${event.status}` };
     case "alarm.raised":

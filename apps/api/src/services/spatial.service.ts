@@ -8,6 +8,7 @@ import {
   getAreaById,
   getDeviceState,
   getFloorOverview,
+  getImageById,
   insertAuditLog,
   insertFloorMap,
   listBuildings,
@@ -340,6 +341,64 @@ export class SpatialService {
       commandId: null,
       });
       return updated;
+    });
+  }
+
+  /**
+   * 등록된 이미지 라이브러리 항목을 층 배경으로 매핑한다.
+   * 이미지 업로드는 `/api/v1/images`에서 image 기본정보만 저장하고, 여기서 별도 매핑 과정을 거친다.
+   */
+  async assignFloorMapImage(
+    floorId: string,
+    imageId: string,
+    scaleMPerPx: number,
+    auth: AuthContext,
+  ): Promise<unknown> {
+    if (typeof imageId !== "string" || imageId.trim().length === 0) {
+      throw new BadRequestException("imageId is required");
+    }
+    if (!Number.isFinite(scaleMPerPx) || scaleMPerPx <= 0) {
+      throw new BadRequestException("scaleMPerPx must be a positive number");
+    }
+
+    const floors = await listFloors(executor);
+    const floor = floors.find((f) => f.id === floorId);
+    if (!floor) {
+      throw new NotFoundException(`floor not found: ${floorId}`);
+    }
+
+    return withTransaction(async (client) => {
+      const image = await getImageById(client, imageId);
+      if (!image) {
+        throw new NotFoundException(`image not found: ${imageId}`);
+      }
+      if (!image.widthPx || !image.heightPx) {
+        throw new BadRequestException("image width/height metadata is required before mapping");
+      }
+
+      const floorMap = await insertFloorMap(client, {
+        imageUrl: image.imageUrl,
+        widthPx: image.widthPx,
+        heightPx: image.heightPx,
+        scaleMPerPx,
+        uploadedBy: auth.userId,
+      });
+      await setFloorFloorMap(client, floorId, floorMap.id);
+      await insertAuditLog(client, {
+      actorType: "ADMIN",
+      actorId: auth.userId,
+      targetType: "FLOOR",
+      targetId: floorId,
+      command: "FLOOR_MAP_ASSIGN_IMAGE",
+      reason: `image ${image.id} '${image.name}' → floor_map ${floorMap.id}, 이전 floor_map ${floor.floorMapId ?? "null"}`,
+      executionStatus: "SUCCEEDED",
+      mqttReasonCode: null,
+      sessionId: null,
+      commandId: null,
+      });
+
+      const updatedFloors = await listFloors(client);
+      return updatedFloors.find((f) => f.id === floorId);
     });
   }
 

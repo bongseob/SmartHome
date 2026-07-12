@@ -1,5 +1,4 @@
 ﻿import {
-  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -7,50 +6,10 @@
   Param,
   Patch,
   Post,
-  UploadedFile,
-  UseInterceptors,
 } from "@nestjs/common";
-import { FileInterceptor } from "@nestjs/platform-express";
-import { diskStorage } from "multer";
-import { randomUUID } from "node:crypto";
-import { open, unlink } from "node:fs/promises";
-import { extname } from "node:path";
 import type { AuthContext } from "@smarthome/auth";
 import { CurrentAuth, Roles } from "../auth/auth.decorators.js";
 import { SpatialService, type SaveLayoutRequest } from "../services/spatial.service.js";
-import { ensureFloorMapsDir } from "../config/uploads.js";
-
-const ALLOWED_IMAGE_TYPES = new Map([
-  [".png", "image/png"],
-  [".jpg", "image/jpeg"],
-  [".jpeg", "image/jpeg"],
-  [".webp", "image/webp"],
-]);
-
-async function hasValidImageSignature(path: string, extension: string): Promise<boolean> {
-  const handle = await open(path, "r");
-  try {
-    const header = Buffer.alloc(12);
-    const { bytesRead } = await handle.read(header, 0, header.length, 0);
-    if (extension === ".png") {
-      return bytesRead >= 8 && header.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-    }
-    if (extension === ".jpg" || extension === ".jpeg") {
-      return bytesRead >= 3 && header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff;
-    }
-    if (extension === ".webp") {
-      return bytesRead >= 12 && header.toString("ascii", 0, 4) === "RIFF" && header.toString("ascii", 8, 12) === "WEBP";
-    }
-    return false;
-  } finally {
-    await handle.close();
-  }
-}
-
-const floorMapStorage = diskStorage({
-  destination: (_req, _file, cb) => cb(null, ensureFloorMapsDir()),
-  filename: (_req, file, cb) => cb(null, `${randomUUID()}${extname(file.originalname).toLowerCase()}`),
-});
 
 @Controller("api/v1/spatial")
 export class SpatialController {
@@ -118,48 +77,6 @@ export class SpatialController {
    * 파싱하지 않는다 — 별도 이미지 라이브러리 의존성 없이 단순화).
    */
   @Roles("ADMIN")
-  @Post("floors/:id/floor-map")
-  @UseInterceptors(
-    FileInterceptor("file", {
-      storage: floorMapStorage,
-      limits: { fileSize: 10 * 1024 * 1024 },
-      fileFilter: (_req, file, cb) => {
-        const extension = extname(file.originalname).toLowerCase();
-        cb(null, ALLOWED_IMAGE_TYPES.get(extension) === file.mimetype);
-      },
-    }),
-  )
-  async uploadFloorMap(
-    @Param("id") id: string,
-    @UploadedFile() file: Express.Multer.File | undefined,
-    @Body() body: { widthPx: string; heightPx: string; scaleMPerPx: string },
-    @CurrentAuth() auth: AuthContext,
-  ): Promise<unknown> {
-    if (!file) {
-      throw new BadRequestException("file is required (png/jpg/jpeg/webp only)");
-    }
-    const extension = extname(file.originalname).toLowerCase();
-    try {
-      if (!(await hasValidImageSignature(file.path, extension))) {
-        throw new BadRequestException("uploaded file content does not match its image extension");
-      }
-      return await this.spatial.uploadFloorMap(
-        id,
-        `/uploads/floor-maps/${file.filename}`,
-        {
-          widthPx: Number(body.widthPx),
-          heightPx: Number(body.heightPx),
-          scaleMPerPx: Number(body.scaleMPerPx),
-        },
-        auth,
-      );
-    } catch (error) {
-      await unlink(file.path).catch(() => undefined);
-      throw error;
-    }
-  }
-
-  @Roles("ADMIN")
   @Patch("floor-maps/:id")
   updateFloorMapScale(
     @Param("id") id: string,
@@ -167,6 +84,17 @@ export class SpatialController {
     @CurrentAuth() auth: AuthContext,
   ): Promise<unknown> {
     return this.spatial.updateFloorMapScale(id, Number(body.scaleMPerPx), auth);
+  }
+
+  /** 등록된 이미지 라이브러리 항목을 별도 매핑 과정으로 층 배경 도면에 적용한다. */
+  @Roles("ADMIN")
+  @Patch("floors/:id/floor-map-image")
+  assignFloorMapImage(
+    @Param("id") id: string,
+    @Body() body: { imageId: string; scaleMPerPx: number },
+    @CurrentAuth() auth: AuthContext,
+  ): Promise<unknown> {
+    return this.spatial.assignFloorMapImage(id, body.imageId, Number(body.scaleMPerPx), auth);
   }
 
   /** 지역(Area) 관리(M16, SRS 2.1.1) — 생성/수정/삭제. ADMIN 전용, 감사 대상. */

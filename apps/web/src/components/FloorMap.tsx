@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import type Konva from "konva";
-import { Circle, Group, Image as KonvaImage, Layer, Line, Stage, Text } from "react-konva";
+import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } from "react-konva";
+import type { DeviceStatus } from "@smarthome/contracts";
 import type { Area, DeviceListItem, FloorOverview } from "../lib/types";
 import { DEVICE_STATUS_COLOR } from "../lib/status";
 import { apiAssetUrl } from "../lib/api";
@@ -12,6 +13,17 @@ const MIN_SCALE = 0.3;
 const MAX_SCALE = 4;
 /** 마커가 도면 밖으로 나가지 않도록 반지름+여백만큼 안쪽으로 제한한다. */
 const MARKER_EDGE_MARGIN = 12;
+type MonitoringLevel = "equipment" | "sensor";
+
+interface EquipmentSummary {
+  total: number;
+  on: number;
+  off: number;
+  warning: number;
+  alarm: number;
+  offline: number;
+  status: DeviceStatus;
+}
 
 function polygonPoints(polygon: unknown): number[] | null {
   if (!Array.isArray(polygon)) return null;
@@ -36,6 +48,33 @@ function devicePosition(
   if (Number.isFinite(x) && Number.isFinite(y)) return { x, y };
   // 좌표가 없는 기기는 좌상단부터 줄지어 배치해 최소한 보이게 한다.
   return { x: 24 + (fallbackIndex % 6) * 32, y: 24 + Math.floor(fallbackIndex / 6) * 32 };
+}
+
+function isActiveMonitoringDevice(device: DeviceListItem): boolean {
+  return device.monitoringVisible && device.enabled && device.lifecycleStatus !== "DECOMMISSIONED";
+}
+
+function summarizeSensors(equipment: DeviceListItem, sensors: DeviceListItem[]): EquipmentSummary {
+  const total = sensors.length;
+  const on = sensors.filter((device) => device.currentStatus === "ON").length;
+  const off = sensors.filter((device) => device.currentStatus === "OFF").length;
+  const warning = sensors.filter((device) => device.currentStatus === "WARNING").length;
+  const alarm = sensors.filter((device) => device.currentStatus === "ALARM").length;
+  const offline = sensors.filter((device) => device.currentStatus === "OFFLINE").length;
+  let status: DeviceStatus = equipment.currentStatus;
+  if (total > 0) {
+    if (alarm > 0) status = "ALARM";
+    else if (warning > 0) status = "WARNING";
+    else if (offline > 0) status = "OFFLINE";
+    else if (on === total) status = "ON";
+    else if (off === total) status = "OFF";
+    else status = "WARNING";
+  }
+  return { total, on, off, warning, alarm, offline, status };
+}
+
+function sensorLabel(device: DeviceListItem): string {
+  return device.channelAddress ? `${device.channelAddress} ${device.name}` : device.name;
 }
 
 interface FloorMapProps {
@@ -63,6 +102,7 @@ export function FloorMap({
   const stageRef = useRef<Konva.Stage>(null);
   const [scale, setScale] = useState(1);
   const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [monitoringLevel, setMonitoringLevel] = useState<MonitoringLevel>("equipment");
   // 드래그 중인 기기의 실시간 위치. 실시간 이벤트(WS) 등으로 드래그 도중 부모가 리렌더되면
   // devicePosition()이 아직 커밋되지 않은 device.posX/posY(옛 값)로 되돌아가 Konva의 드래그 중
   // 내부 위치와 충돌한다 — onDragMove로 이 state를 계속 갱신해 어떤 리렌더가 끼어들어도
@@ -76,6 +116,42 @@ export function FloorMap({
         .filter((entry): entry is { area: Area; points: number[] } => entry.points !== null),
     [overview.areas],
   );
+
+  const activeDevices = useMemo(
+    () => overview.devices.filter(isActiveMonitoringDevice),
+    [overview.devices],
+  );
+
+  const sensors = useMemo(
+    () => activeDevices.filter((device) => device.deviceRole === "SENSOR"),
+    [activeDevices],
+  );
+
+  const equipments = useMemo(
+    () => activeDevices.filter((device) => device.deviceRole === "MONITORING_EQUIPMENT"),
+    [activeDevices],
+  );
+
+  const sensorsByEquipment = useMemo(() => {
+    const result = new Map<string, DeviceListItem[]>();
+    for (const sensor of sensors) {
+      if (!sensor.parentDeviceId) continue;
+      const current = result.get(sensor.parentDeviceId) ?? [];
+      current.push(sensor);
+      result.set(sensor.parentDeviceId, current);
+    }
+    return result;
+  }, [sensors]);
+
+  const selectedEquipment =
+    monitoringLevel === "equipment"
+      ? equipments.find((device) => device.id === selectedDeviceId) ?? null
+      : null;
+  const selectedEquipmentSensors = selectedEquipment ? sensorsByEquipment.get(selectedEquipment.id) ?? [] : [];
+  const selectedEquipmentSummary = selectedEquipment
+    ? summarizeSensors(selectedEquipment, selectedEquipmentSensors)
+    : null;
+  const renderedDevices = monitoringLevel === "equipment" ? equipments : sensors;
 
   function handleWheel(event: Konva.KonvaEventObject<WheelEvent>): void {
     event.evt.preventDefault();
@@ -105,6 +181,22 @@ export function FloorMap({
   return (
     <div className="floor-map">
       <div className="floor-map__toolbar">
+        <div className="floor-map__level-toggle">
+          <button
+            type="button"
+            className={monitoringLevel === "equipment" ? "active" : ""}
+            onClick={() => setMonitoringLevel("equipment")}
+          >
+            감시장비
+          </button>
+          <button
+            type="button"
+            className={monitoringLevel === "sensor" ? "active" : ""}
+            onClick={() => setMonitoringLevel("sensor")}
+          >
+            개별 센서
+          </button>
+        </div>
         <button
           type="button"
           onClick={() => {
@@ -115,6 +207,11 @@ export function FloorMap({
           초기화
         </button>
         <span>{Math.round(scale * 100)}%</span>
+        <span className="floor-map__level-summary">
+          {monitoringLevel === "equipment"
+            ? `감시장비 ${equipments.length}대 / 센서 ${sensors.length}개`
+            : `개별 센서 ${sensors.length}개`}
+        </span>
       </div>
       <Stage
         ref={stageRef}
@@ -163,12 +260,17 @@ export function FloorMap({
           ))}
         </Layer>
         <Layer>
-          {overview.devices.map((device, index) => {
+          {renderedDevices.map((device, index) => {
             const { x, y } =
               dragPreview?.id === device.id
                 ? { x: dragPreview.x, y: dragPreview.y }
                 : devicePosition(device, index, pendingPositions[device.id]);
             const selected = device.id === selectedDeviceId;
+            const childSensors = sensorsByEquipment.get(device.id) ?? [];
+            const summary = device.deviceRole === "MONITORING_EQUIPMENT"
+              ? summarizeSensors(device, childSensors)
+              : null;
+            const markerColor = summary ? DEVICE_STATUS_COLOR[summary.status] : DEVICE_STATUS_COLOR[device.currentStatus];
             return (
               // Group 자체를 기기 좌표로 두고 드래그해야 Circle+Text가 함께 움직인다.
               <Group
@@ -206,14 +308,44 @@ export function FloorMap({
                   e.target.getStage()?.batchDraw();
                 }}
               >
-                <Circle
-                  radius={selected ? 11 : 9}
-                  fill={DEVICE_STATUS_COLOR[device.currentStatus]}
-                  stroke={selected ? "#2c3e50" : "#ffffff"}
-                  strokeWidth={selected ? 2.5 : 1}
-                  onClick={() => onSelectDevice(device)}
-                  onTap={() => onSelectDevice(device)}
-                />
+                {device.deviceRole === "MONITORING_EQUIPMENT" ? (
+                  <>
+                    <Rect
+                      x={selected ? -14 : -12}
+                      y={selected ? -14 : -12}
+                      width={selected ? 28 : 24}
+                      height={selected ? 28 : 24}
+                      cornerRadius={5}
+                      fill={markerColor}
+                      stroke={selected ? "#111827" : "#ffffff"}
+                      strokeWidth={selected ? 2.5 : 1.5}
+                      shadowColor="rgba(15, 23, 42, 0.35)"
+                      shadowBlur={6}
+                      onClick={() => onSelectDevice(device)}
+                      onTap={() => onSelectDevice(device)}
+                    />
+                    <Text
+                      x={-22}
+                      y={-5}
+                      width={44}
+                      align="center"
+                      text={`${summary?.total ?? 0}`}
+                      fontSize={11}
+                      fontStyle="bold"
+                      fill="#ffffff"
+                      listening={false}
+                    />
+                  </>
+                ) : (
+                  <Circle
+                    radius={selected ? 11 : 9}
+                    fill={markerColor}
+                    stroke={selected ? "#2c3e50" : "#ffffff"}
+                    strokeWidth={selected ? 2.5 : 1}
+                    onClick={() => onSelectDevice(device)}
+                    onTap={() => onSelectDevice(device)}
+                  />
+                )}
                 <Text
                   x={-30}
                   y={12}
@@ -227,8 +359,52 @@ export function FloorMap({
               </Group>
             );
           })}
+          {selectedEquipment && selectedEquipmentSummary && (() => {
+            const selectedIndex = renderedDevices.findIndex((device) => device.id === selectedEquipment.id);
+            const { x, y } = devicePosition(
+              selectedEquipment,
+              Math.max(selectedIndex, 0),
+              pendingPositions[selectedEquipment.id],
+            );
+            const previewRows = selectedEquipmentSensors
+              .slice(0, 12)
+              .map((sensor) => `${sensor.channelAddress ?? "--"}  ${sensor.name}  ${sensor.currentStatus}`)
+              .join("\n");
+            const text = [
+              selectedEquipment.name,
+              `전체 ${selectedEquipmentSummary.total} / ON ${selectedEquipmentSummary.on} / OFF ${selectedEquipmentSummary.off}`,
+              selectedEquipmentSummary.alarm > 0 ? `ALARM ${selectedEquipmentSummary.alarm}` : null,
+              previewRows,
+              selectedEquipmentSensors.length > 12 ? `외 ${selectedEquipmentSensors.length - 12}개` : null,
+            ].filter(Boolean).join("\n");
+            return (
+              <Group x={Math.min(x + 20, width - 260)} y={Math.max(y - 28, 12)} listening={false}>
+                <Rect width={250} height={88 + Math.min(selectedEquipmentSensors.length, 12) * 17} fill="#f0ffd8" stroke="#6b7280" strokeWidth={1.5} shadowBlur={5} shadowColor="rgba(0,0,0,0.18)" />
+                <Text x={10} y={9} width={230} text={text} fontSize={12} lineHeight={1.35} fill="#1f2937" />
+              </Group>
+            );
+          })()}
         </Layer>
       </Stage>
+      {monitoringLevel === "sensor" && (
+        <div className="floor-map__sensor-grid">
+          {sensors.map((sensor) => (
+            <button
+              key={sensor.id}
+              type="button"
+              className={`sensor-card ${sensor.id === selectedDeviceId ? "active" : ""}`}
+              onClick={() => onSelectDevice(sensor)}
+            >
+              <span className="sensor-card__icon" aria-hidden="true">
+                <i style={{ background: DEVICE_STATUS_COLOR[sensor.currentStatus] }} />
+              </span>
+              <span className="sensor-card__state">{sensor.currentStatus}</span>
+              <strong>{sensorLabel(sensor)}</strong>
+              <small>{sensor.sensorIoType ?? "I/O"} · {sensor.deviceType ?? sensor.category}</small>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

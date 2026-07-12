@@ -5,6 +5,7 @@ import {
   DevicesService,
   type CreateDeviceRequest,
   type SetDeviceConnectionRequest,
+  type SetDeviceMonitoringRequest,
   type UpdateDeviceRequest,
 } from "../services/devices.service.js";
 
@@ -75,5 +76,16 @@ export class DevicesController {
     @CurrentAuth() auth: AuthContext,
   ): Promise<unknown> {
     return this.devices.setConnection(id, body, auth);
+  }
+
+  /** 모니터링 표시/사용 여부 설정 — ADMIN 전용. 숨김/미사용 기기는 관제 화면에서 제외된다. */
+  @Roles("ADMIN")
+  @Patch(":id/monitoring")
+  setMonitoring(
+    @Param("id") id: string,
+    @Body() body: SetDeviceMonitoringRequest,
+    @CurrentAuth() auth: AuthContext,
+  ): Promise<unknown> {
+    return this.devices.setMonitoring(id, body, auth);
   }
 }

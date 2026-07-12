@@ -26,6 +26,19 @@ describe("AlarmUpdatedEvent", () => {
 });
 
 describe("RealtimeEvent discriminated union", () => {
+  it("device.state origin metadata를 허용한다", () => {
+    const result = RealtimeEvent.safeParse({
+      type: "device.state",
+      deviceId: "device-1",
+      deviceCode: "light-01",
+      status: "ON",
+      origin: "INTENTIONAL",
+      originLabel: "관리자 제어 (CMD-1)",
+      ts: Date.now(),
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("alarm.updated를 판별해 파싱한다", () => {
     const result = RealtimeEvent.safeParse({
       type: "alarm.updated",

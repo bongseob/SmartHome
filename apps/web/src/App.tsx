@@ -11,6 +11,7 @@ import {
   login as apiLogin,
   logout as apiLogout,
   saveFloorLayout,
+  setDeviceMonitoring,
 } from "./lib/api";
 import type { AuthUser, DeviceHistory, DeviceListItem, FloorOverview, FloorSummary } from "./lib/types";
 import { useRealtime } from "./lib/useRealtime";
@@ -23,6 +24,8 @@ import { SystemInfoAdmin } from "./components/SystemInfoAdmin";
 import { FloorMapAdmin } from "./components/FloorMapAdmin";
 import { AreaAdmin } from "./components/AreaAdmin";
 import { DeviceAdmin } from "./components/DeviceAdmin";
+import { Dashboard } from "./components/Dashboard";
+import { GroupControl } from "./components/GroupControl";
 
 const MAX_FEED_ENTRIES = 50;
 
@@ -45,7 +48,7 @@ export function App(): JSX.Element {
   const feedSeq = useRef(0);
 
   // 최상위 화면 전환(M16 Admin) — ADMIN 전용 스케줄러/시스템정보 화면과 기존 Floor Map 관제 화면을 오간다.
-  const [view, setView] = useState<"map" | "schedulers" | "systemInfo" | "floorMaps" | "areas" | "devices">("map");
+  const [view, setView] = useState<"dashboard" | "map" | "groupControl" | "schedulers" | "systemInfo" | "floorMaps" | "areas" | "devices">("dashboard");
 
   // 도면 편집 모드(ui-ux-design.md §4.1-mode) — ADMIN 전용. 실행 모드에서는 조회/제어만 가능하다.
   const [mode, setMode] = useState<"execute" | "edit">("execute");
@@ -75,7 +78,7 @@ export function App(): JSX.Element {
     setMode("execute");
     setPendingPositions({});
     setLayoutError(null);
-    setView("map");
+    setView("dashboard");
   }, []);
 
   const handleLogin = useCallback(async (username: string, password: string) => {
@@ -160,6 +163,40 @@ export function App(): JSX.Element {
           }
           const message = err instanceof ApiError ? err.detail : "명령 전송에 실패했습니다.";
           setHistoryError(message);
+        });
+    },
+    [selectedDevice, handleLogout],
+  );
+
+  const handleSetDeviceMonitoring = useCallback(
+    (flags: { monitoringVisible?: boolean; enabled?: boolean }) => {
+      if (!selectedDevice) return;
+      setDeviceMonitoring(selectedDevice.id, flags)
+        .then((updated) => {
+          setOverview((prev) => {
+            if (!prev) return prev;
+            const shouldShow =
+              updated.monitoringVisible &&
+              updated.enabled &&
+              updated.lifecycleStatus !== "DECOMMISSIONED";
+            if (!shouldShow) {
+              return { ...prev, devices: prev.devices.filter((device) => device.id !== updated.id) };
+            }
+            const devices = prev.devices.map((device) =>
+              device.id === updated.id ? { ...device, ...updated } : device,
+            );
+            return { ...prev, devices };
+          });
+          if (!updated.monitoringVisible || !updated.enabled) {
+            setSelectedDeviceId(null);
+          }
+        })
+        .catch((err: unknown) => {
+          if (err instanceof AuthExpiredError) {
+            handleLogout();
+            return;
+          }
+          setHistoryError(err instanceof ApiError ? err.detail : "모니터링 설정 변경에 실패했습니다.");
         });
     },
     [selectedDevice, handleLogout],
@@ -296,11 +333,19 @@ export function App(): JSX.Element {
             </button>
           </div>
         )}
+        <div className="mode-toggle">
+          <button type="button" className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}>
+            대시보드
+          </button>
+          <button type="button" className={view === "map" ? "active" : ""} onClick={() => setView("map")}>
+            관제
+          </button>
+          <button type="button" className={view === "groupControl" ? "active" : ""} onClick={() => setView("groupControl")}>
+            그룹 제어
+          </button>
+        </div>
         {isAdmin && (
           <div className="mode-toggle">
-            <button type="button" className={view === "map" ? "active" : ""} onClick={() => setView("map")}>
-              관제
-            </button>
             <button type="button" className={view === "schedulers" ? "active" : ""} onClick={() => setView("schedulers")}>
               스케줄러
             </button>
@@ -342,7 +387,15 @@ export function App(): JSX.Element {
 
       {loadError && <p className="error-text">{loadError}</p>}
 
-      {view === "schedulers" ? (
+      {view === "dashboard" ? (
+        <div className="app-shell__body app-shell__body--single">
+          <Dashboard />
+        </div>
+      ) : view === "groupControl" ? (
+        <div className="app-shell__body app-shell__body--single">
+          <GroupControl onAuthExpired={handleLogout} />
+        </div>
+      ) : view === "schedulers" ? (
         <div className="app-shell__body app-shell__body--single">
           <SchedulerAdmin />
         </div>
@@ -387,7 +440,9 @@ export function App(): JSX.Element {
                 pendingCommand={pendingByDevice[selectedDevice.id] ?? null}
                 onClose={() => setSelectedDeviceId(null)}
                 onSendCommand={handleSendCommand}
+                onSetMonitoring={handleSetDeviceMonitoring}
                 editMode={mode === "edit"}
+                isAdmin={isAdmin}
               />
             )}
             <EventFeed entries={feed} />

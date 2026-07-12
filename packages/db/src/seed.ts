@@ -102,11 +102,18 @@ async function seed(): Promise<void> {
     device: "thermostat-01",
   });
   await query(
-    `INSERT INTO device (code, name, category, device_type, mqtt_topic, area_id, current_status, pos_x, pos_y)
-     VALUES ('thermostat-01', '거실 온도조절기', 'SENSOR', 'thermostat', $1, $2, 'OFFLINE', 200, 200)
+    `INSERT INTO device (
+       code, name, category, device_role, device_type, mqtt_topic, area_id, current_status,
+       sensor_signal_type, sensor_io_type, channel_address, pos_x, pos_y
+     )
+     VALUES ('thermostat-01', '거실 온도조절기', 'SENSOR', 'SENSOR', 'thermostat', $1, $2, 'OFFLINE',
+       'ANALOG', 'AI', '01', 200, 200)
      ON CONFLICT (code) DO UPDATE SET
        mqtt_topic = EXCLUDED.mqtt_topic,
        area_id = EXCLUDED.area_id,
+       sensor_signal_type = EXCLUDED.sensor_signal_type,
+       sensor_io_type = EXCLUDED.sensor_io_type,
+       channel_address = EXCLUDED.channel_address,
        pos_x = EXCLUDED.pos_x,
        pos_y = EXCLUDED.pos_y`,
     [t01Topic, livingRoomId],
@@ -121,11 +128,18 @@ async function seed(): Promise<void> {
     device: "light-01",
   });
   await query(
-    `INSERT INTO device (code, name, category, device_type, mqtt_topic, area_id, current_status, pos_x, pos_y)
-     VALUES ('light-01', '거실 조명', 'DEVICE', 'light', $1, $2, 'OFF', 350, 250)
+    `INSERT INTO device (
+       code, name, category, device_role, device_type, mqtt_topic, area_id, current_status,
+       sensor_signal_type, sensor_io_type, channel_address, pos_x, pos_y
+     )
+     VALUES ('light-01', '거실 조명', 'DEVICE', 'SENSOR', 'light', $1, $2, 'OFF',
+       'DIGITAL', 'DO', '02', 350, 250)
      ON CONFLICT (code) DO UPDATE SET
        mqtt_topic = EXCLUDED.mqtt_topic,
        area_id = EXCLUDED.area_id,
+       sensor_signal_type = EXCLUDED.sensor_signal_type,
+       sensor_io_type = EXCLUDED.sensor_io_type,
+       channel_address = EXCLUDED.channel_address,
        pos_x = EXCLUDED.pos_x,
        pos_y = EXCLUDED.pos_y`,
     [l01Topic, livingRoomId],
@@ -140,11 +154,18 @@ async function seed(): Promise<void> {
     device: "light-02",
   });
   await query(
-    `INSERT INTO device (code, name, category, device_type, mqtt_topic, area_id, current_status, pos_x, pos_y)
-     VALUES ('light-02', '침실 조명', 'DEVICE', 'light', $1, $2, 'OFF', 620, 250)
+    `INSERT INTO device (
+       code, name, category, device_role, device_type, mqtt_topic, area_id, current_status,
+       sensor_signal_type, sensor_io_type, channel_address, pos_x, pos_y
+     )
+     VALUES ('light-02', '침실 조명', 'DEVICE', 'SENSOR', 'light', $1, $2, 'OFF',
+       'DIGITAL', 'DO', '03', 620, 250)
      ON CONFLICT (code) DO UPDATE SET
        mqtt_topic = EXCLUDED.mqtt_topic,
        area_id = EXCLUDED.area_id,
+       sensor_signal_type = EXCLUDED.sensor_signal_type,
+       sensor_io_type = EXCLUDED.sensor_io_type,
+       channel_address = EXCLUDED.channel_address,
        pos_x = EXCLUDED.pos_x,
        pos_y = EXCLUDED.pos_y`,
     [l02Topic, bedroomId],

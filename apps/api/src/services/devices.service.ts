@@ -8,7 +8,7 @@ import {
   SEGMENT_PATTERN,
   buildDeviceBase,
 } from "@smarthome/contracts";
-import type { DeviceCategory } from "@smarthome/contracts";
+import type { DeviceCategory, DeviceRole, SensorIoType, SensorSignalType } from "@smarthome/contracts";
 import {
   createDevice,
   decommissionDevice,
@@ -20,6 +20,7 @@ import {
   query,
   updateDevice,
   updateDeviceConnection,
+  updateDeviceMonitoringFlags,
   withTransaction,
 } from "@smarthome/db";
 
@@ -31,16 +32,27 @@ export interface SetDeviceConnectionRequest {
   config?: unknown;
 }
 
+export interface SetDeviceMonitoringRequest {
+  monitoringVisible?: boolean;
+  enabled?: boolean;
+}
+
 export interface CreateDeviceRequest {
   code: string;
   name: string;
   category: string;
+  deviceRole?: DeviceRole;
   deviceType?: string | null;
   manufacturer?: string | null;
   model?: string | null;
   firmwareVersion?: string | null;
   areaId: string;
   gatewayId?: string | null;
+  parentDeviceId?: string | null;
+  sensorSignalType?: SensorSignalType | null;
+  sensorIoType?: SensorIoType | null;
+  channelAddress?: string | null;
+  terminalBlock?: string | null;
 }
 
 export interface UpdateDeviceRequest {
@@ -50,6 +62,52 @@ export interface UpdateDeviceRequest {
   model?: string | null;
   firmwareVersion?: string | null;
   gatewayId?: string | null;
+  parentDeviceId?: string | null;
+  sensorSignalType?: SensorSignalType | null;
+  sensorIoType?: SensorIoType | null;
+  channelAddress?: string | null;
+  terminalBlock?: string | null;
+}
+
+const DEVICE_ROLES: DeviceRole[] = ["MONITORING_EQUIPMENT", "SENSOR"];
+const SENSOR_SIGNAL_TYPES: SensorSignalType[] = ["DIGITAL", "ANALOG"];
+const SENSOR_IO_TYPES: SensorIoType[] = ["DI", "DO", "AI", "AO"];
+
+function signalTypeForIo(ioType: SensorIoType | null | undefined): SensorSignalType | null {
+  if (!ioType) return null;
+  return ioType.startsWith("D") ? "DIGITAL" : "ANALOG";
+}
+
+function normalizeDeviceRole(role: DeviceRole | undefined, category: string): DeviceRole {
+  if (role) return role;
+  return category === "GATEWAY" ? "MONITORING_EQUIPMENT" : "SENSOR";
+}
+
+function validateDeviceRole(role: DeviceRole): void {
+  if (!DEVICE_ROLES.includes(role)) {
+    throw new BadRequestException(`deviceRole은 ${DEVICE_ROLES.join(", ")} 중 하나여야 합니다.`);
+  }
+}
+
+function validateSensorMetadata(input: {
+  deviceRole: DeviceRole;
+  parentDeviceId?: string | null;
+  sensorSignalType?: SensorSignalType | null;
+  sensorIoType?: SensorIoType | null;
+}): void {
+  validateDeviceRole(input.deviceRole);
+  if (input.deviceRole === "MONITORING_EQUIPMENT") {
+    if (input.parentDeviceId) {
+      throw new BadRequestException("감시장비는 상위 감시장비를 가질 수 없습니다.");
+    }
+    return;
+  }
+  if (input.sensorSignalType && !SENSOR_SIGNAL_TYPES.includes(input.sensorSignalType)) {
+    throw new BadRequestException(`sensorSignalType은 ${SENSOR_SIGNAL_TYPES.join(", ")} 중 하나여야 합니다.`);
+  }
+  if (input.sensorIoType && !SENSOR_IO_TYPES.includes(input.sensorIoType)) {
+    throw new BadRequestException(`sensorIoType은 ${SENSOR_IO_TYPES.join(", ")} 중 하나여야 합니다.`);
+  }
 }
 
 @Injectable()
@@ -143,6 +201,68 @@ export class DevicesService {
     });
   }
 
+  async setMonitoring(
+    id: string,
+    body: SetDeviceMonitoringRequest,
+    auth: AuthContext,
+  ): Promise<unknown> {
+    const hasMonitoringVisible = body.monitoringVisible !== undefined;
+    const hasEnabled = body.enabled !== undefined;
+    if (!hasMonitoringVisible && !hasEnabled) {
+      throw new BadRequestException("monitoringVisible 또는 enabled 중 하나는 필요합니다.");
+    }
+    if (hasMonitoringVisible && typeof body.monitoringVisible !== "boolean") {
+      throw new BadRequestException("monitoringVisible은 boolean이어야 합니다.");
+    }
+    if (hasEnabled && typeof body.enabled !== "boolean") {
+      throw new BadRequestException("enabled는 boolean이어야 합니다.");
+    }
+
+    return withTransaction(async (client) => {
+      const before = await getDeviceState(client, id);
+      if (!before) {
+        throw new NotFoundException(`device not found: ${id}`);
+      }
+      if (before.lifecycleStatus === "DECOMMISSIONED") {
+        throw new ConflictException("decommissioned device cannot be changed");
+      }
+
+      const input: SetDeviceMonitoringRequest = {};
+      if (typeof body.monitoringVisible === "boolean") {
+        input.monitoringVisible = body.monitoringVisible;
+      }
+      if (typeof body.enabled === "boolean") {
+        input.enabled = body.enabled;
+      }
+      const updated = await updateDeviceMonitoringFlags(client, id, input);
+      if (!updated) {
+        throw new NotFoundException(`device not found: ${id}`);
+      }
+
+      const changes: string[] = [];
+      if (hasMonitoringVisible && body.monitoringVisible !== before.monitoringVisible) {
+        changes.push(`monitoringVisible ${before.monitoringVisible} → ${body.monitoringVisible}`);
+      }
+      if (hasEnabled && body.enabled !== before.enabled) {
+        changes.push(`enabled ${before.enabled} → ${body.enabled}`);
+      }
+
+      await insertAuditLog(client, {
+      actorType: "ADMIN",
+      actorId: auth.userId,
+      targetType: "DEVICE",
+      targetId: id,
+      command: "DEVICE_MONITORING_UPDATE",
+      reason: changes.length > 0 ? changes.join(", ") : "no changes",
+      executionStatus: "SUCCEEDED",
+      mqttReasonCode: null,
+      sessionId: null,
+      commandId: null,
+      });
+      return updated;
+    });
+  }
+
   /**
    * 기기 생성(ADMIN 전용). mqtt_topic은 buildDeviceBase()로 자동 생성 — 클라이언트가 보낸
    * 세그먼트를 신뢰하지 않는다. code 중복(23505)은 BadRequestException으로 변환.
@@ -168,8 +288,23 @@ export class DevicesService {
         `category는 ${validCategories.join(", ")} 중 하나여야 합니다 (CAMERA는 별도 등록).`,
       );
     }
+    const deviceRole = normalizeDeviceRole(body.deviceRole, body.category);
+    const sensorIoType = deviceRole === "SENSOR" ? body.sensorIoType ?? "DI" : null;
+    const sensorSignalType = deviceRole === "SENSOR" ? body.sensorSignalType ?? signalTypeForIo(sensorIoType) : null;
+    validateSensorMetadata(
+      body.parentDeviceId !== undefined
+        ? { deviceRole, parentDeviceId: body.parentDeviceId, sensorSignalType, sensorIoType }
+        : { deviceRole, sensorSignalType, sensorIoType },
+    );
 
     return withTransaction(async (client) => {
+      if (body.parentDeviceId) {
+        const parent = await getDeviceState(client, body.parentDeviceId);
+        if (!parent) throw new NotFoundException(`parent device not found: ${body.parentDeviceId}`);
+        if (parent.deviceRole !== "MONITORING_EQUIPMENT") {
+          throw new BadRequestException("센서의 parentDeviceId는 감시장비여야 합니다.");
+        }
+      }
       const slugPath = await getAreaSlugPath(client, body.areaId);
       if (!slugPath) {
         throw new NotFoundException(`area not found: ${body.areaId}`);
@@ -197,6 +332,7 @@ export class DevicesService {
           code: body.code,
           name: body.name.trim(),
           category: body.category as DeviceCategory,
+          deviceRole,
           deviceType: body.deviceType ?? null,
           manufacturer: body.manufacturer ?? null,
           model: body.model ?? null,
@@ -204,6 +340,11 @@ export class DevicesService {
           mqttTopic,
           areaId: body.areaId,
           gatewayId: body.gatewayId ?? null,
+          parentDeviceId: deviceRole === "SENSOR" ? body.parentDeviceId ?? null : null,
+          sensorSignalType: deviceRole === "SENSOR" ? sensorSignalType : null,
+          sensorIoType,
+          channelAddress: deviceRole === "SENSOR" ? body.channelAddress ?? null : null,
+          terminalBlock: body.terminalBlock ?? null,
         });
       } catch (e) {
         if ((e as { code?: string }).code === "23505") {
@@ -243,16 +384,45 @@ export class DevicesService {
       if (before.lifecycleStatus === "DECOMMISSIONED") {
         throw new ConflictException("decommissioned device cannot be changed");
       }
+      const sensorSignalType = body.sensorSignalType ?? signalTypeForIo(body.sensorIoType);
+      validateSensorMetadata(
+        body.parentDeviceId !== undefined
+          ? {
+              deviceRole: before.deviceRole,
+              parentDeviceId: body.parentDeviceId,
+              sensorSignalType,
+              sensorIoType: body.sensorIoType ?? null,
+            }
+          : {
+              deviceRole: before.deviceRole,
+              sensorSignalType,
+              sensorIoType: body.sensorIoType ?? null,
+            },
+      );
+      if (body.parentDeviceId) {
+        const parent = await getDeviceState(client, body.parentDeviceId);
+        if (!parent) throw new NotFoundException(`parent device not found: ${body.parentDeviceId}`);
+        if (parent.deviceRole !== "MONITORING_EQUIPMENT") {
+          throw new BadRequestException("센서의 parentDeviceId는 감시장비여야 합니다.");
+        }
+      }
 
       const normalizedName = body.name?.trim();
-      const updated = await updateDevice(client, id, {
-        name: normalizedName,
-        deviceType: body.deviceType,
-        manufacturer: body.manufacturer,
-        model: body.model,
-        firmwareVersion: body.firmwareVersion,
-        gatewayId: body.gatewayId,
-      });
+      const updateInput: UpdateDeviceRequest = {};
+      if (normalizedName !== undefined) updateInput.name = normalizedName;
+      if (body.deviceType !== undefined) updateInput.deviceType = body.deviceType;
+      if (body.manufacturer !== undefined) updateInput.manufacturer = body.manufacturer;
+      if (body.model !== undefined) updateInput.model = body.model;
+      if (body.firmwareVersion !== undefined) updateInput.firmwareVersion = body.firmwareVersion;
+      if (body.gatewayId !== undefined) updateInput.gatewayId = body.gatewayId;
+      if (body.terminalBlock !== undefined) updateInput.terminalBlock = body.terminalBlock;
+      if (before.deviceRole === "SENSOR") {
+        if (body.parentDeviceId !== undefined) updateInput.parentDeviceId = body.parentDeviceId;
+        if (sensorSignalType !== undefined) updateInput.sensorSignalType = sensorSignalType;
+        if (body.sensorIoType !== undefined) updateInput.sensorIoType = body.sensorIoType;
+        if (body.channelAddress !== undefined) updateInput.channelAddress = body.channelAddress;
+      }
+      const updated = await updateDevice(client, id, updateInput);
       if (!updated) {
         throw new NotFoundException(`device not found: ${id}`);
       }

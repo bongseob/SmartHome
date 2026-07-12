@@ -12,6 +12,7 @@ import {
   closePool,
   compareThreshold,
   completeCommandFromAck,
+  findRecentIntentionalStateCommand,
   getDeviceIdByCode,
   getNotificationChannelById,
   insertTelemetryBatch,
@@ -19,7 +20,7 @@ import {
   listChannelsForPolicy,
   query,
   raiseAlarmFromPolicy,
-  raiseOfflineAlarm,
+  raiseUnexpectedStateChangeAlarm,
   setDeviceStatus,
   sweepDueEscalations,
   transitionCommandWithAudit,
@@ -42,6 +43,7 @@ import {
 } from "@smarthome/realtime";
 
 const dbExecutor = { query };
+const INTENTIONAL_STATE_WINDOW_MS = Number(process.env.INTENTIONAL_STATE_WINDOW_MS ?? "30000");
 
 /**
  * @smarthome/gateway — MQTT 인제스트 (docs/architecture.md §8).
@@ -66,6 +68,35 @@ async function resolveDeviceId(code: string): Promise<string | null> {
 
 // 상태 변화 감지(retained 재수신·중복 억제)
 const lastStatus = new Map<string, string>();
+
+function stateCommandSourceLabel(actorType: string): string {
+  if (actorType === "SYSTEM") return "스케줄/예약";
+  if (actorType === "ADMIN") return "관리자 제어";
+  if (actorType === "USER") return "사용자 제어";
+  if (actorType === "AI") return "AI 승인 제어";
+  return "제어 명령";
+}
+
+function stateAlarmSeverity(status: string): "WARNING" | "CRITICAL" {
+  return status === "ALARM" ? "CRITICAL" : "WARNING";
+}
+
+async function classifyStateChange(
+  deviceId: string,
+  status: "ON" | "OFF" | "WARNING" | "ALARM" | "OFFLINE",
+): Promise<{ origin: "INTENTIONAL" | "FIELD"; label: string; commandId?: string }> {
+  const windowMs =
+    Number.isFinite(INTENTIONAL_STATE_WINDOW_MS) && INTENTIONAL_STATE_WINDOW_MS > 0
+      ? INTENTIONAL_STATE_WINDOW_MS
+      : 30000;
+  const command = await findRecentIntentionalStateCommand(deviceId, status, windowMs);
+  if (!command) return { origin: "FIELD", label: "현장 상태 변화" };
+  return {
+    origin: "INTENTIONAL",
+    label: `${stateCommandSourceLabel(command.actorType)} (${command.commandId})`,
+    commandId: command.commandId,
+  };
+}
 
 // ─── M9 Alarm Service: threshold 평가 + 에스컬레이션 ────────────────────
 // deviceId:metric → 해당 기기·지표를 감시하는 활성 정책들 (주기적으로 새로고침)
@@ -321,25 +352,39 @@ async function onMessage(
     const status = parsed.data.status;
     if (lastStatus.get(parts.device) === status) return; // 변화 없음
     lastStatus.set(parts.device, status);
-    await setDeviceStatus(parts.device, status);
-    console.log(`[gateway] state ${parts.device} → ${status}`);
-    const id = await resolveDeviceId(parts.device);
-    if (id) {
+    const update = await setDeviceStatus(parts.device, status);
+    if (!update.deviceId) {
+      console.warn(`[gateway] 미등록 device '${parts.device}' — state 무시`);
+      return;
+    }
+    const id = update.deviceId;
+    idCache.set(parts.device, id);
+    if (!update.changed) return;
+
+    const classification = await classifyStateChange(id, status);
+    console.log(`[gateway] state ${parts.device} → ${status} (${classification.label})`);
+    {
       await publishRealtimeEvent(events, {
         type: "device.state",
         deviceId: id,
         deviceCode: parts.device,
         status,
+        origin: classification.origin,
+        originLabel: classification.label,
         ts: Date.now(),
       });
-      if (status === "OFFLINE") {
-        const message = "device offline (state/LWT)";
-        await raiseOfflineAlarm(id, message);
+      if (classification.origin === "FIELD") {
+        const message =
+          status === "OFFLINE"
+            ? "현장 상태 변화: device offline (state/LWT)"
+            : `현장 상태 변화: ${parts.device} ${update.previousStatus ?? "UNKNOWN"} → ${status}`;
+        const raised = await raiseUnexpectedStateChangeAlarm(id, message, stateAlarmSeverity(status));
+        if (!raised) return;
         await publishRealtimeEvent(events, {
           type: "alarm.raised",
           deviceId: id,
           tier: "REACTIVE",
-          severity: "WARNING",
+          severity: stateAlarmSeverity(status),
           message,
           ts: Date.now(),
         });

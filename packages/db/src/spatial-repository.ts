@@ -4,7 +4,10 @@ import type {
   DeviceCategory,
   DeviceConnectionProtocol,
   DeviceLifecycle,
+  DeviceRole,
   DeviceStatus,
+  SensorIoType,
+  SensorSignalType,
 } from "@smarthome/contracts";
 import type { QueryResultRow } from "./pool.js";
 import type { QueryExecutor } from "./audit-repository.js";
@@ -427,6 +430,7 @@ export interface DeviceListItem {
   code: string;
   name: string;
   category: DeviceCategory;
+  deviceRole: DeviceRole;
   deviceType: string | null;
   manufacturer: string | null;
   model: string | null;
@@ -434,6 +438,13 @@ export interface DeviceListItem {
   mqttTopic: string;
   currentStatus: DeviceStatus;
   lifecycleStatus: DeviceLifecycle;
+  monitoringVisible: boolean;
+  enabled: boolean;
+  parentDeviceId: string | null;
+  sensorSignalType: SensorSignalType | null;
+  sensorIoType: SensorIoType | null;
+  channelAddress: string | null;
+  terminalBlock: string | null;
   areaId: string | null;
   areaTopicPrefix: string | null; // "enterprise/site1/bldg-a/2f/living-room"
   posX: string | null;
@@ -448,6 +459,7 @@ interface DeviceListRow extends QueryResultRow {
   code: string;
   name: string;
   category: DeviceCategory;
+  device_role: DeviceRole;
   device_type: string | null;
   manufacturer: string | null;
   model: string | null;
@@ -455,6 +467,13 @@ interface DeviceListRow extends QueryResultRow {
   mqtt_topic: string;
   current_status: DeviceStatus;
   lifecycle_status: DeviceLifecycle;
+  monitoring_visible: boolean;
+  enabled: boolean;
+  parent_device_id: string | null;
+  sensor_signal_type: SensorSignalType | null;
+  sensor_io_type: SensorIoType | null;
+  channel_address: string | null;
+  terminal_block: string | null;
   area_id: string | null;
   area_topic_prefix: string | null;
   pos_x: string | null;
@@ -470,6 +489,7 @@ function toDeviceListItem(row: DeviceListRow): DeviceListItem {
     code: row.code,
     name: row.name,
     category: row.category,
+    deviceRole: row.device_role,
     deviceType: row.device_type,
     manufacturer: row.manufacturer,
     model: row.model,
@@ -477,6 +497,13 @@ function toDeviceListItem(row: DeviceListRow): DeviceListItem {
     mqttTopic: row.mqtt_topic,
     currentStatus: row.current_status,
     lifecycleStatus: row.lifecycle_status,
+    monitoringVisible: row.monitoring_visible,
+    enabled: row.enabled,
+    parentDeviceId: row.parent_device_id,
+    sensorSignalType: row.sensor_signal_type,
+    sensorIoType: row.sensor_io_type,
+    channelAddress: row.channel_address,
+    terminalBlock: row.terminal_block,
     areaId: row.area_id,
     areaTopicPrefix: row.area_topic_prefix,
     posX: row.pos_x,
@@ -488,9 +515,11 @@ function toDeviceListItem(row: DeviceListRow): DeviceListItem {
 }
 
 const DEVICE_SELECT_COLUMNS = `
-  d.id::text, d.code, d.name, d.category, d.device_type, d.manufacturer, d.model,
+  d.id::text, d.code, d.name, d.category, d.device_role, d.device_type, d.manufacturer, d.model,
   d.firmware_version, d.mqtt_topic, d.current_status, d.lifecycle_status,
-  d.area_id::text, d.pos_x::text, d.pos_y::text, d.connection_protocol, d.connection_config,
+  d.monitoring_visible, d.enabled, d.parent_device_id::text, d.sensor_signal_type, d.sensor_io_type,
+  d.channel_address, d.terminal_block, d.area_id::text, d.pos_x::text, d.pos_y::text,
+  d.connection_protocol, d.connection_config,
   d.updated_at,
   CASE
     WHEN a.id IS NOT NULL THEN
@@ -503,15 +532,17 @@ export interface DeviceListFilter {
   areaId?: string;
   category?: string;
   status?: string;
+  groupId?: string;
 }
 
-/** 기기 목록 조회 (필터: areaId, category, status) */
+/** 기기 목록 조회 (필터: areaId, category, status, groupId) */
 export async function listDevices(
   db: QueryExecutor,
   filter: DeviceListFilter = {},
 ): Promise<DeviceListItem[]> {
   const conditions: string[] = [];
   const params: unknown[] = [];
+  const joins: string[] = [];
 
   if (filter.areaId) {
     params.push(filter.areaId);
@@ -525,12 +556,18 @@ export async function listDevices(
     params.push(filter.status);
     conditions.push(`d.current_status = $${params.length}::device_status`);
   }
+  if (filter.groupId) {
+    joins.push(`JOIN device_group_mapping dgm ON dgm.device_id = d.id`);
+    params.push(filter.groupId);
+    conditions.push(`dgm.group_id::text = $${params.length}`);
+  }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
   const r = await db.query<DeviceListRow>(
     `SELECT ${DEVICE_SELECT_COLUMNS}
      FROM device d
+     ${joins.join("\n")}
      LEFT JOIN area a      ON a.id = d.area_id
      LEFT JOIN floor f     ON f.id = a.floor_id
      LEFT JOIN building b  ON b.id = f.building_id
@@ -566,6 +603,9 @@ export async function getFloorOverview(
        LEFT JOIN building b  ON b.id = f.building_id
        LEFT JOIN site s      ON s.id = b.site_id
        WHERE d.area_id IN (SELECT id FROM area WHERE floor_id::text = $1)
+         AND d.monitoring_visible = true
+         AND d.enabled = true
+         AND d.lifecycle_status <> 'DECOMMISSIONED'
        ORDER BY d.name`,
       [floorId],
     ),

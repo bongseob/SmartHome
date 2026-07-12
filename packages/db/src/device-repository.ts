@@ -4,8 +4,11 @@ import type {
   DeviceCategory,
   DeviceConnectionProtocol,
   DeviceLifecycle,
+  DeviceRole,
   DeviceStatus,
   ExecutionStatus,
+  SensorIoType,
+  SensorSignalType,
   Severity,
 } from "@smarthome/contracts";
 import type { QueryResultRow } from "./pool.js";
@@ -16,6 +19,7 @@ export interface DeviceStateRecord {
   code: string;
   name: string;
   category: DeviceCategory;
+  deviceRole: DeviceRole;
   deviceType: string | null;
   manufacturer: string | null;
   model: string | null;
@@ -23,6 +27,13 @@ export interface DeviceStateRecord {
   mqttTopic: string;
   currentStatus: DeviceStatus;
   lifecycleStatus: DeviceLifecycle;
+  monitoringVisible: boolean;
+  enabled: boolean;
+  parentDeviceId: string | null;
+  sensorSignalType: SensorSignalType | null;
+  sensorIoType: SensorIoType | null;
+  channelAddress: string | null;
+  terminalBlock: string | null;
   areaId: string | null;
   posX: string | null;
   posY: string | null;
@@ -81,6 +92,7 @@ interface DeviceStateRow extends QueryResultRow {
   code: string;
   name: string;
   category: DeviceCategory;
+  device_role: DeviceRole;
   device_type: string | null;
   manufacturer: string | null;
   model: string | null;
@@ -88,6 +100,13 @@ interface DeviceStateRow extends QueryResultRow {
   mqtt_topic: string;
   current_status: DeviceStatus;
   lifecycle_status: DeviceLifecycle;
+  monitoring_visible: boolean;
+  enabled: boolean;
+  parent_device_id: string | null;
+  sensor_signal_type: SensorSignalType | null;
+  sensor_io_type: SensorIoType | null;
+  channel_address: string | null;
+  terminal_block: string | null;
   area_id: string | null;
   pos_x: string | null;
   pos_y: string | null;
@@ -131,9 +150,10 @@ interface DeviceAlarmHistoryRow extends QueryResultRow {
 }
 
 const DEVICE_COLUMNS = `
-  id::text, code, name, category, device_type, manufacturer, model, firmware_version,
+  id::text, code, name, category, device_role, device_type, manufacturer, model, firmware_version,
   mqtt_topic, current_status, lifecycle_status, area_id::text, pos_x::text, pos_y::text,
-  gateway_id::text, connection_protocol, connection_config, updated_at
+  monitoring_visible, enabled, parent_device_id::text, sensor_signal_type, sensor_io_type,
+  channel_address, terminal_block, gateway_id::text, connection_protocol, connection_config, updated_at
 `;
 
 function toDeviceState(row: DeviceStateRow): DeviceStateRecord {
@@ -142,6 +162,7 @@ function toDeviceState(row: DeviceStateRow): DeviceStateRecord {
     code: row.code,
     name: row.name,
     category: row.category,
+    deviceRole: row.device_role,
     deviceType: row.device_type,
     manufacturer: row.manufacturer,
     model: row.model,
@@ -149,6 +170,13 @@ function toDeviceState(row: DeviceStateRow): DeviceStateRecord {
     mqttTopic: row.mqtt_topic,
     currentStatus: row.current_status,
     lifecycleStatus: row.lifecycle_status,
+    monitoringVisible: row.monitoring_visible,
+    enabled: row.enabled,
+    parentDeviceId: row.parent_device_id,
+    sensorSignalType: row.sensor_signal_type,
+    sensorIoType: row.sensor_io_type,
+    channelAddress: row.channel_address,
+    terminalBlock: row.terminal_block,
     areaId: row.area_id,
     posX: row.pos_x,
     posY: row.pos_y,
@@ -256,6 +284,35 @@ export async function updateDeviceConnection(
   return row ? toDeviceState(row) : null;
 }
 
+export async function updateDeviceMonitoringFlags(
+  db: QueryExecutor,
+  deviceId: string,
+  input: { monitoringVisible?: boolean; enabled?: boolean },
+): Promise<DeviceStateRecord | null> {
+  const sets: string[] = [];
+  const params: unknown[] = [deviceId];
+
+  if (input.monitoringVisible !== undefined) {
+    params.push(input.monitoringVisible);
+    sets.push(`monitoring_visible = $${params.length}`);
+  }
+  if (input.enabled !== undefined) {
+    params.push(input.enabled);
+    sets.push(`enabled = $${params.length}`);
+  }
+  if (sets.length === 0) return getDeviceState(db, deviceId);
+
+  const result = await db.query<DeviceStateRow>(
+    `UPDATE device
+     SET ${sets.join(", ")}, updated_at = now()
+     WHERE id::text = $1
+     RETURNING ${DEVICE_COLUMNS}`,
+    params,
+  );
+  const row = result.rows[0];
+  return row ? toDeviceState(row) : null;
+}
+
 export async function getDeviceHistory(
   db: QueryExecutor,
   idOrCode: string,
@@ -352,6 +409,7 @@ export interface CreateDeviceInput {
   code: string;
   name: string;
   category: DeviceCategory;
+  deviceRole?: DeviceRole;
   deviceType?: string | null;
   manufacturer?: string | null;
   model?: string | null;
@@ -359,6 +417,11 @@ export interface CreateDeviceInput {
   mqttTopic: string;
   areaId: string;
   gatewayId?: string | null;
+  parentDeviceId?: string | null;
+  sensorSignalType?: SensorSignalType | null;
+  sensorIoType?: SensorIoType | null;
+  channelAddress?: string | null;
+  terminalBlock?: string | null;
 }
 
 /**
@@ -370,14 +433,16 @@ export async function createDevice(
   input: CreateDeviceInput,
 ): Promise<DeviceStateRecord> {
   const r = await db.query<{ id: string }>(
-    `INSERT INTO device (code, name, category, device_type, manufacturer, model,
-        firmware_version, mqtt_topic, area_id, gateway_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+    `INSERT INTO device (code, name, category, device_role, device_type, manufacturer, model,
+        firmware_version, mqtt_topic, area_id, gateway_id, parent_device_id, sensor_signal_type,
+        sensor_io_type, channel_address, terminal_block)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
      RETURNING id::text`,
     [
       input.code,
       input.name,
       input.category,
+      input.deviceRole ?? "SENSOR",
       input.deviceType ?? null,
       input.manufacturer ?? null,
       input.model ?? null,
@@ -385,6 +450,11 @@ export async function createDevice(
       input.mqttTopic,
       input.areaId,
       input.gatewayId ?? null,
+      input.parentDeviceId ?? null,
+      input.sensorSignalType ?? null,
+      input.sensorIoType ?? null,
+      input.channelAddress ?? null,
+      input.terminalBlock ?? null,
     ],
   );
   const id = r.rows[0]?.id;
@@ -401,6 +471,11 @@ export interface UpdateDeviceInput {
   model?: string | null | undefined;
   firmwareVersion?: string | null | undefined;
   gatewayId?: string | null | undefined;
+  parentDeviceId?: string | null | undefined;
+  sensorSignalType?: SensorSignalType | null | undefined;
+  sensorIoType?: SensorIoType | null | undefined;
+  channelAddress?: string | null | undefined;
+  terminalBlock?: string | null | undefined;
 }
 
 /**
@@ -437,6 +512,26 @@ export async function updateDevice(
   if (input.gatewayId !== undefined) {
     params.push(input.gatewayId);
     sets.push(`gateway_id = $${params.length}`);
+  }
+  if (input.parentDeviceId !== undefined) {
+    params.push(input.parentDeviceId);
+    sets.push(`parent_device_id = $${params.length}`);
+  }
+  if (input.sensorSignalType !== undefined) {
+    params.push(input.sensorSignalType);
+    sets.push(`sensor_signal_type = $${params.length}`);
+  }
+  if (input.sensorIoType !== undefined) {
+    params.push(input.sensorIoType);
+    sets.push(`sensor_io_type = $${params.length}`);
+  }
+  if (input.channelAddress !== undefined) {
+    params.push(input.channelAddress);
+    sets.push(`channel_address = $${params.length}`);
+  }
+  if (input.terminalBlock !== undefined) {
+    params.push(input.terminalBlock);
+    sets.push(`terminal_block = $${params.length}`);
   }
   if (sets.length === 0) return getDeviceState(db, id);
 

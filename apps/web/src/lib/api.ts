@@ -3,15 +3,20 @@ import type {
   AuthUser,
   BuildingRecord,
   CommandCreateResponse,
+  CommandRecord,
   CreateDeviceRequest,
   CreateSchedulerRequest,
   DeviceHistory,
   DeviceListItem,
   FloorOverview,
   FloorSummary,
+  GroupCommandResponse,
+  GroupControlSummary,
+  ImageRecord,
   ScheduleRunRecord,
   SchedulerRecord,
   SetDeviceConnectionRequest,
+  SetDeviceMonitoringRequest,
   SiteRecord,
   TokenPair,
   UpdateDeviceRequest,
@@ -268,6 +273,16 @@ export function setDeviceConnection(
   });
 }
 
+export function setDeviceMonitoring(
+  id: string,
+  body: SetDeviceMonitoringRequest,
+): Promise<DeviceListItem> {
+  return authedJson<DeviceListItem>(`/api/v1/devices/${id}/monitoring`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
 export function createCommand(
   command: string,
   targetDeviceId: string,
@@ -276,6 +291,28 @@ export function createCommand(
     method: "POST",
     body: JSON.stringify({ command, target: { id: targetDeviceId } }),
   });
+}
+
+export function createGroupCommand(
+  command: string,
+  targetGroupId: string,
+): Promise<GroupCommandResponse> {
+  return authedJson<GroupCommandResponse>("/api/v1/commands/group", {
+    method: "POST",
+    body: JSON.stringify({ command, target: { id: targetGroupId, type: "GROUP" } }),
+  });
+}
+
+export function getCommand(commandId: string): Promise<CommandRecord> {
+  return authedJson<CommandRecord>(`/api/v1/commands/${commandId}`);
+}
+
+export function listGroupControlSummaries(): Promise<GroupControlSummary[]> {
+  return authedJson<GroupControlSummary[]>("/api/v1/groups/control");
+}
+
+export function listGroupControlDevices(groupId: string): Promise<DeviceListItem[]> {
+  return authedJson<DeviceListItem[]>(`/api/v1/groups/${groupId}/devices`);
 }
 
 // ─── Scheduler (M16 Admin — ADMIN 전용, 서버가 최종 검증) ─────────────────
@@ -330,32 +367,52 @@ export function updateBuildingName(id: string, name: string): Promise<BuildingRe
   });
 }
 
-// ─── 도면(Floor Map) 관리 (M16 Admin — ADMIN 전용, 로컬 파일시스템 저장) ──
-
-export function uploadFloorMap(
-  floorId: string,
-  file: File,
-  meta: { widthPx: number; heightPx: number; scaleMPerPx: number },
-): Promise<FloorSummary> {
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("widthPx", String(meta.widthPx));
-  formData.append("heightPx", String(meta.heightPx));
-  formData.append("scaleMPerPx", String(meta.scaleMPerPx));
-  return authedFetch(`/api/v1/spatial/floors/${floorId}/floor-map`, {
-    method: "POST",
-    body: formData,
-  }).then(async (response) => {
-    if (!response.ok) throw new ApiError(response.status, await parseProblemDetail(response));
-    return (await response.json()) as FloorSummary;
-  });
-}
+// ─── 도면(Floor Map) 관리 (이미지 등록 후 별도 매핑) ──
 
 export function updateFloorMapScale(floorMapId: string, scaleMPerPx: number): Promise<unknown> {
   return authedJson(`/api/v1/spatial/floor-maps/${floorMapId}`, {
     method: "PATCH",
     body: JSON.stringify({ scaleMPerPx }),
   });
+}
+
+export function assignFloorMapImage(
+  floorId: string,
+  imageId: string,
+  scaleMPerPx: number,
+): Promise<FloorSummary> {
+  return authedJson<FloorSummary>(`/api/v1/spatial/floors/${floorId}/floor-map-image`, {
+    method: "PATCH",
+    body: JSON.stringify({ imageId, scaleMPerPx }),
+  });
+}
+
+// ─── 이미지 라이브러리 (이미지 기본정보 등록 후, 별도 매핑으로 사용) ──
+
+export function listImages(): Promise<ImageRecord[]> {
+  return authedJson<ImageRecord[]>("/api/v1/images");
+}
+
+export function uploadImage(
+  file: File,
+  meta: { name: string; widthPx: number; heightPx: number },
+): Promise<ImageRecord> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("name", meta.name);
+  formData.append("widthPx", String(meta.widthPx));
+  formData.append("heightPx", String(meta.heightPx));
+  return authedFetch("/api/v1/images", {
+    method: "POST",
+    body: formData,
+  }).then(async (response) => {
+    if (!response.ok) throw new ApiError(response.status, await parseProblemDetail(response));
+    return (await response.json()) as ImageRecord;
+  });
+}
+
+export function deleteImage(id: string): Promise<{ deleted: true }> {
+  return authedJson<{ deleted: true }>(`/api/v1/images/${id}`, { method: "DELETE" });
 }
 
 // ─── 지역(Area) 관리 (M16 Admin — ADMIN 전용) ────────────────────────

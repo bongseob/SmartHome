@@ -14,6 +14,8 @@ export const DeviceStateEvent = z.object({
   deviceId: z.string(),
   deviceCode: z.string(),
   status: DeviceStatus,
+  origin: z.enum(["INTENTIONAL", "FIELD"]).optional(),
+  originLabel: z.string().optional(),
   ts: epochMs,
 });
 export type DeviceStateEvent = z.infer<typeof DeviceStateEvent>;

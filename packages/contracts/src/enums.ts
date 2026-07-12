@@ -9,6 +9,18 @@ import { z } from "zod";
 export const DeviceCategory = z.enum(["DEVICE", "SENSOR", "GATEWAY", "CAMERA"]);
 export type DeviceCategory = z.infer<typeof DeviceCategory>;
 
+/** 기기 관리 운영 모델: 통신/제어 단위인 감시장비와 그 하위 개별 센서를 분리한다. */
+export const DeviceRole = z.enum(["MONITORING_EQUIPMENT", "SENSOR"]);
+export type DeviceRole = z.infer<typeof DeviceRole>;
+
+/** 센서 값 형태. 디지털은 ON/OFF류, 아날로그는 수치/연속값류를 의미한다. */
+export const SensorSignalType = z.enum(["DIGITAL", "ANALOG"]);
+export type SensorSignalType = z.infer<typeof SensorSignalType>;
+
+/** 감시장비 채널 I/O 유형. 레거시 DI/DO/AI/AO 표기를 그대로 수용한다. */
+export const SensorIoType = z.enum(["DI", "DO", "AI", "AO"]);
+export type SensorIoType = z.infer<typeof SensorIoType>;
+
 /** Floor Map 색상 매핑: ON=녹색 OFF=회색 WARNING=노랑 ALARM=빨강 OFFLINE=검정 */
 export const DeviceStatus = z.enum(["ON", "OFF", "WARNING", "ALARM", "OFFLINE"]);
 export type DeviceStatus = z.infer<typeof DeviceStatus>;
