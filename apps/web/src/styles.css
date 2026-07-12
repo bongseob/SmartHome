@@ -293,6 +293,120 @@ body {
 .badge--alarm { background: #e74c3c; }
 .badge--offline { background: #2c3e50; }
 
+/* ── 미확인 알람 배너 (현장 상태변화 등) ─────────────────────────────── */
+@keyframes alarm-banner-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(225, 29, 72, 0.55); }
+  50% { box-shadow: 0 0 0 6px rgba(225, 29, 72, 0); }
+}
+@keyframes alarm-dot-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+.alarm-banner {
+  margin: 0.5rem 1rem 0;
+  border: 2px solid #e11d48;
+  border-radius: 10px;
+  background: #fff1f3;
+  animation: alarm-banner-pulse 1.2s ease-in-out infinite;
+  overflow: hidden;
+}
+
+.alarm-banner__head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.85rem;
+  background: #e11d48;
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+.alarm-banner__pulse {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  animation: alarm-dot-blink 0.8s steps(1) infinite;
+}
+
+.alarm-banner__hint {
+  font-size: 0.8rem;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.alarm-banner__ackall {
+  margin-left: auto;
+  min-height: 28px;
+  padding: 0.2rem 0.7rem;
+  border: 1px solid #fff;
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-weight: 800;
+}
+
+.alarm-banner__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.alarm-banner__item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.85rem;
+  border-top: 1px solid #fecdd3;
+}
+
+.alarm-banner__sev {
+  flex: 0 0 auto;
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: #fff;
+}
+
+.alarm-banner__msg {
+  flex: 1;
+  min-width: 0;
+  color: #7f1d1d;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.alarm-banner__msg strong {
+  margin-right: 0.35rem;
+  color: #9f1239;
+}
+
+.alarm-banner__time {
+  flex: 0 0 auto;
+  font-size: 0.78rem;
+  color: #9f1239;
+}
+
+.alarm-banner__ack {
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0.2rem 0.8rem;
+  border: 1px solid #e11d48;
+  border-radius: 7px;
+  background: #e11d48;
+  color: #fff;
+  font-weight: 800;
+}
+
+.alarm-banner__ack:hover {
+  background: #be123c;
+}
+
 /* ── 차단기 전체 모니터링 (분전반 환경감시) ───────────────────────── */
 .full-monitoring {
   flex: 1;

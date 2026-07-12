@@ -115,6 +115,8 @@ interface FloorMapProps {
   focusEquipmentId?: string | null;
   /** 포커스를 적용한 뒤 부모의 상태를 비우도록 알린다(중복 적용 방지). */
   onFocusHandled?: () => void;
+  /** 미확인 알람이 걸린 기기(접점) id 집합 — 해당 마커를 빨간 링으로 강조한다. */
+  alarmedDeviceIds?: Set<string>;
 }
 
 export function FloorMap({
@@ -126,6 +128,7 @@ export function FloorMap({
   onDeviceDragEnd,
   focusEquipmentId = null,
   onFocusHandled,
+  alarmedDeviceIds,
 }: FloorMapProps): JSX.Element {
   const width = overview.floor.floorMapWidth ?? FALLBACK_WIDTH;
   const height = overview.floor.floorMapHeight ?? FALLBACK_HEIGHT;
@@ -416,6 +419,12 @@ export function FloorMap({
               ? DEVICE_STATUS_COLOR[summary.status]
               : DEVICE_STATUS_COLOR[device.currentStatus];
             const emphasized = selected || hovered;
+            // 미확인 알람: 접점 자체 또는 감시장비 하위 접점 중 하나라도 알람이면 강조.
+            const isAlarmed = alarmedDeviceIds
+              ? isEquipment
+                ? alarmedDeviceIds.has(device.id) || childSensors.some((s) => alarmedDeviceIds.has(s.id))
+                : alarmedDeviceIds.has(device.id)
+              : false;
             return (
               <Group
                 key={device.id}
@@ -448,6 +457,17 @@ export function FloorMap({
                   e.target.getStage()?.batchDraw();
                 }}
               >
+                {isAlarmed && (
+                  <Circle
+                    radius={isEquipment ? 22 : 17}
+                    stroke="#e11d48"
+                    strokeWidth={3}
+                    dash={[4, 3]}
+                    shadowColor="#e11d48"
+                    shadowBlur={12}
+                    listening={false}
+                  />
+                )}
                 {isEquipment ? (
                   <>
                     <Rect

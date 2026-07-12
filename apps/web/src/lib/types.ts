@@ -1,4 +1,6 @@
 import type {
+  AlarmState,
+  AlarmTier,
   DeviceCategory,
   DeviceLifecycle,
   DeviceRole,
@@ -10,6 +12,7 @@ import type {
   ScheduleType,
   SensorIoType,
   SensorSignalType,
+  Severity,
   TargetType,
 } from "@smarthome/contracts";
 
@@ -91,6 +94,23 @@ export interface DeviceListItem {
   connectionProtocol: string | null;
   connectionConfig: unknown;
   updatedAt: string;
+}
+
+// ─── 알람 (현장 상태변화 등) ───────────────────────────────────────────
+
+export interface AlarmRecord {
+  id: string;
+  policyId: string | null;
+  deviceId: string | null;
+  tier: AlarmTier;
+  severity: Severity;
+  message: string | null;
+  state: AlarmState;
+  raisedAt: string;
+  snoozedUntil: string | null;
+  resolvedAt: string | null;
+  escalatedLevel: number;
+  areaTopicPrefix: string | null;
 }
 
 // ─── 기기 등록/설정 (M16 Admin — ADMIN 전용) ──────────────────────────

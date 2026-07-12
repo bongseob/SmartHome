@@ -1,4 +1,5 @@
 import type {
+  AlarmRecord,
   Area,
   AuthUser,
   BuildingRecord,
@@ -204,6 +205,19 @@ async function authedJson<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export function listFloors(): Promise<FloorSummary[]> {
   return authedJson<FloorSummary[]>("/api/v1/spatial/floors");
+}
+
+/** 활성 알람(RAISED)만 조회 — 현장 상태변화 등. 확인(ack) 전까지 유지된다. */
+export function listActiveAlarms(): Promise<AlarmRecord[]> {
+  return authedJson<AlarmRecord[]>("/api/v1/alarms?state=RAISED");
+}
+
+/** 알람 확인(담당자/관리자) — RAISED → ACK. 확인 시에만 알람이 멈춘다(자동 해제 없음). */
+export function acknowledgeAlarm(id: string): Promise<AlarmRecord> {
+  return authedJson<AlarmRecord>(`/api/v1/alarms/${id}/ack`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
 }
 
 export function getFloorOverview(floorId: string): Promise<FloorOverview> {

@@ -13,8 +13,10 @@ import {
   saveFloorLayout,
   setDeviceMonitoring,
   checkSystemHealth,
+  listActiveAlarms,
+  acknowledgeAlarm,
 } from "./lib/api";
-import type { AuthUser, DeviceHistory, DeviceListItem, FloorOverview, FloorSummary } from "./lib/types";
+import type { AlarmRecord, AuthUser, DeviceHistory, DeviceListItem, FloorOverview, FloorSummary } from "./lib/types";
 import { useRealtime } from "./lib/useRealtime";
 import { LoginView } from "./components/LoginView";
 import { FloorMap } from "./components/FloorMap";
@@ -28,6 +30,7 @@ import { DeviceAdmin } from "./components/DeviceAdmin";
 import { Dashboard } from "./components/Dashboard";
 import { GroupControl } from "./components/GroupControl";
 import { FullMonitoring } from "./components/FullMonitoring";
+import { AlarmBanner } from "./components/AlarmBanner";
 
 const MAX_FEED_ENTRIES = 50;
 
@@ -40,6 +43,8 @@ export function App(): JSX.Element {
   const [user, setUser] = useState<AuthUser | null>(() => getSession()?.user ?? null);
   const [apiStatus, setApiStatus] = useState<"ONLINE" | "OFFLINE">("OFFLINE");
   const [mqttStatus, setMqttStatus] = useState<"ONLINE" | "OFFLINE">("OFFLINE");
+  // 미확인(RAISED) 알람 — 현장 상태변화 등. 확인(ack) 전까지 배너/하이라이트로 유지된다.
+  const [alarms, setAlarms] = useState<AlarmRecord[]>([]);
   const [floors, setFloors] = useState<FloorSummary[]>([]);
   const [selectedFloorId, setSelectedFloorId] = useState<string | null>(null);
   const [overview, setOverview] = useState<FloorOverview | null>(null);
@@ -84,6 +89,7 @@ export function App(): JSX.Element {
     setMode("execute");
     setPendingPositions({});
     setLayoutError(null);
+    setAlarms([]);
     setView("dashboard");
   }, []);
 
@@ -91,6 +97,35 @@ export function App(): JSX.Element {
     const loggedInUser = await apiLogin(username, password);
     setUser(loggedInUser);
   }, []);
+
+  // 활성(RAISED) 알람 재조회 — 로그인 시 + alarm.raised/updated 실시간 이벤트마다.
+  const refreshAlarms = useCallback(() => {
+    listActiveAlarms()
+      .then(setAlarms)
+      .catch((err: unknown) => {
+        if (err instanceof AuthExpiredError) handleLogout();
+        // 그 외 오류는 조용히 무시(다음 이벤트/폴링에서 회복)
+      });
+  }, [handleLogout]);
+
+  // 알람 확인(담당자/관리자) — 확인한 알람만 즉시 제거하고 서버 상태로 재동기화.
+  const handleAckAlarm = useCallback(
+    (id: string) => {
+      setAlarms((prev) => prev.filter((alarm) => alarm.id !== id));
+      acknowledgeAlarm(id)
+        .then(() => refreshAlarms())
+        .catch((err: unknown) => {
+          if (err instanceof AuthExpiredError) handleLogout();
+          else refreshAlarms(); // 실패 시 원복
+        });
+    },
+    [refreshAlarms, handleLogout],
+  );
+
+  // 로그인 시 활성 알람 초기 로드(현장변화 알람이 이미 떠 있을 수 있음).
+  useEffect(() => {
+    if (user) refreshAlarms();
+  }, [user, refreshAlarms]);
 
   useEffect(() => {
     if (!user) return;
@@ -307,8 +342,13 @@ export function App(): JSX.Element {
       if (event.type === "system.status") {
         setMqttStatus(event.mqtt === "connected" ? "ONLINE" : "OFFLINE");
       }
+
+      // 현장 상태변화 등으로 알람 발생/변경 → 활성 알람 재조회(배너·하이라이트 갱신).
+      if (event.type === "alarm.raised" || event.type === "alarm.updated") {
+        refreshAlarms();
+      }
     },
-    [selectedDevice],
+    [selectedDevice, refreshAlarms],
   );
 
   const handleStatusChange = useCallback((status: "connected" | "disconnected") => {
@@ -335,6 +375,16 @@ export function App(): JSX.Element {
         });
     }
   }, [user]);
+
+  const alarmedDeviceIds = useMemo(
+    () => new Set(alarms.map((a) => a.deviceId).filter((id): id is string => id !== null)),
+    [alarms],
+  );
+  const resolveDeviceName = useCallback(
+    (deviceId: string | null): string | null =>
+      overview?.devices.find((d) => d.id === deviceId)?.name ?? null,
+    [overview],
+  );
 
   if (!user) {
     return <LoginView onLogin={handleLogin} />;
@@ -430,6 +480,8 @@ export function App(): JSX.Element {
         </button>
       </header>
 
+      <AlarmBanner alarms={alarms} onAck={handleAckAlarm} resolveDeviceName={resolveDeviceName} />
+
       {view === "map" && mode === "edit" && (
         <div className="layout-editbar">
           <span>편집 모드 — 마커를 드래그해 위치를 옮기세요.</span>
@@ -491,6 +543,7 @@ export function App(): JSX.Element {
                 onDeviceDragEnd={handleDeviceDragEnd}
                 focusEquipmentId={focusEquipmentId}
                 onFocusHandled={() => setFocusEquipmentId(null)}
+                alarmedDeviceIds={alarmedDeviceIds}
               />
             ) : (
               <p>층을 불러오는 중…</p>
