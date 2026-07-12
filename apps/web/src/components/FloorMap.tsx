@@ -11,6 +11,8 @@ const FALLBACK_WIDTH = 800;
 const FALLBACK_HEIGHT = 600;
 const MIN_SCALE = 0.3;
 const MAX_SCALE = 4;
+const MIN_STAGE_WIDTH = 360;
+const MIN_STAGE_HEIGHT = 420;
 /** 마커가 도면 밖으로 나가지 않도록 반지름+여백만큼 안쪽으로 제한한다. */
 const MARKER_EDGE_MARGIN = 12;
 type MonitoringLevel = "equipment" | "sensor";
@@ -77,6 +79,21 @@ function sensorLabel(device: DeviceListItem): string {
   return device.channelAddress ? `${device.channelAddress} ${device.name}` : device.name;
 }
 
+function fitMapToViewport(
+  viewport: { width: number; height: number },
+  map: { width: number; height: number },
+): { scale: number; pos: { x: number; y: number } } {
+  const fitScale = Math.min(viewport.width / map.width, viewport.height / map.height);
+  const safeScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, fitScale));
+  return {
+    scale: safeScale,
+    pos: {
+      x: Math.max(0, (viewport.width - map.width * safeScale) / 2),
+      y: Math.max(0, (viewport.height - map.height * safeScale) / 2),
+    },
+  };
+}
+
 /** 접점(자식 센서)을 접점주소 기준으로 안정 정렬한다. */
 function sortContacts(sensors: DeviceListItem[]): DeviceListItem[] {
   return [...sensors].sort((a, b) =>
@@ -112,9 +129,14 @@ export function FloorMap({
   const width = overview.floor.floorMapWidth ?? FALLBACK_WIDTH;
   const height = overview.floor.floorMapHeight ?? FALLBACK_HEIGHT;
   const image = useHtmlImage(apiAssetUrl(overview.floor.floorMapUrl));
+  const stageContainerRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const [scale, setScale] = useState(1);
   const [pos, setPos] = useState({ x: 0, y: 0 });
+  const [stageSize, setStageSize] = useState({
+    width: Math.min(width, 1000),
+    height: Math.min(height, 700),
+  });
   const [monitoringLevel, setMonitoringLevel] = useState<MonitoringLevel>("equipment");
   // 지역(Area) 선택 — 선택 시 해당 지역 감시장비만 보여준다(요구: 지역 선택 → 감시장비 레벨).
   const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
@@ -130,6 +152,33 @@ export function FloorMap({
     setHoveredEquipmentId(null);
     setContactsEquipmentId(null);
   }, [overview.floor.id]);
+
+  useEffect(() => {
+    const container = stageContainerRef.current;
+    if (!container) return;
+
+    const updateSize = (): void => {
+      const rect = container.getBoundingClientRect();
+      const nextSize = {
+        width: Math.max(MIN_STAGE_WIDTH, Math.floor(rect.width)),
+        height: Math.max(MIN_STAGE_HEIGHT, Math.floor(rect.height)),
+      };
+      setStageSize((current) =>
+        current.width === nextSize.width && current.height === nextSize.height ? current : nextSize,
+      );
+    };
+
+    updateSize();
+    const resizeObserver = new ResizeObserver(updateSize);
+    resizeObserver.observe(container);
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const fitted = fitMapToViewport(stageSize, { width, height });
+    setScale(fitted.scale);
+    setPos(fitted.pos);
+  }, [overview.floor.id, stageSize, width, height]);
 
   const areasWithPoints = useMemo(
     () =>
@@ -278,8 +327,9 @@ export function FloorMap({
         <button
           type="button"
           onClick={() => {
-            setScale(1);
-            setPos({ x: 0, y: 0 });
+            const fitted = fitMapToViewport(stageSize, { width, height });
+            setScale(fitted.scale);
+            setPos(fitted.pos);
           }}
         >
           초기화
@@ -297,21 +347,22 @@ export function FloorMap({
           </button>
         )}
       </div>
-      <Stage
-        ref={stageRef}
-        width={Math.min(width, 1000)}
-        height={Math.min(height, 700)}
-        scaleX={scale}
-        scaleY={scale}
-        x={pos.x}
-        y={pos.y}
-        draggable={!editMode}
-        onWheel={handleWheel}
-        onDragEnd={(e) => {
-          if (e.target !== e.target.getStage()) return;
-          setPos({ x: e.target.x(), y: e.target.y() });
-        }}
-      >
+      <div className="floor-map__stage" ref={stageContainerRef}>
+        <Stage
+          ref={stageRef}
+          width={stageSize.width}
+          height={stageSize.height}
+          scaleX={scale}
+          scaleY={scale}
+          x={pos.x}
+          y={pos.y}
+          draggable={!editMode}
+          onWheel={handleWheel}
+          onDragEnd={(e) => {
+            if (e.target !== e.target.getStage()) return;
+            setPos({ x: e.target.x(), y: e.target.y() });
+          }}
+        >
         <Layer listening={false}>
           {image && <KonvaImage image={image} width={width} height={height} opacity={0.9} />}
         </Layer>
@@ -475,7 +526,8 @@ export function FloorMap({
             );
           })()}
         </Layer>
-      </Stage>
+        </Stage>
+      </div>
 
       {/* 클릭 → 접점별 상태 패널. 선택된 감시장비의 자식 접점(센서)을 접점주소/단자/IO/상태로 나열. */}
       {contactsEquipment && contactsSummary && (
