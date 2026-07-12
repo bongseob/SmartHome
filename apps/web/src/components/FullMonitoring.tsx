@@ -29,11 +29,12 @@ const CONTACT_LABEL: Record<ContactClass, string> = {
 
 const LEGEND_ORDER: ContactClass[] = ["EMG_ON", "NRM_ON", "EMG_OFF", "NRM_OFF", "SP", "ALARM"];
 
-/** 부하 구분(비상/일반). load_class가 있으면 그 값을, 없으면 화재감지기 등을 비상 회로로 간주한다. */
+/**
+ * 비상/일반은 **조명(전등) 차단기**의 비상등/일반등 구분이며, 오직 load_class로만 판정한다.
+ * (전열·화재감지기 등 조명이 아닌 접점은 이 축과 무관 → 비상 아님.)
+ */
 function isEmergency(device: DeviceListItem): boolean {
-  if (device.loadClass) return device.loadClass === "EMERGENCY";
-  const hay = `${device.deviceType ?? ""} ${device.name}`.toLowerCase();
-  return hay.includes("fire") || device.name.includes("화재") || device.name.includes("비상");
+  return device.loadClass === "EMERGENCY";
 }
 
 function contactClass(device: DeviceListItem): ContactClass {

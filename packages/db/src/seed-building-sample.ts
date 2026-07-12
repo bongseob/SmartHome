@@ -27,6 +27,9 @@ interface DeviceDef {
   namePrefix: string;
   posDx: number;
   posDy: number;
+  /** 부하 구분 — 조명(전등) 차단기만 비상등(EMERGENCY)/일반등(NORMAL)으로 나뉜다.
+   *  전열/기타(에어컨·화재감지기)는 조명의 비상/일반 축과 무관하므로 미지정(null). */
+  loadClass?: "NORMAL" | "EMERGENCY" | "RESERVE";
 }
 
 const FLOORS: FloorDef[] = [
@@ -71,8 +74,10 @@ const AREAS: AreaDef[] = [
 ];
 
 const DEVICES: DeviceDef[] = [
-  { kind: "light", index: 1, category: "DEVICE", deviceType: "light", sensorIoType: "DO", namePrefix: "전등", posDx: 0, posDy: 0 },
-  { kind: "light", index: 2, category: "DEVICE", deviceType: "light", sensorIoType: "DO", namePrefix: "전등", posDx: 58, posDy: 0 },
+  // 전등(조명) — 전등1 = 일반등(NORMAL), 전등2 = 비상등(EMERGENCY).
+  { kind: "light", index: 1, category: "DEVICE", deviceType: "light", sensorIoType: "DO", namePrefix: "일반등", posDx: 0, posDy: 0, loadClass: "NORMAL" },
+  { kind: "light", index: 2, category: "DEVICE", deviceType: "light", sensorIoType: "DO", namePrefix: "비상등", posDx: 58, posDy: 0, loadClass: "EMERGENCY" },
+  // 전열/기타 — 조명의 비상/일반 축과 무관(load_class 미지정).
   { kind: "aircon", index: 1, category: "DEVICE", deviceType: "aircon", sensorIoType: "DO", namePrefix: "에어컨", posDx: 0, posDy: 58 },
   { kind: "fire_detector", index: 1, category: "SENSOR", deviceType: "fire_detector", sensorIoType: "DI", namePrefix: "화재감지기", posDx: 58, posDy: 58 },
 ];
@@ -254,11 +259,11 @@ async function seedBuildingSample(): Promise<void> {
           `INSERT INTO device (
              code, name, category, device_role, device_type, manufacturer, model, firmware_version,
              mqtt_topic, area_id, parent_device_id, current_status, lifecycle_status,
-             sensor_signal_type, sensor_io_type, channel_address, terminal_block,
+             sensor_signal_type, sensor_io_type, channel_address, terminal_block, load_class,
              pos_x, pos_y, monitoring_visible, enabled
            )
            VALUES ($1,$2,$3,'SENSOR',$4,'SampleCo','SIM-100','1.0.0',$5,$6,$7,$8,'ACTIVE',
-             $9,$10,$11,$12,$13,$14,true,true)
+             $9,$10,$11,$12,$15::load_class,$13,$14,true,true)
            ON CONFLICT (code) DO UPDATE SET
              name = EXCLUDED.name,
              category = EXCLUDED.category,
@@ -276,6 +281,7 @@ async function seedBuildingSample(): Promise<void> {
              sensor_io_type = EXCLUDED.sensor_io_type,
              channel_address = EXCLUDED.channel_address,
              terminal_block = EXCLUDED.terminal_block,
+             load_class = EXCLUDED.load_class,
              pos_x = EXCLUDED.pos_x,
              pos_y = EXCLUDED.pos_y,
              monitoring_visible = true,
@@ -283,7 +289,7 @@ async function seedBuildingSample(): Promise<void> {
            RETURNING id::text AS id`,
           [
             code,
-            `${floor.name} ${area.name} ${device.namePrefix} ${device.index}`,
+            `${floor.name} ${area.name} ${device.namePrefix}${device.kind === "light" ? "" : ` ${device.index}`}`,
             device.category,
             device.deviceType,
             topic,
@@ -296,6 +302,7 @@ async function seedBuildingSample(): Promise<void> {
             `${floor.name}-${area.name}`,
             area.baseX + device.posDx,
             area.baseY + device.posDy,
+            device.loadClass ?? null,
           ],
         );
         deviceCount += 1;
