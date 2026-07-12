@@ -50,11 +50,19 @@ export const AlarmUpdatedEvent = z.object({
 });
 export type AlarmUpdatedEvent = z.infer<typeof AlarmUpdatedEvent>;
 
+export const SystemStatusEvent = z.object({
+  type: z.literal("system.status"),
+  mqtt: z.enum(["connected", "disconnected"]),
+  ts: epochMs,
+});
+export type SystemStatusEvent = z.infer<typeof SystemStatusEvent>;
+
 export const RealtimeEvent = z.discriminatedUnion("type", [
   DeviceStateEvent,
   AlarmRaisedEvent,
   CommandStatusEvent,
   AlarmUpdatedEvent,
+  SystemStatusEvent,
 ]);
 export type RealtimeEvent = z.infer<typeof RealtimeEvent>;
 

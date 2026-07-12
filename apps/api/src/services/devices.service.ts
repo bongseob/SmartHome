@@ -8,7 +8,7 @@ import {
   SEGMENT_PATTERN,
   buildDeviceBase,
 } from "@smarthome/contracts";
-import type { DeviceCategory, DeviceRole, SensorIoType, SensorSignalType } from "@smarthome/contracts";
+import type { DeviceCategory, DeviceRole, LoadClass, SensorIoType, SensorSignalType } from "@smarthome/contracts";
 import {
   createDevice,
   decommissionDevice,
@@ -53,6 +53,8 @@ export interface CreateDeviceRequest {
   sensorIoType?: SensorIoType | null;
   channelAddress?: string | null;
   terminalBlock?: string | null;
+  loadClass?: LoadClass | null;
+  description?: string | null;
 }
 
 export interface UpdateDeviceRequest {
@@ -67,6 +69,8 @@ export interface UpdateDeviceRequest {
   sensorIoType?: SensorIoType | null;
   channelAddress?: string | null;
   terminalBlock?: string | null;
+  loadClass?: LoadClass | null;
+  description?: string | null;
 }
 
 const DEVICE_ROLES: DeviceRole[] = ["MONITORING_EQUIPMENT", "SENSOR"];
@@ -345,6 +349,8 @@ export class DevicesService {
           sensorIoType,
           channelAddress: deviceRole === "SENSOR" ? body.channelAddress ?? null : null,
           terminalBlock: body.terminalBlock ?? null,
+          loadClass: body.loadClass ?? "NORMAL",
+          description: body.description ?? null,
         });
       } catch (e) {
         if ((e as { code?: string }).code === "23505") {
@@ -416,6 +422,8 @@ export class DevicesService {
       if (body.firmwareVersion !== undefined) updateInput.firmwareVersion = body.firmwareVersion;
       if (body.gatewayId !== undefined) updateInput.gatewayId = body.gatewayId;
       if (body.terminalBlock !== undefined) updateInput.terminalBlock = body.terminalBlock;
+      if (body.loadClass !== undefined) updateInput.loadClass = body.loadClass;
+      if (body.description !== undefined) updateInput.description = body.description;
       if (before.deviceRole === "SENSOR") {
         if (body.parentDeviceId !== undefined) updateInput.parentDeviceId = body.parentDeviceId;
         if (sensorSignalType !== undefined) updateInput.sensorSignalType = sensorSignalType;
@@ -447,6 +455,12 @@ export class DevicesService {
       }
       if (body.gatewayId !== undefined && body.gatewayId !== before.gatewayId) {
         changes.push(`gatewayId '${before.gatewayId ?? "null"}' → '${body.gatewayId ?? "null"}'`);
+      }
+      if (body.loadClass !== undefined && body.loadClass !== before.loadClass) {
+        changes.push(`loadClass '${before.loadClass ?? "null"}' → '${body.loadClass ?? "null"}'`);
+      }
+      if (body.description !== undefined && body.description !== before.description) {
+        changes.push(`description '${before.description ?? "null"}' → '${body.description ?? "null"}'`);
       }
 
       await insertAuditLog(client, {

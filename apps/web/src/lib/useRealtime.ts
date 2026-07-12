@@ -12,11 +12,14 @@ export function useRealtime(
   enabled: boolean,
   onEvent: (event: RealtimeEvent) => void,
   onAuthExpired: () => void,
+  onStatusChange?: (status: "connected" | "disconnected") => void,
 ): void {
   const onEventRef = useRef(onEvent);
   onEventRef.current = onEvent;
   const onAuthExpiredRef = useRef(onAuthExpired);
   onAuthExpiredRef.current = onAuthExpired;
+  const onStatusChangeRef = useRef(onStatusChange);
+  onStatusChangeRef.current = onStatusChange;
 
   useEffect(() => {
     if (!enabled) return;
@@ -27,6 +30,9 @@ export function useRealtime(
 
     const connect = (): void => {
       socket = new WebSocket(wsUrl());
+      socket.onopen = () => {
+        onStatusChangeRef.current?.("connected");
+      };
       socket.onmessage = (event: MessageEvent<string>) => {
         let parsed: unknown;
         try {
@@ -40,6 +46,7 @@ export function useRealtime(
         }
       };
       socket.onclose = (event: CloseEvent) => {
+        onStatusChangeRef.current?.("disconnected");
         if (stopped) return;
         if (event.code === 4401) {
           onAuthExpiredRef.current();

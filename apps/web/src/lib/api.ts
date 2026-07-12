@@ -446,3 +446,17 @@ export function wsUrl(): string {
   const token = readStoredAuth()?.tokens.accessToken ?? "";
   return `${base}/ws/realtime?token=${encodeURIComponent(token)}`;
 }
+
+export interface HealthStatus {
+  status: "ok" | "error";
+  service: "api";
+  mqtt: "connected" | "disconnected";
+}
+
+export async function checkSystemHealth(): Promise<HealthStatus> {
+  const response = await rawFetch("/health", { method: "GET" });
+  if (!response.ok) {
+    throw new ApiError(response.status, "시스템 헬스 체크 실패");
+  }
+  return response.json() as Promise<HealthStatus>;
+}

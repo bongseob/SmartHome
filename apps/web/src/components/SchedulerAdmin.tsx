@@ -7,9 +7,10 @@ import {
   getSchedulerRuns,
   listDevices,
   listSchedulers,
+  listGroupControlSummaries,
   setSchedulerEnabled,
 } from "../lib/api";
-import type { CreateSchedulerRequest, DeviceListItem, ScheduleRunRecord, SchedulerRecord } from "../lib/types";
+import type { CreateSchedulerRequest, DeviceListItem, GroupControlSummary, ScheduleRunRecord, SchedulerRecord } from "../lib/types";
 
 const SCHEDULE_TYPES: ScheduleType[] = ["ONE_TIME", "DAILY", "WEEKLY", "MONTHLY", "CRON"];
 const TARGET_TYPES: TargetType[] = ["DEVICE", "GROUP", "AREA"];
@@ -36,8 +37,36 @@ function summarizeSchedule(s: SchedulerRecord): string {
 }
 
 /** "HH:MM" 입력을 UTC 시각으로 해석해 임의의 기준일 ISO 문자열로 만든다(schedule-math.ts는 시:분:초만 사용). */
-function timeToUtcIso(time: string): string {
-  return new Date(`1970-01-01T${time}:00Z`).toISOString();
+function timeToUtcIso(time: string): string | null {
+  let clean = time.trim();
+  let isPM = false;
+  if (/오후|pm/i.test(clean)) {
+    isPM = true;
+  }
+  clean = clean.replace(/오전|오후|am|pm|시|분|초/gi, "").trim();
+
+  const match = clean.match(/(\d{1,2})[\s:]*(\d{2})?/);
+  if (!match) return null;
+
+  let hours = parseInt(match[1] || "0", 10);
+  const minutes = parseInt(match[2] || "0", 10);
+
+  if (isPM && hours < 12) {
+    hours += 12;
+  } else if (!isPM && hours === 12) {
+    hours = 0;
+  }
+
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+    return null;
+  }
+
+  const paddedH = String(hours).padStart(2, "0");
+  const paddedM = String(minutes).padStart(2, "0");
+
+  const isoStr = `1970-01-01T${paddedH}:${paddedM}:00Z`;
+  const d = new Date(isoStr);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
 interface FormState {
@@ -71,6 +100,7 @@ const INITIAL_FORM: FormState = {
 export function SchedulerAdmin(): JSX.Element {
   const [schedulers, setSchedulers] = useState<SchedulerRecord[]>([]);
   const [devices, setDevices] = useState<DeviceListItem[]>([]);
+  const [groups, setGroups] = useState<GroupControlSummary[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<FormState>(INITIAL_FORM);
@@ -95,6 +125,9 @@ export function SchedulerAdmin(): JSX.Element {
     reload();
     listDevices()
       .then(setDevices)
+      .catch(() => undefined);
+    listGroupControlSummaries()
+      .then(setGroups)
       .catch(() => undefined);
   }, []);
 
@@ -171,19 +204,29 @@ export function SchedulerAdmin(): JSX.Element {
         setFormError("발화 시각을 입력하세요.");
         return;
       }
-      body.runAt = new Date(form.oneTimeAt).toISOString();
-    } else if (form.scheduleType === "DAILY") {
-      body.runAt = timeToUtcIso(form.timeOfDay);
-    } else if (form.scheduleType === "WEEKLY") {
-      if (form.daysOfWeek.length === 0) {
-        setFormError("반복할 요일을 하나 이상 선택하세요.");
+      const parsedDate = new Date(form.oneTimeAt);
+      if (Number.isNaN(parsedDate.getTime())) {
+        setFormError("올바르지 않은 발화 시각 형식입니다. 날짜와 시각을 정확히 입력해 주세요.");
         return;
       }
-      body.runAt = timeToUtcIso(form.timeOfDay);
-      body.daysOfWeek = form.daysOfWeek;
-    } else if (form.scheduleType === "MONTHLY") {
-      body.runAt = timeToUtcIso(form.timeOfDay);
-      body.dayOfMonth = form.dayOfMonth;
+      body.runAt = parsedDate.toISOString();
+    } else if (form.scheduleType === "DAILY" || form.scheduleType === "WEEKLY" || form.scheduleType === "MONTHLY") {
+      const utcIso = timeToUtcIso(form.timeOfDay);
+      if (!utcIso) {
+        setFormError("올바르지 않은 시각 형식입니다. 시각을 정확히 입력해 주세요.");
+        return;
+      }
+      body.runAt = utcIso;
+
+      if (form.scheduleType === "WEEKLY") {
+        if (form.daysOfWeek.length === 0) {
+          setFormError("반복할 요일을 하나 이상 선택하세요.");
+          return;
+        }
+        body.daysOfWeek = form.daysOfWeek;
+      } else if (form.scheduleType === "MONTHLY") {
+        body.dayOfMonth = form.dayOfMonth;
+      }
     } else if (form.scheduleType === "CRON") {
       if (!form.cronExpr.trim()) {
         setFormError("cron 식을 입력하세요.");
@@ -207,224 +250,254 @@ export function SchedulerAdmin(): JSX.Element {
 
   return (
     <div className="scheduler-admin">
-      <div className="scheduler-admin__header">
+      <div className="scheduler-admin__header" style={{ display: "flex", gap: "1rem", alignItems: "center", marginBottom: "1rem" }}>
         <h2>스케줄 / 예약 관리</h2>
-        <button type="button" className="primary" onClick={() => setShowForm((v) => !v)}>
-          {showForm ? "닫기" : "+ 새 스케줄"}
+        <button type="button" className="primary" onClick={() => setShowForm(true)}>
+          + 새 스케줄
         </button>
       </div>
 
       {loadError && <p className="error-text">{loadError}</p>}
 
+      {/* ─── 새 스케줄 등록 모달 ─── */}
       {showForm && (
-        <form className="scheduler-form" onSubmit={handleSubmit}>
-          <label>
-            이름
-            <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          </label>
-
-          <div className="scheduler-form__row">
-            <label>
-              대상 종류
-              <select
-                value={form.targetType}
-                onChange={(e) => setForm({ ...form, targetType: e.target.value as TargetType, targetId: "" })}
-              >
-                {TARGET_TYPES.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            {form.targetType === "DEVICE" ? (
+        <div className="modal-overlay">
+          <form className="modal-content" onSubmit={handleSubmit}>
+            <h3>새 스케줄 예약 등록</h3>
+            <div className="device-admin__form">
               <label>
-                대상 기기
-                <select value={form.targetId} onChange={(e) => setForm({ ...form, targetId: e.target.value })}>
-                  <option value="">선택하세요</option>
-                  {devices.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name} ({d.code})
+                이름
+                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              </label>
+
+              <div className="scheduler-form__row">
+                <label>
+                  대상 종류
+                  <select
+                    value={form.targetType}
+                    onChange={(e) => setForm({ ...form, targetType: e.target.value as TargetType, targetId: "" })}
+                  >
+                    {TARGET_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {form.targetType === "DEVICE" && (
+                  <label>
+                    대상 기기
+                    <select value={form.targetId} onChange={(e) => setForm({ ...form, targetId: e.target.value })}>
+                      <option value="">선택하세요</option>
+                      {devices.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.name} ({d.code})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
+                {form.targetType === "GROUP" && (
+                  <label>
+                    대상 그룹
+                    <select value={form.targetId} onChange={(e) => setForm({ ...form, targetId: e.target.value })}>
+                      <option value="">선택하세요</option>
+                      {groups.map((g) => (
+                        <option key={g.id} value={g.id}>
+                          {g.name} ({g.slug})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
+                {form.targetType === "AREA" && (
+                  <label>
+                    대상 ID
+                    <input
+                      value={form.targetId}
+                      onChange={(e) => setForm({ ...form, targetId: e.target.value })}
+                      placeholder="공간(Area) ID (UUID)"
+                    />
+                  </label>
+                )}
+              </div>
+
+              <label>
+                반복 방식
+                <select
+                  value={form.scheduleType}
+                  onChange={(e) => setForm({ ...form, scheduleType: e.target.value as ScheduleType })}
+                >
+                  {SCHEDULE_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
                     </option>
                   ))}
                 </select>
               </label>
-            ) : (
-              <label>
-                대상 ID
-                <input
-                  value={form.targetId}
-                  onChange={(e) => setForm({ ...form, targetId: e.target.value })}
-                  placeholder={`${form.targetType} id`}
-                />
-              </label>
-            )}
-          </div>
 
-          <label>
-            반복 방식
-            <select
-              value={form.scheduleType}
-              onChange={(e) => setForm({ ...form, scheduleType: e.target.value as ScheduleType })}
-            >
-              {SCHEDULE_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </label>
+              {form.scheduleType === "ONE_TIME" && (
+                <label>
+                  발화 시각
+                  <input
+                    type="datetime-local"
+                    value={form.oneTimeAt}
+                    onChange={(e) => setForm({ ...form, oneTimeAt: e.target.value })}
+                  />
+                </label>
+              )}
 
-          {form.scheduleType === "ONE_TIME" && (
-            <label>
-              발화 시각
-              <input
-                type="datetime-local"
-                value={form.oneTimeAt}
-                onChange={(e) => setForm({ ...form, oneTimeAt: e.target.value })}
-              />
-            </label>
-          )}
+              {(form.scheduleType === "DAILY" || form.scheduleType === "WEEKLY" || form.scheduleType === "MONTHLY") && (
+                <label>
+                  시각 (UTC)
+                  <input
+                    type="time"
+                    value={form.timeOfDay}
+                    onChange={(e) => setForm({ ...form, timeOfDay: e.target.value })}
+                  />
+                </label>
+              )}
 
-          {(form.scheduleType === "DAILY" || form.scheduleType === "WEEKLY" || form.scheduleType === "MONTHLY") && (
-            <label>
-              시각 (UTC)
-              <input
-                type="time"
-                value={form.timeOfDay}
-                onChange={(e) => setForm({ ...form, timeOfDay: e.target.value })}
-              />
-            </label>
-          )}
+              {form.scheduleType === "WEEKLY" && (
+                <div className="scheduler-form__weekdays">
+                  {WEEKDAY_LABELS.map((label, day) => (
+                    <button
+                      key={day}
+                      type="button"
+                      className={form.daysOfWeek.includes(day) ? "active" : ""}
+                      onClick={() => toggleWeekday(day)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
 
-          {form.scheduleType === "WEEKLY" && (
-            <div className="scheduler-form__weekdays">
-              {WEEKDAY_LABELS.map((label, day) => (
-                <button
-                  key={day}
-                  type="button"
-                  className={form.daysOfWeek.includes(day) ? "active" : ""}
-                  onClick={() => toggleWeekday(day)}
-                >
-                  {label}
-                </button>
-              ))}
+              {form.scheduleType === "MONTHLY" && (
+                <label>
+                  매월 며칠
+                  <input
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={form.dayOfMonth}
+                    onChange={(e) => setForm({ ...form, dayOfMonth: Number(e.target.value) })}
+                  />
+                </label>
+              )}
+
+              {form.scheduleType === "CRON" && (
+                <label>
+                  cron 식
+                  <input
+                    value={form.cronExpr}
+                    onChange={(e) => setForm({ ...form, cronExpr: e.target.value })}
+                    placeholder="0 9 * * 1-5"
+                  />
+                </label>
+              )}
+
+              <div className="scheduler-form__row">
+                <label>
+                  명령(command)
+                  <input
+                    value={form.command}
+                    onChange={(e) => setForm({ ...form, command: e.target.value })}
+                    placeholder="turn_on"
+                  />
+                </label>
+                <label>
+                  args (JSON, 선택)
+                  <input
+                    value={form.argsJson}
+                    onChange={(e) => setForm({ ...form, argsJson: e.target.value })}
+                    placeholder='{"level": 3}'
+                  />
+                </label>
+              </div>
             </div>
-          )}
 
-          {form.scheduleType === "MONTHLY" && (
-            <label>
-              매월 며칠
-              <input
-                type="number"
-                min={1}
-                max={31}
-                value={form.dayOfMonth}
-                onChange={(e) => setForm({ ...form, dayOfMonth: Number(e.target.value) })}
-              />
-            </label>
-          )}
+            {formError && <p className="error-text">{formError}</p>}
 
-          {form.scheduleType === "CRON" && (
-            <label>
-              cron 식
-              <input
-                value={form.cronExpr}
-                onChange={(e) => setForm({ ...form, cronExpr: e.target.value })}
-                placeholder="0 9 * * 1-5"
-              />
-            </label>
-          )}
-
-          <div className="scheduler-form__row">
-            <label>
-              명령(command)
-              <input
-                value={form.command}
-                onChange={(e) => setForm({ ...form, command: e.target.value })}
-                placeholder="turn_on"
-              />
-            </label>
-            <label>
-              args (JSON, 선택)
-              <input
-                value={form.argsJson}
-                onChange={(e) => setForm({ ...form, argsJson: e.target.value })}
-                placeholder='{"level": 3}'
-              />
-            </label>
-          </div>
-
-          {formError && <p className="error-text">{formError}</p>}
-
-          <button type="submit" className="primary" disabled={submitting}>
-            {submitting ? "생성 중…" : "생성"}
-          </button>
-        </form>
+            <div className="modal-actions">
+              <button type="submit" className="primary" disabled={submitting}>
+                {submitting ? "생성 중…" : "생성"}
+              </button>
+              <button type="button" onClick={() => setShowForm(false)}>
+                취소
+              </button>
+            </div>
+          </form>
+        </div>
       )}
 
-      <table className="scheduler-table">
-        <thead>
-          <tr>
-            <th>이름</th>
-            <th>대상</th>
-            <th>일정</th>
-            <th>명령</th>
-            <th>활성</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {schedulers.map((s) => (
-            <Fragment key={s.id}>
-              <tr>
-                <td>{s.name}</td>
-                <td>
-                  {s.targetType} · {s.targetId.slice(0, 8)}
-                </td>
-                <td>{summarizeSchedule(s)}</td>
-                <td>{s.payload.command ?? "-"}</td>
-                <td>
-                  <button
-                    type="button"
-                    className={s.enabled ? "active" : ""}
-                    onClick={() => handleToggleEnabled(s)}
-                  >
-                    {s.enabled ? "ON" : "OFF"}
-                  </button>
-                </td>
-                <td className="scheduler-table__actions">
-                  <button type="button" onClick={() => handleShowRuns(s)}>
-                    이력
-                  </button>
-                  <button type="button" onClick={() => handleDelete(s)}>
-                    삭제
-                  </button>
-                </td>
-              </tr>
-              {runsFor === s.id && (
+      {/* ─── 스케줄 목록 테이블 ─── */}
+      <div className="scheduler-table-container">
+        <table className="scheduler-table">
+          <thead>
+            <tr>
+              <th>이름</th>
+              <th>대상</th>
+              <th>일정</th>
+              <th>명령</th>
+              <th>활성</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {schedulers.map((s) => (
+              <Fragment key={s.id}>
                 <tr>
-                  <td colSpan={6} className="scheduler-table__runs">
-                    {runsError && <p className="error-text">{runsError}</p>}
-                    {!runsError && runs.length === 0 && <span>실행 이력이 없습니다.</span>}
-                    {!runsError && runs.length > 0 && (
-                      <ul>
-                        {runs.map((r) => (
-                          <li key={r.id}>
-                            {new Date(r.firedAt).toLocaleString()} · {r.status}
-                            {r.commandId ? ` · command ${r.commandId.slice(0, 8)}` : ""}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
+                  <td>{s.name}</td>
+                  <td>
+                    {s.targetType} · {s.targetId.slice(0, 8)}
+                  </td>
+                  <td>{summarizeSchedule(s)}</td>
+                  <td>{s.payload.command ?? "-"}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className={s.enabled ? "active" : ""}
+                      onClick={() => handleToggleEnabled(s)}
+                    >
+                      {s.enabled ? "ON" : "OFF"}
+                    </button>
+                  </td>
+                  <td className="scheduler-table__actions">
+                    <button type="button" onClick={() => handleShowRuns(s)}>
+                      이력
+                    </button>
+                    <button type="button" onClick={() => handleDelete(s)}>
+                      삭제
+                    </button>
                   </td>
                 </tr>
-              )}
-            </Fragment>
-          ))}
-        </tbody>
-      </table>
+                {runsFor === s.id && (
+                  <tr>
+                    <td colSpan={6} className="scheduler-table__runs">
+                      {runsError && <p className="error-text">{runsError}</p>}
+                      {!runsError && runs.length === 0 && <span>실행 이력이 없습니다.</span>}
+                      {!runsError && runs.length > 0 && (
+                        <ul>
+                          {runs.map((r) => (
+                            <li key={r.id}>
+                              {new Date(r.firedAt).toLocaleString()} · {r.status}
+                              {r.commandId ? ` · command ${r.commandId.slice(0, 8)}` : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

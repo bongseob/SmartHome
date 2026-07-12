@@ -94,6 +94,7 @@ export function AreaAdmin(): JSX.Element {
 
   const handleStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
     if (!drawing) return;
+    if (e.target !== e.target.getStage()) return;
     const stage = e.target.getStage();
     const pointer = stage?.getPointerPosition();
     if (!pointer) return;
@@ -243,12 +244,42 @@ export function AreaAdmin(): JSX.Element {
                     );
                   })}
               </Layer>
-              <Layer listening={false}>
+              <Layer>
                 {drawPoints.length >= 2 && (
                   <Line points={drawPoints.flat()} stroke="#e67e22" strokeWidth={2} closed={drawPoints.length >= 3} fill="rgba(230,126,34,0.15)" />
                 )}
                 {drawPoints.map((p, i) => (
-                  <Circle key={i} x={p[0]} y={p[1]} radius={4} fill="#e67e22" />
+                  <Circle
+                    key={i}
+                    x={p[0]}
+                    y={p[1]}
+                    radius={6.5}
+                    fill="#e67e22"
+                    stroke="#ffffff"
+                    strokeWidth={1.5}
+                    draggable={true}
+                    onDragMove={(e) => {
+                      e.cancelBubble = true;
+                      const nextPos = [e.target.x(), e.target.y()];
+                      setDrawPoints((prev) => {
+                        const next = [...prev];
+                        next[i] = nextPos;
+                        return next;
+                      });
+                    }}
+                    onDragEnd={(e) => {
+                      e.cancelBubble = true;
+                      e.target.getStage()?.batchDraw();
+                    }}
+                    onMouseEnter={(e) => {
+                      const container = e.target.getStage()?.container();
+                      if (container) container.style.cursor = "move";
+                    }}
+                    onMouseLeave={(e) => {
+                      const container = e.target.getStage()?.container();
+                      if (container) container.style.cursor = "default";
+                    }}
+                  />
                 ))}
               </Layer>
             </Stage>

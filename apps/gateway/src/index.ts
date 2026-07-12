@@ -308,7 +308,6 @@ async function handleAckMessage(
     console.error(`[gateway] ack 처리 오류 command=${ack.commandId}:`, err);
   }
 }
-
 async function onMessage(
   redis: RedisCommandClient,
   events: RealtimePublisher,
@@ -317,7 +316,6 @@ async function onMessage(
 ): Promise<void> {
   const parts = parseTopic(topic);
   if (!parts) return;
-
   let json: unknown;
   try {
     json = JSON.parse(payload.toString());

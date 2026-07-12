@@ -12,6 +12,7 @@ import {
   logout as apiLogout,
   saveFloorLayout,
   setDeviceMonitoring,
+  checkSystemHealth,
 } from "./lib/api";
 import type { AuthUser, DeviceHistory, DeviceListItem, FloorOverview, FloorSummary } from "./lib/types";
 import { useRealtime } from "./lib/useRealtime";
@@ -37,6 +38,8 @@ interface PendingCommand {
 
 export function App(): JSX.Element {
   const [user, setUser] = useState<AuthUser | null>(() => getSession()?.user ?? null);
+  const [apiStatus, setApiStatus] = useState<"ONLINE" | "OFFLINE">("OFFLINE");
+  const [mqttStatus, setMqttStatus] = useState<"ONLINE" | "OFFLINE">("OFFLINE");
   const [floors, setFloors] = useState<FloorSummary[]>([]);
   const [selectedFloorId, setSelectedFloorId] = useState<string | null>(null);
   const [overview, setOverview] = useState<FloorOverview | null>(null);
@@ -300,11 +303,38 @@ export function App(): JSX.Element {
             .catch(() => undefined);
         }
       }
+
+      if (event.type === "system.status") {
+        setMqttStatus(event.mqtt === "connected" ? "ONLINE" : "OFFLINE");
+      }
     },
     [selectedDevice],
   );
 
-  useRealtime(Boolean(user), handleRealtimeEvent, handleLogout);
+  const handleStatusChange = useCallback((status: "connected" | "disconnected") => {
+    setApiStatus(status === "connected" ? "ONLINE" : "OFFLINE");
+    if (status === "connected") {
+      checkSystemHealth()
+        .then((res) => setMqttStatus(res.mqtt === "connected" ? "ONLINE" : "OFFLINE"))
+        .catch(() => setMqttStatus("OFFLINE"));
+    } else {
+      setMqttStatus("OFFLINE");
+    }
+  }, []);
+
+  useRealtime(Boolean(user), handleRealtimeEvent, handleLogout, handleStatusChange);
+
+  useEffect(() => {
+    if (user) {
+      checkSystemHealth()
+        .then((res) => {
+          setMqttStatus(res.mqtt === "connected" ? "ONLINE" : "OFFLINE");
+        })
+        .catch(() => {
+          setMqttStatus("OFFLINE");
+        });
+    }
+  }, [user]);
 
   if (!user) {
     return <LoginView onLogin={handleLogin} />;
@@ -381,6 +411,17 @@ export function App(): JSX.Element {
             </button>
           </div>
         )}
+        <div className="connection-statuses">
+          <span className={`header-status-chip header-status-chip--${apiStatus.toLowerCase()}`}>
+            <span className="status-indicator-dot" />
+            API {apiStatus}
+          </span>
+          <span className={`header-status-chip header-status-chip--${mqttStatus.toLowerCase()}`}>
+            <span className="status-indicator-dot" />
+            MQTT {mqttStatus}
+          </span>
+        </div>
+
         <span className="app-shell__user">
           {user.username} ({user.roles.join(", ")})
         </span>

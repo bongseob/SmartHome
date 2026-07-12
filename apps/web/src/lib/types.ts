@@ -82,6 +82,7 @@ export interface DeviceListItem {
   channelAddress: string | null;
   terminalBlock: string | null;
   loadClass: LoadClass | null;
+  description: string | null;
   areaId: string | null;
   areaTopicPrefix: string | null;
   posX: string | null;
@@ -110,6 +111,8 @@ export interface CreateDeviceRequest {
   sensorIoType?: SensorIoType | null;
   channelAddress?: string | null;
   terminalBlock?: string | null;
+  loadClass?: LoadClass | null;
+  description?: string | null;
 }
 
 export interface UpdateDeviceRequest {
@@ -124,6 +127,8 @@ export interface UpdateDeviceRequest {
   sensorIoType?: SensorIoType | null;
   channelAddress?: string | null;
   terminalBlock?: string | null;
+  loadClass?: LoadClass | null;
+  description?: string | null;
 }
 
 export interface SetDeviceConnectionRequest {

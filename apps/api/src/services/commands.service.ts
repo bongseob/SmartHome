@@ -15,6 +15,7 @@ import {
   type TargetType,
 } from "@smarthome/contracts";
 import { connect, type DeviceIdentity, type MqttClient } from "@smarthome/mqtt";
+import { createRealtimePublisher, publishRealtimeEvent, type RealtimePublisher } from "@smarthome/realtime";
 import {
   getCommandById,
   getDeviceAccessLevel,
@@ -88,6 +89,7 @@ const commandExecutor = { query };
 export class CommandsService implements OnModuleInit, OnModuleDestroy {
   private mqtt: MqttClient | undefined;
   private redis: RedisCommandClient | undefined;
+  private publisher: RealtimePublisher | undefined;
 
   async onModuleInit(): Promise<void> {
     this.mqtt = connect(process.env.MQTT_URL ?? "mqtt://localhost:1883", {
@@ -95,6 +97,34 @@ export class CommandsService implements OnModuleInit, OnModuleDestroy {
     });
     this.redis = createRedisCommandClient();
     await this.redis.connect();
+
+    this.publisher = createRealtimePublisher();
+    await this.publisher.connect();
+
+    this.mqtt.on("connect", () => {
+      console.log("[api] MQTT 브로커 연결 성공 - 실시간 전파");
+      if (this.publisher) {
+        void publishRealtimeEvent(this.publisher, {
+          type: "system.status",
+          mqtt: "connected",
+          ts: Date.now(),
+        });
+      }
+    });
+
+    const handleDisconnect = () => {
+      console.log("[api] MQTT 브로커 연결 해제 - 실시간 전파");
+      if (this.publisher) {
+        void publishRealtimeEvent(this.publisher, {
+          type: "system.status",
+          mqtt: "disconnected",
+          ts: Date.now(),
+        });
+      }
+    };
+
+    this.mqtt.on("close", handleDisconnect);
+    this.mqtt.on("offline", handleDisconnect);
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -104,6 +134,13 @@ export class CommandsService implements OnModuleInit, OnModuleDestroy {
     if (this.redis) {
       await this.redis.quit();
     }
+    if (this.publisher) {
+      await this.publisher.quit();
+    }
+  }
+
+  isMqttConnected(): boolean {
+    return this.mqtt?.connected ?? false;
   }
 
   async create(body: CreateCommandRequest, auth: AuthContext): Promise<CommandResponse> {

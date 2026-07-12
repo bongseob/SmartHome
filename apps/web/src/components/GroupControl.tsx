@@ -3,6 +3,7 @@ import { AgGridReact } from "ag-grid-react";
 import {
   AllCommunityModule,
   ModuleRegistry,
+  ValidationModule,
   type ColDef,
   type ICellRendererParams,
 } from "ag-grid-community";
@@ -19,10 +20,11 @@ import {
   listGroupControlSummaries,
 } from "../lib/api";
 import type { DeviceListItem, GroupCommandResponse, GroupControlSummary } from "../lib/types";
+import { useRealtime } from "../lib/useRealtime";
 
 type ControlCommand = "turn_on" | "turn_off";
 
-ModuleRegistry.registerModules([AllCommunityModule]);
+ModuleRegistry.registerModules([AllCommunityModule, ValidationModule]);
 
 interface CommandTracker {
   commandId: string;
@@ -84,7 +86,6 @@ export function GroupControl({ onAuthExpired }: { onAuthExpired: () => void }): 
   const [selectedByGroup, setSelectedByGroup] = useState<Record<string, Set<string>>>({});
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
   const [progressByGroup, setProgressByGroup] = useState<Record<string, ProgressState>>({});
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollRef = useRef<number | null>(null);
 
@@ -102,7 +103,6 @@ export function GroupControl({ onAuthExpired }: { onAuthExpired: () => void }): 
   const openSelectedDevices = openMembers.filter((device) => openSelected.has(device.id));
 
   const refreshGroups = useCallback(() => {
-    setLoading(true);
     setError(null);
     listGroupControlSummaries()
       .then(setGroups)
@@ -112,13 +112,40 @@ export function GroupControl({ onAuthExpired }: { onAuthExpired: () => void }): 
           return;
         }
         setError(describeError(err, "그룹 목록을 불러오지 못했습니다."));
-      })
-      .finally(() => setLoading(false));
+      });
   }, [onAuthExpired]);
 
   useEffect(() => {
     refreshGroups();
   }, [refreshGroups]);
+
+  const handleRealtimeEvent = useCallback(
+    (event: any) => {
+      if (event.type === "device.state") {
+        // 1. 그룹 목록 갱신
+        refreshGroups();
+
+        // 2. 현재 개별제어 모달 기기 목록 상태 갱신
+        setMembersByGroup((prev) => {
+          const next = { ...prev };
+          let updated = false;
+          for (const [groupId, devices] of Object.entries(next)) {
+            const idx = devices.findIndex((d) => d.id === event.deviceId);
+            if (idx !== -1) {
+              const updatedDevices = [...devices];
+              updatedDevices[idx] = { ...updatedDevices[idx], currentStatus: event.status };
+              next[groupId] = updatedDevices;
+              updated = true;
+            }
+          }
+          return updated ? next : prev;
+        });
+      }
+    },
+    [refreshGroups]
+  );
+
+  useRealtime(true, handleRealtimeEvent, onAuthExpired);
 
   const loadMembers = useCallback(
     (groupId: string) => {
@@ -382,9 +409,6 @@ export function GroupControl({ onAuthExpired }: { onAuthExpired: () => void }): 
           <h2>그룹별 제어</h2>
           <p>그룹 단위로 일괄 제어하고, 필요하면 그룹 내 센서를 선택해 개별 제어합니다.</p>
         </div>
-        <button type="button" onClick={refreshGroups} disabled={loading}>
-          {loading ? "갱신 중..." : "새로고침"}
-        </button>
       </header>
 
       {error && <p className="error-text">{error}</p>}
@@ -404,55 +428,67 @@ export function GroupControl({ onAuthExpired }: { onAuthExpired: () => void }): 
           rowHeight={52}
           domLayout="autoHeight"
           suppressCellFocus
+          theme="legacy"
         />
       </div>
 
       {openGroup && (
-        <div className="group-control__members">
-          <div className="group-control__member-toolbar">
-            <strong>그룹 내 센서 {openMembers.length}개</strong>
-            <span>선택 {openSelectedDevices.length}개</span>
-            <button
-              type="button"
-              onClick={() => setSelectedByGroup((prev) => ({ ...prev, [openGroup.id]: new Set(openMembers.map((device) => device.id)) }))}
-            >
-              전체선택
-            </button>
-            <button
-              type="button"
-              onClick={() => setSelectedByGroup((prev) => ({ ...prev, [openGroup.id]: new Set() }))}
-            >
-              선택해제
-            </button>
-            <button type="button" onClick={() => runDeviceCommands(openGroup, openSelectedDevices, "turn_on")} disabled={openSelectedDevices.length === 0}>
-              선택 ON
-            </button>
-            <button type="button" onClick={() => runDeviceCommands(openGroup, openSelectedDevices, "turn_off")} disabled={openSelectedDevices.length === 0}>
-              선택 OFF
-            </button>
-          </div>
-          <div className="group-control__member-list">
-            {openMembers.map((device) => (
-              <label key={device.id} className="group-control__member-row">
-                <input
-                  type="checkbox"
-                  checked={openSelected.has(device.id)}
-                  onChange={(event) =>
-                    setSelectedByGroup((prev) => {
-                      const next = new Set(prev[openGroup.id] ?? []);
-                      if (event.target.checked) next.add(device.id);
-                      else next.delete(device.id);
-                      return { ...prev, [openGroup.id]: next };
-                    })
-                  }
-                />
-                <span className={`device-dot device-dot--${device.currentStatus.toLowerCase()}`} />
-                <span>{device.name}</span>
-                <small>{device.channelAddress ?? device.code}</small>
-                <button type="button" onClick={() => runDeviceCommands(openGroup, [device], "turn_on")}>ON</button>
-                <button type="button" onClick={() => runDeviceCommands(openGroup, [device], "turn_off")}>OFF</button>
-              </label>
-            ))}
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: "640px" }}>
+            <h3>[{openGroup.name}] 그룹 내 기기 개별 제어</h3>
+            
+            <div className="group-control__member-toolbar">
+              <strong>기기 {openMembers.length}개</strong>
+              <span>선택 {openSelectedDevices.length}개</span>
+              <button
+                type="button"
+                onClick={() => setSelectedByGroup((prev) => ({ ...prev, [openGroup.id]: new Set(openMembers.map((device) => device.id)) }))}
+              >
+                전체선택
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedByGroup((prev) => ({ ...prev, [openGroup.id]: new Set() }))}
+              >
+                선택해제
+              </button>
+              <button type="button" onClick={() => runDeviceCommands(openGroup, openSelectedDevices, "turn_on")} disabled={openSelectedDevices.length === 0}>
+                선택 ON
+              </button>
+              <button type="button" onClick={() => runDeviceCommands(openGroup, openSelectedDevices, "turn_off")} disabled={openSelectedDevices.length === 0}>
+                선택 OFF
+              </button>
+            </div>
+
+            <div className="group-control__member-list">
+              {openMembers.map((device) => (
+                <label key={device.id} className="group-control__member-row">
+                  <input
+                    type="checkbox"
+                    checked={openSelected.has(device.id)}
+                    onChange={(event) =>
+                      setSelectedByGroup((prev) => {
+                        const next = new Set(prev[openGroup.id] ?? []);
+                        if (event.target.checked) next.add(device.id);
+                        else next.delete(device.id);
+                        return { ...prev, [openGroup.id]: next };
+                      })
+                    }
+                  />
+                  <span className={`device-dot device-dot--${device.currentStatus.toLowerCase()}`} />
+                  <span style={{ fontWeight: 600 }}>{device.name}</span>
+                  <small>{device.channelAddress ?? device.code}</small>
+                  <button type="button" onClick={() => runDeviceCommands(openGroup, [device], "turn_on")}>ON</button>
+                  <button type="button" onClick={() => runDeviceCommands(openGroup, [device], "turn_off")}>OFF</button>
+                </label>
+              ))}
+            </div>
+
+            <div className="modal-actions">
+              <button type="button" onClick={() => setOpenGroupId(null)}>
+                닫기
+              </button>
+            </div>
           </div>
         </div>
       )}

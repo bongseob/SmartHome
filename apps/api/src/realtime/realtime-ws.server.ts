@@ -84,9 +84,9 @@ export class RealtimeWsServer {
 
     const deviceId = this.eventDeviceId(event);
     if (deviceId === null) {
-      // 기기 하나로 스코프할 수 없는 이벤트: 기기 없는 알람(전사 공지성)은 전체에 알리고,
+      // 기기 하나로 스코프할 수 없는 이벤트: 기기 없는 알람(전사 공지성) 및 시스템 상태는 전체에 알리고,
       // 그 외(GROUP 대상 command.status 등)는 area를 판정할 수 없으니 안전하게 숨긴다.
-      return event.type === "alarm.raised" || event.type === "alarm.updated";
+      return event.type === "alarm.raised" || event.type === "alarm.updated" || event.type === "system.status";
     }
 
     const areaPrefix = this.deviceAreaCache.get(deviceId);
