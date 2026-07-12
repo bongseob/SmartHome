@@ -134,14 +134,15 @@ export function App(): JSX.Element {
     };
   }, [selectedFloorId, handleLogout]);
 
-  const handleSelectEquipment = useCallback((equipment: DeviceListItem, floor: FloorSummary) => {
-    // 관제(map) 화면으로 이동해 해당 감시장비의 접점별 개별 제어를 펼친다.
+  const handleOpenFloorControl = useCallback((floor: FloorSummary) => {
+    // 전등(제어 가능) 층 선택 → 관제(map) 화면으로 이동해 개별 제어(지역·감시장비 드릴다운)를 연다.
+    // 전열은 안전상 제어 대상이 아니므로 이 경로로 오지 않는다.
     if (dirtyCount > 0) setPendingPositions({});
     setLayoutError(null);
     setMode("execute");
     setSelectedFloorId(floor.id);
     setSelectedDeviceId(null);
-    setFocusEquipmentId(equipment.id);
+    setFocusEquipmentId(null);
     setView("map");
   }, [dirtyCount]);
 
@@ -410,7 +411,7 @@ export function App(): JSX.Element {
         </div>
       ) : view === "fullMonitoring" ? (
         <div className="app-shell__body app-shell__body--single">
-          <FullMonitoring onSelectEquipment={handleSelectEquipment} />
+          <FullMonitoring onOpenLightingControl={handleOpenFloorControl} />
         </div>
       ) : view === "groupControl" ? (
         <div className="app-shell__body app-shell__body--single">
