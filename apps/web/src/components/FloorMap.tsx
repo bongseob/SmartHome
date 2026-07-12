@@ -83,13 +83,14 @@ function fitMapToViewport(
   viewport: { width: number; height: number },
   map: { width: number; height: number },
 ): { scale: number; pos: { x: number; y: number } } {
-  const fitScale = Math.min(viewport.width / map.width, viewport.height / map.height);
+  // cover: 도면 이미지가 뷰포트 영역을 빈틈없이 꽉 채우도록 더 큰 배율로 맞춘다(넘치는 축은 중앙 크롭).
+  const fitScale = Math.max(viewport.width / map.width, viewport.height / map.height);
   const safeScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, fitScale));
   return {
     scale: safeScale,
     pos: {
-      x: Math.max(0, (viewport.width - map.width * safeScale) / 2),
-      y: Math.max(0, (viewport.height - map.height * safeScale) / 2),
+      x: (viewport.width - map.width * safeScale) / 2,
+      y: (viewport.height - map.height * safeScale) / 2,
     },
   };
 }
