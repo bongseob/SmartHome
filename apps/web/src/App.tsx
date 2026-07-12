@@ -26,6 +26,7 @@ import { AreaAdmin } from "./components/AreaAdmin";
 import { DeviceAdmin } from "./components/DeviceAdmin";
 import { Dashboard } from "./components/Dashboard";
 import { GroupControl } from "./components/GroupControl";
+import { FullMonitoring } from "./components/FullMonitoring";
 
 const MAX_FEED_ENTRIES = 50;
 
@@ -48,7 +49,7 @@ export function App(): JSX.Element {
   const feedSeq = useRef(0);
 
   // 최상위 화면 전환(M16 Admin) — ADMIN 전용 스케줄러/시스템정보 화면과 기존 Floor Map 관제 화면을 오간다.
-  const [view, setView] = useState<"dashboard" | "map" | "groupControl" | "schedulers" | "systemInfo" | "floorMaps" | "areas" | "devices">("dashboard");
+  const [view, setView] = useState<"dashboard" | "fullMonitoring" | "map" | "groupControl" | "schedulers" | "systemInfo" | "floorMaps" | "areas" | "devices">("dashboard");
 
   // 도면 편집 모드(ui-ux-design.md §4.1-mode) — ADMIN 전용. 실행 모드에서는 조회/제어만 가능하다.
   const [mode, setMode] = useState<"execute" | "edit">("execute");
@@ -340,6 +341,9 @@ export function App(): JSX.Element {
           <button type="button" className={view === "map" ? "active" : ""} onClick={() => setView("map")}>
             관제
           </button>
+          <button type="button" className={view === "fullMonitoring" ? "active" : ""} onClick={() => setView("fullMonitoring")}>
+            전체 모니터링
+          </button>
           <button type="button" className={view === "groupControl" ? "active" : ""} onClick={() => setView("groupControl")}>
             그룹 제어
           </button>
@@ -390,6 +394,10 @@ export function App(): JSX.Element {
       {view === "dashboard" ? (
         <div className="app-shell__body app-shell__body--single">
           <Dashboard />
+        </div>
+      ) : view === "fullMonitoring" ? (
+        <div className="app-shell__body app-shell__body--single">
+          <FullMonitoring />
         </div>
       ) : view === "groupControl" ? (
         <div className="app-shell__body app-shell__body--single">

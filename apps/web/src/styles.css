@@ -281,6 +281,118 @@ body {
 .badge--alarm { background: #e74c3c; }
 .badge--offline { background: #2c3e50; }
 
+/* ── 차단기 전체 모니터링 (분전반 환경감시) ───────────────────────── */
+.full-monitoring {
+  padding: 0.25rem 0.25rem 1.5rem;
+}
+
+.full-monitoring__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #eef2f7;
+}
+
+.full-monitoring__head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: #0f172a;
+}
+
+.full-monitoring__sub {
+  margin: 0.2rem 0 0;
+  font-size: 0.82rem;
+  color: #64748b;
+}
+
+.full-monitoring__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  font-size: 0.8rem;
+  color: #334155;
+}
+
+.full-monitoring__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.full-monitoring__legend-item b {
+  color: #0f172a;
+}
+
+.full-monitoring__grid {
+  border: 1px solid #d7dee8;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #cfd6de;
+}
+
+.full-monitoring__row {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid #b9c2cc;
+  background: #cfd6de;
+}
+
+.full-monitoring__row:last-child {
+  border-bottom: none;
+}
+
+.full-monitoring__floor {
+  flex: 0 0 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.25rem 0.35rem;
+  background: #e6ebf1;
+  border-right: 1px solid #b9c2cc;
+  font-weight: 800;
+  font-size: 0.82rem;
+  color: #5b21b6;
+}
+
+.full-monitoring__dots {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: center;
+  gap: 4px;
+  padding: 5px 8px;
+  min-height: 24px;
+  flex: 1;
+}
+
+.fm-dot {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  display: inline-block;
+  border: 1px solid rgba(15, 23, 42, 0.28);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.45);
+  flex: 0 0 auto;
+}
+
+.fm-dot.hollow {
+  background: #ffffff !important;
+  border-color: #9aa4ad;
+  box-shadow: none;
+}
+
+.full-monitoring__empty {
+  padding: 2rem;
+  text-align: center;
+  color: #94a3b8;
+}
+
 .floor-map__sensor-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));

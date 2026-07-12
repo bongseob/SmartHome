@@ -6,6 +6,7 @@ import type {
   DeviceLifecycle,
   DeviceRole,
   DeviceStatus,
+  LoadClass,
   SensorIoType,
   SensorSignalType,
 } from "@smarthome/contracts";
@@ -445,6 +446,7 @@ export interface DeviceListItem {
   sensorIoType: SensorIoType | null;
   channelAddress: string | null;
   terminalBlock: string | null;
+  loadClass: LoadClass | null;
   areaId: string | null;
   areaTopicPrefix: string | null; // "enterprise/site1/bldg-a/2f/living-room"
   posX: string | null;
@@ -474,6 +476,7 @@ interface DeviceListRow extends QueryResultRow {
   sensor_io_type: SensorIoType | null;
   channel_address: string | null;
   terminal_block: string | null;
+  load_class: LoadClass | null;
   area_id: string | null;
   area_topic_prefix: string | null;
   pos_x: string | null;
@@ -504,6 +507,7 @@ function toDeviceListItem(row: DeviceListRow): DeviceListItem {
     sensorIoType: row.sensor_io_type,
     channelAddress: row.channel_address,
     terminalBlock: row.terminal_block,
+    loadClass: row.load_class,
     areaId: row.area_id,
     areaTopicPrefix: row.area_topic_prefix,
     posX: row.pos_x,
@@ -518,7 +522,7 @@ const DEVICE_SELECT_COLUMNS = `
   d.id::text, d.code, d.name, d.category, d.device_role, d.device_type, d.manufacturer, d.model,
   d.firmware_version, d.mqtt_topic, d.current_status, d.lifecycle_status,
   d.monitoring_visible, d.enabled, d.parent_device_id::text, d.sensor_signal_type, d.sensor_io_type,
-  d.channel_address, d.terminal_block, d.area_id::text, d.pos_x::text, d.pos_y::text,
+  d.channel_address, d.terminal_block, d.load_class, d.area_id::text, d.pos_x::text, d.pos_y::text,
   d.connection_protocol, d.connection_config,
   d.updated_at,
   CASE

@@ -7,6 +7,7 @@ import type {
   DeviceRole,
   DeviceStatus,
   ExecutionStatus,
+  LoadClass,
   SensorIoType,
   SensorSignalType,
   Severity,
@@ -34,6 +35,8 @@ export interface DeviceStateRecord {
   sensorIoType: SensorIoType | null;
   channelAddress: string | null;
   terminalBlock: string | null;
+  /** 부하 구분(일반/비상/예비, addendum §3.2). 미설정이면 null. */
+  loadClass: LoadClass | null;
   areaId: string | null;
   posX: string | null;
   posY: string | null;
@@ -107,6 +110,7 @@ interface DeviceStateRow extends QueryResultRow {
   sensor_io_type: SensorIoType | null;
   channel_address: string | null;
   terminal_block: string | null;
+  load_class: LoadClass | null;
   area_id: string | null;
   pos_x: string | null;
   pos_y: string | null;
@@ -153,7 +157,7 @@ const DEVICE_COLUMNS = `
   id::text, code, name, category, device_role, device_type, manufacturer, model, firmware_version,
   mqtt_topic, current_status, lifecycle_status, area_id::text, pos_x::text, pos_y::text,
   monitoring_visible, enabled, parent_device_id::text, sensor_signal_type, sensor_io_type,
-  channel_address, terminal_block, gateway_id::text, connection_protocol, connection_config, updated_at
+  channel_address, terminal_block, load_class, gateway_id::text, connection_protocol, connection_config, updated_at
 `;
 
 function toDeviceState(row: DeviceStateRow): DeviceStateRecord {
@@ -177,6 +181,7 @@ function toDeviceState(row: DeviceStateRow): DeviceStateRecord {
     sensorIoType: row.sensor_io_type,
     channelAddress: row.channel_address,
     terminalBlock: row.terminal_block,
+    loadClass: row.load_class,
     areaId: row.area_id,
     posX: row.pos_x,
     posY: row.pos_y,

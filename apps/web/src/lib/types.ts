@@ -4,6 +4,7 @@ import type {
   DeviceRole,
   DeviceStatus,
   ExecutionStatus,
+  LoadClass,
   Role,
   ScheduleRunStatus,
   ScheduleType,
@@ -80,6 +81,7 @@ export interface DeviceListItem {
   sensorIoType: SensorIoType | null;
   channelAddress: string | null;
   terminalBlock: string | null;
+  loadClass: LoadClass | null;
   areaId: string | null;
   areaTopicPrefix: string | null;
   posX: string | null;
