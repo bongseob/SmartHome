@@ -31,5 +31,6 @@
 | 가상 기기 시뮬레이터 계획 | [docs/device-simulator.md](device-simulator.md) | 초안 v0.1 |
 | 테스트 / QA 전략 | [docs/test-strategy.md](test-strategy.md) | 초안 v0.1 |
 | 구현 추적 문서 | [docs/implementation-tracker.md](implementation-tracker.md) | 작성 중 |
+| 인수인계 (Handover) | [docs/handover.md](handover.md) | 2026-07-12 |
 
 > 산출물을 작성하면 상태를 `작성 중` / `완료`로 갱신한다.
