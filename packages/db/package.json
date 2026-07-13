@@ -16,7 +16,8 @@
     "migrate:up": "dotenv -e ../../.env -- node-pg-migrate up -j sql -m migrations",
     "migrate:down": "dotenv -e ../../.env -- node-pg-migrate down -j sql -m migrations",
     "seed": "dotenv -e ../../.env -- node dist/seed.js",
-    "seed:building-sample": "dotenv -e ../../.env -- node dist/seed-building-sample.js"
+    "seed:building-sample": "dotenv -e ../../.env -- node dist/seed-building-sample.js",
+    "seed:esp32-sample": "dotenv -e ../../.env -- node dist/seed-esp32-sample.js"
   },
   "dependencies": {
     "@smarthome/contracts": "workspace:*",

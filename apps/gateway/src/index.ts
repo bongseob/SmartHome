@@ -9,6 +9,7 @@ import {
 } from "@smarthome/contracts";
 import { connect, publishServiceStatus, serviceWill, type MqttClient } from "@smarthome/mqtt";
 import {
+  cascadeChildrenOffline,
   closePool,
   compareThreshold,
   completeCommandFromAck,
@@ -319,6 +320,45 @@ async function handleAckMessage(
     console.error(`[gateway] ack 처리 오류 command=${ack.commandId}:`, err);
   }
 }
+
+/**
+ * 감시장비(ESP32 보드 등)가 OFFLINE으로 전이되면, 같은 물리 연결을 공유하는 하위
+ * 채널(parent_device_id)들은 더 이상 자기 상태를 갱신할 수 없다 — 화면에 마지막 값이
+ * 남아있지 않도록 함께 OFFLINE 처리하고, 실제로 상태가 바뀐 채널마다 개별 기기가
+ * 오프라인 됐을 때와 동일하게 realtime 이벤트·알람을 남긴다.
+ */
+async function cascadeBoardOfflineToChildren(
+  events: RealtimePublisher,
+  parentDeviceId: string,
+  parentDeviceCode: string,
+): Promise<void> {
+  const children = await cascadeChildrenOffline(parentDeviceId);
+  for (const child of children) {
+    lastStatus.set(child.code, "OFFLINE");
+    await publishRealtimeEvent(events, {
+      type: "device.state",
+      deviceId: child.deviceId,
+      deviceCode: child.code,
+      status: "OFFLINE",
+      origin: "FIELD",
+      originLabel: `상위 감시장비(${parentDeviceCode}) 오프라인 — 연쇄 처리`,
+      ts: Date.now(),
+    });
+    const message = `현장 상태 변화: 상위 감시장비(${parentDeviceCode}) 오프라인으로 연쇄 OFFLINE`;
+    const raised = await raiseUnexpectedStateChangeAlarm(child.deviceId, message, "WARNING");
+    if (raised) {
+      await publishRealtimeEvent(events, {
+        type: "alarm.raised",
+        deviceId: child.deviceId,
+        tier: "REACTIVE",
+        severity: "WARNING",
+        message,
+        ts: Date.now(),
+      });
+    }
+  }
+}
+
 async function onMessage(
   redis: RedisCommandClient,
   events: RealtimePublisher,
@@ -382,6 +422,9 @@ async function onMessage(
         originLabel: classification.label,
         ts: Date.now(),
       });
+      if (status === "OFFLINE") {
+        await cascadeBoardOfflineToChildren(events, id, parts.device);
+      }
       if (classification.origin === "FIELD") {
         const message =
           status === "OFFLINE"

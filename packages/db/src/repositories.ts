@@ -61,6 +61,49 @@ export async function setDeviceStatus(
   };
 }
 
+export interface CascadedOfflineChild {
+  deviceId: string;
+  code: string;
+  previousStatus: DeviceStatus;
+}
+
+interface CascadedOfflineChildRow extends QueryResultRow {
+  id: string;
+  code: string;
+  previous_status: DeviceStatus;
+}
+
+/**
+ * 감시장비(보드)가 OFFLINE으로 전이될 때, 거기 딸린 채널(parent_device_id)들도 함께
+ * OFFLINE 처리한다 — 보드 연결이 끊기면 개별 채널은 자기 상태를 더 이상 갱신할 수
+ * 없으므로(같은 물리 연결을 공유), 화면에 마지막 값이 그대로 남는 걸 막는다.
+ */
+export async function cascadeChildrenOffline(parentDeviceId: string): Promise<CascadedOfflineChild[]> {
+  const r = await query<CascadedOfflineChildRow>(
+    `WITH before AS (
+       SELECT id::text, code, current_status
+       FROM device
+       WHERE parent_device_id = $1
+         AND current_status IS DISTINCT FROM 'OFFLINE'
+     ),
+     updated AS (
+       UPDATE device
+       SET current_status = 'OFFLINE', updated_at = now()
+       WHERE id::text IN (SELECT id FROM before)
+       RETURNING id::text
+     )
+     SELECT before.id, before.code, before.current_status AS previous_status
+     FROM before
+     JOIN updated ON updated.id = before.id`,
+    [parentDeviceId],
+  );
+  return r.rows.map((row) => ({
+    deviceId: row.id,
+    code: row.code,
+    previousStatus: row.previous_status,
+  }));
+}
+
 export interface IntentionalStateCommand {
   commandId: string;
   command: string;
