@@ -12,7 +12,6 @@ import {
   logout as apiLogout,
   saveFloorLayout,
   setDeviceMonitoring,
-  checkSystemHealth,
   listActiveAlarms,
   acknowledgeAlarm,
 } from "./lib/api";
@@ -31,6 +30,8 @@ import { Dashboard } from "./components/Dashboard";
 import { GroupControl } from "./components/GroupControl";
 import { FullMonitoring } from "./components/FullMonitoring";
 import { AlarmBanner } from "./components/AlarmBanner";
+import { ServerStatusOverlay } from "./components/ServerStatusOverlay";
+import { useConfirm } from "./components/ConfirmDialog";
 
 const MAX_FEED_ENTRIES = 50;
 
@@ -40,9 +41,9 @@ interface PendingCommand {
 }
 
 export function App(): JSX.Element {
+  const confirm = useConfirm();
   const [user, setUser] = useState<AuthUser | null>(() => getSession()?.user ?? null);
-  const [apiStatus, setApiStatus] = useState<"ONLINE" | "OFFLINE">("OFFLINE");
-  const [mqttStatus, setMqttStatus] = useState<"ONLINE" | "OFFLINE">("OFFLINE");
+  const [serverStatusOpen, setServerStatusOpen] = useState(true);
   // 미확인(RAISED) 알람 — 현장 상태변화 등. 확인(ack) 전까지 배너/하이라이트로 유지된다.
   const [alarms, setAlarms] = useState<AlarmRecord[]>([]);
   const [floors, setFloors] = useState<FloorSummary[]>([]);
@@ -298,15 +299,18 @@ export function App(): JSX.Element {
 
   const handleToggleMode = useCallback(() => {
     if (mode === "edit" && dirtyCount > 0) {
-      const discard = window.confirm(
-        `저장하지 않은 위치 변경 ${dirtyCount}건이 있습니다. 실행 모드로 전환하면 버려집니다. 계속할까요?`,
+      confirm(`저장하지 않은 위치 변경 ${dirtyCount}건이 있습니다. 실행 모드로 전환하면 버려집니다. 계속할까요?`).then(
+        (discard) => {
+          if (!discard) return;
+          setPendingPositions({});
+          setLayoutError(null);
+          setMode((prev) => (prev === "execute" ? "edit" : "execute"));
+        },
       );
-      if (!discard) return;
-      setPendingPositions({});
-      setLayoutError(null);
+      return;
     }
     setMode((prev) => (prev === "execute" ? "edit" : "execute"));
-  }, [mode, dirtyCount]);
+  }, [mode, dirtyCount, confirm]);
 
   const handleRealtimeEvent = useCallback(
     (event: RealtimeEvent) => {
@@ -339,10 +343,6 @@ export function App(): JSX.Element {
         }
       }
 
-      if (event.type === "system.status") {
-        setMqttStatus(event.mqtt === "connected" ? "ONLINE" : "OFFLINE");
-      }
-
       // 현장 상태변화 등으로 알람 발생/변경 → 활성 알람 재조회(배너·하이라이트 갱신).
       if (event.type === "alarm.raised" || event.type === "alarm.updated") {
         refreshAlarms();
@@ -351,30 +351,7 @@ export function App(): JSX.Element {
     [selectedDevice, refreshAlarms],
   );
 
-  const handleStatusChange = useCallback((status: "connected" | "disconnected") => {
-    setApiStatus(status === "connected" ? "ONLINE" : "OFFLINE");
-    if (status === "connected") {
-      checkSystemHealth()
-        .then((res) => setMqttStatus(res.mqtt === "connected" ? "ONLINE" : "OFFLINE"))
-        .catch(() => setMqttStatus("OFFLINE"));
-    } else {
-      setMqttStatus("OFFLINE");
-    }
-  }, []);
-
-  useRealtime(Boolean(user), handleRealtimeEvent, handleLogout, handleStatusChange);
-
-  useEffect(() => {
-    if (user) {
-      checkSystemHealth()
-        .then((res) => {
-          setMqttStatus(res.mqtt === "connected" ? "ONLINE" : "OFFLINE");
-        })
-        .catch(() => {
-          setMqttStatus("OFFLINE");
-        });
-    }
-  }, [user]);
+  useRealtime(Boolean(user), handleRealtimeEvent, handleLogout);
 
   const alarmedDeviceIds = useMemo(
     () => new Set(alarms.map((a) => a.deviceId).filter((id): id is string => id !== null)),
@@ -399,15 +376,20 @@ export function App(): JSX.Element {
           <select
             value={selectedFloorId ?? ""}
             onChange={(e) => {
+              const nextFloorId = e.target.value;
               if (dirtyCount > 0) {
-                const discard = window.confirm(
-                  `저장하지 않은 위치 변경 ${dirtyCount}건이 있습니다. 층을 바꾸면 버려집니다. 계속할까요?`,
+                confirm(`저장하지 않은 위치 변경 ${dirtyCount}건이 있습니다. 층을 바꾸면 버려집니다. 계속할까요?`).then(
+                  (discard) => {
+                    if (!discard) return;
+                    setPendingPositions({});
+                    setLayoutError(null);
+                    setSelectedFloorId(nextFloorId);
+                    setSelectedDeviceId(null);
+                  },
                 );
-                if (!discard) return;
-                setPendingPositions({});
-                setLayoutError(null);
+                return;
               }
-              setSelectedFloorId(e.target.value);
+              setSelectedFloorId(nextFloorId);
               setSelectedDeviceId(null);
             }}
           >
@@ -418,15 +400,16 @@ export function App(): JSX.Element {
             ))}
           </select>
         </label>
-        {isAdmin && view === "map" && (
-          <div className="mode-toggle">
-            <button type="button" className={mode === "execute" ? "active" : ""} onClick={() => mode !== "execute" && handleToggleMode()}>
-              실행
-            </button>
-            <button type="button" className={mode === "edit" ? "active" : ""} onClick={() => mode !== "edit" && handleToggleMode()}>
-              편집
-            </button>
-          </div>
+        {isAdmin && (
+          <label className={`edit-mode-toggle${view !== "map" ? " edit-mode-toggle--disabled" : ""}`}>
+            <input
+              type="checkbox"
+              checked={mode === "edit"}
+              disabled={view !== "map"}
+              onChange={handleToggleMode}
+            />
+            편집
+          </label>
         )}
         <div className="mode-toggle">
           <button type="button" className={view === "dashboard" ? "active" : ""} onClick={() => setView("dashboard")}>
@@ -461,17 +444,16 @@ export function App(): JSX.Element {
             </button>
           </div>
         )}
-        <div className="connection-statuses">
-          <span className={`header-status-chip header-status-chip--${apiStatus.toLowerCase()}`}>
-            <span className="status-indicator-dot" />
-            API {apiStatus}
-          </span>
-          <span className={`header-status-chip header-status-chip--${mqttStatus.toLowerCase()}`}>
-            <span className="status-indicator-dot" />
-            MQTT {mqttStatus}
-          </span>
-        </div>
-
+        {isAdmin && (
+          <label className="server-status-toggle">
+            <input
+              type="checkbox"
+              checked={serverStatusOpen}
+              onChange={(e) => setServerStatusOpen(e.target.checked)}
+            />
+            서버 상태
+          </label>
+        )}
         <span className="app-shell__user">
           {user.username} ({user.roles.join(", ")})
         </span>
@@ -481,6 +463,9 @@ export function App(): JSX.Element {
       </header>
 
       <AlarmBanner alarms={alarms} onAck={handleAckAlarm} resolveDeviceName={resolveDeviceName} />
+      {isAdmin && (
+        <ServerStatusOverlay open={serverStatusOpen} onClose={() => setServerStatusOpen(false)} />
+      )}
 
       {view === "map" && mode === "edit" && (
         <div className="layout-editbar">

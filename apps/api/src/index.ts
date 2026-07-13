@@ -7,6 +7,17 @@ import { ProblemJsonFilter } from "./filters/problem-json.filter.js";
 import { RealtimeWsServer } from "./realtime/realtime-ws.server.js";
 import { ensureFloorMapsDir, UPLOADS_ROOT } from "./config/uploads.js";
 
+// node-redis(v4)는 소켓이 예기치 않게 끊기면(Redis 재기동 등) 내부적으로 'error'를
+// 재전파하지 못하고 uncaughtException으로 새는 경우가 있다 — client.on("error", ...)를
+// 붙여도 프로세스가 죽을 수 있다는 뜻이다. 재연결은 라이브러리가 기본 전략으로 알아서
+// 재시도하므로, 여기서는 로그만 남기고 프로세스를 계속 살려둔다(크래시 방지).
+process.on("uncaughtException", (err) => {
+  console.error("[api] 처리되지 않은 예외(계속 실행):", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[api] 처리되지 않은 프로미스 거부(계속 실행):", reason);
+});
+
 export async function main(): Promise<void> {
   ensureFloorMapsDir();
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { cors: true });

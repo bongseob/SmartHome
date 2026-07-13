@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AlarmTier, DeviceStatus, Severity } from "./enums.js";
+import { SERVICE_NAMES } from "./topics.js";
 
 /**
  * MQTT payload 스키마 단일 소스 (docs/mqtt-topic-design.md §3).
@@ -73,6 +74,14 @@ export const LwtPayload = z.object({
   ts: epochMs,
 });
 export type LwtPayload = z.infer<typeof LwtPayload>;
+
+/** 서비스 프레즌스 payload — platform/service/{service}/status(retained)에 게시 */
+export const ServiceStatusPayload = z.object({
+  service: z.enum(SERVICE_NAMES),
+  status: z.enum(["ONLINE", "OFFLINE"]),
+  ts: epochMs,
+});
+export type ServiceStatusPayload = z.infer<typeof ServiceStatusPayload>;
 
 /** OTA `ota_update` 명령의 args (docs/device-lifecycle-ota.md §4.2) */
 export const OtaUpdateArgs = z.object({

@@ -15,6 +15,7 @@ export interface CommandCorrelationState {
 }
 
 export interface RedisCommandClient {
+  readonly isReady: boolean;
   connect(): Promise<unknown>;
   quit(): Promise<unknown>;
   on(event: "error", listener: (err: Error) => void): unknown;

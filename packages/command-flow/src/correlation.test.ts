@@ -13,6 +13,7 @@ import {
 class FakeRedis implements RedisCommandClient {
   private readonly kv = new Map<string, string>();
   private readonly zsets = new Map<string, Map<string, number>>();
+  readonly isReady = true;
 
   async connect(): Promise<unknown> {
     return undefined;

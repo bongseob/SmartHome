@@ -461,16 +461,16 @@ export function wsUrl(): string {
   return `${base}/ws/realtime?token=${encodeURIComponent(token)}`;
 }
 
-export interface HealthStatus {
-  status: "ok" | "error";
-  service: "api";
-  mqtt: "connected" | "disconnected";
+export interface SystemStatus {
+  api: { status: "ok" | "error" };
+  mqtt: { status: "ok" | "error" };
+  redis: { status: "ok" | "error" };
+  gateway: { status: "ok" | "error" };
+  scheduler: { status: "ok" | "error" };
+  simulator: { status: "ok" | "error" };
 }
 
-export async function checkSystemHealth(): Promise<HealthStatus> {
-  const response = await rawFetch("/health", { method: "GET" });
-  if (!response.ok) {
-    throw new ApiError(response.status, "시스템 헬스 체크 실패");
-  }
-  return response.json() as Promise<HealthStatus>;
+/** 서버 상태 위젯 — web/api/mqtt/redis/gateway/scheduler/simulator 7개 항목을 한 번에 조회한다. */
+export function getSystemStatus(): Promise<SystemStatus> {
+  return authedJson<SystemStatus>("/health/system");
 }

@@ -1,12 +1,15 @@
 import mqtt from "mqtt";
 import type { IClientOptions, IClientPublishOptions, MqttClient } from "mqtt";
 import {
+  buildServiceStatusTopic,
   buildTopic,
   isRetained,
   qosFor,
   toUserProperties,
   type CommandUserProperties,
   type LwtPayload,
+  type ServiceName,
+  type ServiceStatusPayload,
   type TopicSuffix,
 } from "@smarthome/contracts";
 
@@ -45,6 +48,30 @@ export function offlineWill(id: DeviceIdentity): IClientOptions["will"] {
     qos: qosFor("state"),
     retain: true,
   };
+}
+
+/**
+ * 서비스 프레즌스 LWT — 새 HTTP 포트를 열지 않고, 이미 맺고 있는 MQTT 연결이 비정상 종료되면
+ * 브로커가 대신 OFFLINE(retained)을 게시하게 한다(기기 LWT와 동일한 패턴, SRS 4.1.2 참조).
+ */
+export function serviceWill(service: ServiceName): IClientOptions["will"] {
+  const payload: ServiceStatusPayload = { service, status: "OFFLINE", ts: Date.now() };
+  return {
+    topic: buildServiceStatusTopic(service),
+    payload: JSON.stringify(payload),
+    qos: 1,
+    retain: true,
+  };
+}
+
+/** 정상 기동/종료 시 명시적으로 ONLINE·OFFLINE을 게시한다(LWT는 비정상 종료만 커버). */
+export function publishServiceStatus(
+  client: MqttClient,
+  service: ServiceName,
+  status: "ONLINE" | "OFFLINE",
+): void {
+  const payload: ServiceStatusPayload = { service, status, ts: Date.now() };
+  client.publish(buildServiceStatusTopic(service), JSON.stringify(payload), { qos: 1, retain: true });
 }
 
 /** MQTT5 클라이언트 연결 (LWT 등 옵션은 호출부에서 병합) */

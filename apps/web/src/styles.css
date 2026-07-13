@@ -713,6 +713,43 @@ body {
   border-color: #2c3e50;
 }
 
+.edit-mode-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.edit-mode-toggle input[type="checkbox"] {
+  cursor: pointer;
+}
+
+/* 상단 메뉴(뷰 전환)와 성격이 달라 우측(사용자 정보 앞)으로 분리한 체크박스 */
+.server-status-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+  user-select: none;
+  margin-left: auto;
+}
+
+.server-status-toggle input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.edit-mode-toggle--disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.edit-mode-toggle--disabled input[type="checkbox"] {
+  cursor: not-allowed;
+}
+
 .layout-editbar {
   display: flex;
   align-items: center;
@@ -1206,6 +1243,26 @@ body {
   background: white;
   border-radius: 4px;
   cursor: pointer;
+}
+
+.scheduler-toggle {
+  min-width: 52px;
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.scheduler-toggle--on {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: white;
+}
+
+.scheduler-toggle--off {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: white;
 }
 
 .scheduler-table__runs {
@@ -1833,6 +1890,25 @@ select {
   border-color: #ffffff;
   color: var(--ui-primary-dark);
   box-shadow: 0 4px 12px rgba(15, 23, 42, 0.14);
+}
+
+/* 어두운 헤더 위의 버튼은 공용 button:hover 규칙(밝은 배경)을 그대로 쓰면
+   글씨색(밝은색)과 배경색이 둘 다 밝아져 안 보인다 — 헤더 전용 hover로 재정의. */
+.mode-toggle button:hover:not(:disabled):not(.active) {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #ffffff;
+}
+
+.app-shell__top > button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18);
+  color: #ffffff;
+}
+
+.edit-mode-toggle,
+.server-status-toggle {
+  color: rgba(255, 255, 255, 0.78);
+  font-weight: 700;
 }
 
 .layout-editbar {
@@ -2465,6 +2541,27 @@ select {
   background: var(--ui-primary-hover, #2563eb);
 }
 
+.modal-actions button.danger {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: white;
+}
+
+.modal-actions button.danger:hover {
+  background: #b91c1c;
+}
+
+.confirm-dialog {
+  max-width: 420px;
+}
+
+.confirm-dialog__message {
+  margin: 0;
+  white-space: pre-line;
+  color: var(--ui-text, #1e293b);
+  line-height: 1.5;
+}
+
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -2480,14 +2577,6 @@ select {
 }
 
 /* 실시간 통신 및 MQTT 브로커 상태 칩 */
-.connection-statuses {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-right: auto;
-  margin-left: 1.5rem;
-}
-
 .header-status-chip {
   display: inline-flex;
   align-items: center;
@@ -2546,6 +2635,71 @@ select {
 @keyframes pulseRed {
   0% { transform: scale(0.9); opacity: 0.8; }
   100% { transform: scale(1.1); opacity: 1; }
+}
+
+/* ── 서버 상태 위젯 박스 (하나의 박스로 드래그 이동) ───────────────────────── */
+.server-status-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  pointer-events: none;
+}
+
+.server-status-box {
+  position: absolute;
+  pointer-events: auto;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  min-width: 180px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.server-status-box:active {
+  cursor: grabbing;
+}
+
+.server-status-box__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 255, 255, 0.06);
+  color: #f8fafc;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.server-status-box__close {
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: #f8fafc;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.1rem 0.35rem;
+  border-radius: 6px;
+}
+
+.server-status-box__close:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.server-status-box__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+}
+
+.server-status-box .header-status-chip {
+  padding: 0.5rem 0.9rem;
+  font-size: 0.8rem;
 }
 
 /* 기기 관리 테이블 mqtt_topic 컬럼 가로 한도 제한 및 말줄임(Ellipsis) 적용 */

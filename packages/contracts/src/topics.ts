@@ -154,3 +154,20 @@ export function qosFor(suffix: TopicSuffix): 0 | 1 | 2 {
 export function isRetained(suffix: TopicSuffix): boolean {
   return RETAINED_SUFFIXES.has(suffix);
 }
+
+/**
+ * 서비스 프레즌스(생존 여부) 토픽 — 기기 UNS 네임스페이스(enterprise/...)와는 별개의
+ * 플랫폼 인프라 채널이다. HTTP 포트를 새로 열지 않고, 각 백엔드 프로세스가 이미 맺고 있는
+ * MQTT 연결의 LWT(retained)로 온/오프라인을 알린다 — 기기 LWT(SRS 4.1.2)와 동일한 패턴.
+ */
+export const SERVICE_NAMES = ["api", "gateway", "scheduler", "device-simulator"] as const;
+export type ServiceName = (typeof SERVICE_NAMES)[number];
+
+export function buildServiceStatusTopic(service: ServiceName): string {
+  return `platform/service/${service}/status`;
+}
+
+/** 구독측(API)이 모든 서비스 프레즌스를 한 번에 받기 위한 와일드카드 토픽. */
+export function buildServiceStatusWildcard(): string {
+  return "platform/service/+/status";
+}

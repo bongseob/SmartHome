@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { parseDeviceBase } from "@smarthome/contracts";
-import { connect, type MqttClient } from "@smarthome/mqtt";
+import { connect, publishServiceStatus, serviceWill, type MqttClient } from "@smarthome/mqtt";
 import {
   closePool,
   getDeviceState,
@@ -27,6 +27,17 @@ import { computeDueState } from "./schedule-math.js";
  * command 발행/audit는 @smarthome/command-flow·command-service 단일 소스를 그대로 재사용한다.
  * EVENT 타입은 이벤트 소스가 SRS/PROJECT_RULES에 정의돼 있지 않아 이번 범위에서 제외한다(스킵).
  */
+
+// node-redis(v4)는 소켓이 예기치 않게 끊기면(Redis 재기동 등) 내부적으로 'error'를
+// 재전파하지 못하고 uncaughtException으로 새는 경우가 있다 — client.on("error", ...)를
+// 붙여도 프로세스가 죽을 수 있다는 뜻이다. 재연결은 라이브러리가 기본 전략으로 알아서
+// 재시도하므로, 여기서는 로그만 남기고 프로세스를 계속 살려둔다(크래시 방지).
+process.on("uncaughtException", (err) => {
+  console.error("[scheduler] 처리되지 않은 예외(계속 실행):", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[scheduler] 처리되지 않은 프로미스 거부(계속 실행):", reason);
+});
 
 const dbExecutor = { query };
 const POLL_INTERVAL_MS = 15_000;
@@ -161,7 +172,13 @@ async function main(): Promise<void> {
   await redis.connect();
   console.log("[scheduler] redis 연결 — command correlation 활성화");
 
-  const mqtt: MqttClient = connect(url, { clientId: `svc:scheduler-${process.pid}` });
+  const mqtt: MqttClient = connect(url, {
+    clientId: `svc:scheduler-${process.pid}`,
+    will: serviceWill("scheduler"),
+  });
+  // 최초 연결뿐 아니라 브로커 재기동 후 자동 재연결 때도 매번 다시 타야 한다 —
+  // 한 번만 발행하면 재연결 후에도 프레즌스가 예전 OFFLINE(LWT)에 멈춰 있게 된다.
+  mqtt.on("connect", () => publishServiceStatus(mqtt, "scheduler", "ONLINE"));
   await new Promise<void>((resolve) => mqtt.on("connect", () => resolve()));
   console.log(`[scheduler] ${url} 연결`);
 
@@ -170,6 +187,7 @@ async function main(): Promise<void> {
 
   const shutdown = (): void => {
     clearInterval(pollTimer);
+    publishServiceStatus(mqtt, "scheduler", "OFFLINE");
     mqtt.end(false, {}, () =>
       void redis.quit().then(() => closePool()).then(() => process.exit(0)),
     );

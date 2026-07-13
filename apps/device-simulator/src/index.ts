@@ -1,3 +1,4 @@
+import { connect, publishServiceStatus, serviceWill, type MqttClient } from "@smarthome/mqtt";
 import { VirtualDevice, type CommandFault } from "./virtual-device.js";
 import { MockResponder } from "./mock-responder.js";
 
@@ -24,9 +25,23 @@ function parseFault(spec: string | undefined): CommandFault[] {
   return [];
 }
 
+/**
+ * 서버 상태 위젯(web) 전용 프레즌스 커넥션 — VirtualDevice/MockResponder는 "가상 기기" 정체성으로
+ * 접속하므로(기기 LWT), 이 프로세스(device-simulator 서비스) 자체의 생존 여부는 별도 연결로 알린다.
+ */
+function connectServicePresence(url: string): MqttClient {
+  const client = connect(url, {
+    clientId: `svc:device-simulator-${process.pid}`,
+    will: serviceWill("device-simulator"),
+  });
+  client.on("connect", () => publishServiceStatus(client, "device-simulator", "ONLINE"));
+  return client;
+}
+
 export function main(): void {
   const url = process.env.MQTT_URL ?? "mqtt://localhost:1883";
   const runMs = Number(process.env.SIM_RUN_MS ?? "0");
+  const presence = connectServicePresence(url);
 
   // 전역 목 응답기 모드 — 실기기/개별 시뮬레이터 없이 모든 기기 명령을 SUCCEEDED로 완료시킨다.
   if (process.env.SIM_MOCK_ALL) {
@@ -34,7 +49,8 @@ export function main(): void {
     console.log(`[simulator] ${url} — 전역 목 응답기 (run=${runMs > 0 ? `${runMs}ms` : "무한"})`);
     responder.start();
     const stop = (): void => {
-      void responder.stop().then(() => process.exit(0));
+      publishServiceStatus(presence, "device-simulator", "OFFLINE");
+      presence.end(false, {}, () => void responder.stop().then(() => process.exit(0)));
     };
     if (runMs > 0) setTimeout(stop, runMs);
     process.on("SIGINT", stop);
@@ -62,7 +78,8 @@ export function main(): void {
   device.start();
 
   const shutdown = (): void => {
-    void device.stop().then(() => process.exit(0));
+    publishServiceStatus(presence, "device-simulator", "OFFLINE");
+    presence.end(false, {}, () => void device.stop().then(() => process.exit(0)));
   };
   if (runMs > 0) {
     setTimeout(shutdown, runMs);

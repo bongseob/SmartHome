@@ -9,9 +9,13 @@ import {
 import { randomUUID } from "node:crypto";
 import { actorRole, hasAccessLevel, isAdmin, type AuthContext } from "@smarthome/auth";
 import {
+  buildServiceStatusWildcard,
   parseDeviceBase,
+  ServiceStatusPayload,
+  SERVICE_NAMES,
   type ActorType,
   type Role,
+  type ServiceName,
   type TargetType,
 } from "@smarthome/contracts";
 import { connect, type DeviceIdentity, type MqttClient } from "@smarthome/mqtt";
@@ -90,25 +94,37 @@ export class CommandsService implements OnModuleInit, OnModuleDestroy {
   private mqtt: MqttClient | undefined;
   private redis: RedisCommandClient | undefined;
   private publisher: RealtimePublisher | undefined;
+  // 서버 상태 위젯(web) 전용 — gateway/scheduler/device-simulator는 HTTP 서버가 없어 새 포트를
+  // 열지 않고, 각 서비스가 이미 맺고 있는 MQTT 연결의 프레즌스(LWT+retained)를 대신 구독한다.
+  private readonly serviceStatus = new Map<ServiceName, "ONLINE" | "OFFLINE">();
 
   async onModuleInit(): Promise<void> {
     this.mqtt = connect(process.env.MQTT_URL ?? "mqtt://localhost:1883", {
       clientId: `svc:api-${process.pid}`,
     });
-    this.redis = createRedisCommandClient();
-    await this.redis.connect();
 
-    this.publisher = createRealtimePublisher();
-    await this.publisher.connect();
-
+    // mqtt 핸드셰이크는 아래 redis/publisher await보다 먼저 끝날 수 있다 — connect 리스너를
+    // await들 뒤에 붙이면 그 사이에 이미 발생한 'connect' 이벤트를 영영 놓친다(레이스).
+    // 그래서 리스너 등록을 client 생성 직후, 어떤 await보다도 앞에 둔다.
     this.mqtt.on("connect", () => {
       console.log("[api] MQTT 브로커 연결 성공 - 실시간 전파");
+      this.mqtt?.subscribe(buildServiceStatusWildcard(), { qos: 1 });
       if (this.publisher) {
         void publishRealtimeEvent(this.publisher, {
           type: "system.status",
           mqtt: "connected",
           ts: Date.now(),
         });
+      }
+    });
+
+    this.mqtt.on("message", (topic: string, payload: Buffer) => {
+      if (!topic.startsWith("platform/service/") || !topic.endsWith("/status")) return;
+      try {
+        const parsed = ServiceStatusPayload.safeParse(JSON.parse(payload.toString()));
+        if (parsed.success) this.serviceStatus.set(parsed.data.service, parsed.data.status);
+      } catch {
+        // 잘못된 payload는 무시 — 다음 프레즌스 게시를 기다린다
       }
     });
 
@@ -125,6 +141,12 @@ export class CommandsService implements OnModuleInit, OnModuleDestroy {
 
     this.mqtt.on("close", handleDisconnect);
     this.mqtt.on("offline", handleDisconnect);
+
+    this.redis = createRedisCommandClient();
+    await this.redis.connect();
+
+    this.publisher = createRealtimePublisher();
+    await this.publisher.connect();
   }
 
   async onModuleDestroy(): Promise<void> {
@@ -141,6 +163,19 @@ export class CommandsService implements OnModuleInit, OnModuleDestroy {
 
   isMqttConnected(): boolean {
     return this.mqtt?.connected ?? false;
+  }
+
+  isRedisConnected(): boolean {
+    return this.redis?.isReady ?? false;
+  }
+
+  /** 서버 상태 위젯(web) 전용 — 프레즌스를 아직 한 번도 못 받은 서비스는 OFFLINE 취급. */
+  getServiceStatuses(): Record<ServiceName, "ONLINE" | "OFFLINE"> {
+    const result = {} as Record<ServiceName, "ONLINE" | "OFFLINE">;
+    for (const service of SERVICE_NAMES) {
+      result[service] = this.serviceStatus.get(service) ?? "OFFLINE";
+    }
+    return result;
   }
 
   async create(body: CreateCommandRequest, auth: AuthContext): Promise<CommandResponse> {

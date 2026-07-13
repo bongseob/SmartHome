@@ -7,7 +7,7 @@ import {
   type ExecutionStatus,
   type TargetType,
 } from "@smarthome/contracts";
-import { connect, type MqttClient } from "@smarthome/mqtt";
+import { connect, publishServiceStatus, serviceWill, type MqttClient } from "@smarthome/mqtt";
 import {
   closePool,
   compareThreshold,
@@ -41,6 +41,17 @@ import {
   publishRealtimeEvent,
   type RealtimePublisher,
 } from "@smarthome/realtime";
+
+// node-redis(v4)는 소켓이 예기치 않게 끊기면(Redis 재기동 등) 내부적으로 'error'를
+// 재전파하지 못하고 uncaughtException으로 새는 경우가 있다 — client.on("error", ...)를
+// 붙여도 프로세스가 죽을 수 있다는 뜻이다. 재연결은 라이브러리가 기본 전략으로 알아서
+// 재시도하므로, 여기서는 로그만 남기고 프로세스를 계속 살려둔다(크래시 방지).
+process.on("uncaughtException", (err) => {
+  console.error("[gateway] 처리되지 않은 예외(계속 실행):", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[gateway] 처리되지 않은 프로미스 거부(계속 실행):", reason);
+});
 
 const dbExecutor = { query };
 const INTENTIONAL_STATE_WINDOW_MS = Number(process.env.INTENTIONAL_STATE_WINDOW_MS ?? "30000");
@@ -457,7 +468,10 @@ async function main(): Promise<void> {
 
   await refreshAlarmPolicyCache();
 
-  const client: MqttClient = connect(url, { clientId: "svc:gateway-1" });
+  const client: MqttClient = connect(url, {
+    clientId: "svc:gateway-1",
+    will: serviceWill("gateway"),
+  });
 
   client.on("connect", () => {
     const subs = [
@@ -468,6 +482,7 @@ async function main(): Promise<void> {
     for (const s of subs) {
       client.subscribe(s, { qos: s.endsWith("telemetry") ? 0 : 1 });
     }
+    publishServiceStatus(client, "gateway", "ONLINE");
     console.log(`[gateway] ${url} 연결 — 공유구독 시작`);
   });
   client.on("message", (topic: string, payload: Buffer) => {
@@ -485,6 +500,7 @@ async function main(): Promise<void> {
     clearInterval(timeoutTimer);
     clearInterval(policyRefreshTimer);
     clearInterval(escalationTimer);
+    publishServiceStatus(client, "gateway", "OFFLINE");
     void flush().then(() =>
       client.end(false, {}, () =>
         void redis
