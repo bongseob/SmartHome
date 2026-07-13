@@ -26,6 +26,17 @@ Mosquitto·Redis는 compose로:
 docker compose -f infra/docker-compose.dev.yml up -d
 ```
 
+**Mosquitto는 인증을 요구한다(`allow_anonymous false`, PROJECT_RULES §5).** `infra/mosquitto/passwd`·
+`acl`은 `.gitignore` 대상이라 새로 clone하면 없다 — 최초 1회, DB 마이그레이션/시드 이후에:
+```bash
+touch infra/mosquitto/passwd infra/mosquitto/acl   # 파일이 없으면 mosquitto가 시작을 못 할 수 있어 먼저 생성
+docker compose -f infra/docker-compose.dev.yml up -d mosquitto   # 방금 만든 :ro→읽기쓰기 마운트로 재기동
+pnpm --filter @smarthome/db run provision:mqtt-auth   # 서비스 공용 계정(.env에 자동 기록) + 보드별 계정 발급
+docker restart mosquitto   # passwd/acl을 확실히 다시 읽게 재기동
+```
+`provision:mqtt-auth`가 `.env`에 `MQTT_USERNAME=svc-backend`/`MQTT_PASSWORD=...`를 자동으로 추가한다 —
+api/gateway/scheduler/device-simulator는 `@smarthome/mqtt`의 `connect()`가 이 값을 자동으로 실어준다.
+
 **주의 — Postgres는 compose에 없다.** compose는 "기존 Postgres 컨테이너(:5432, DB `smarthome`)"를
 전제한다. 실행 중인 게 없으면 `.env`의 `DATABASE_URL`(기본 `stock_user`/`stock_pass`/`smarthome`)에
 맞춰 직접 띄운다. TimescaleDB는 선택이라 플레인 `postgres:15`로 마이그레이션이 통과한다:
@@ -80,4 +91,6 @@ docker rm -f smarthome-postgres            # 이 스킬이 띄운 경우만
 ## 함정
 - Postgres를 compose에서 찾지 말 것 — 없다. 위 `docker run`으로 별도 기동.
 - API는 `dist/`에서 실행(`node dist/index.js`)하므로 코드 변경 후 반드시 `pnpm build` 재실행.
+- `.env`에 `MQTT_USERNAME`/`MQTT_PASSWORD`가 없으면 모든 백엔드 프로세스가 mosquitto에
+  `not authorised`로 거부된다 — `provision:mqtt-auth`를 먼저 돌렸는지 확인할 것.
 - 스크린샷·`.playwright-mcp` 등 QA 아티팩트가 리포지토리 루트에 생기면 커밋 전에 지울 것.

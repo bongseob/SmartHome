@@ -14,13 +14,17 @@
 #define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
 
 // ── MQTT 브로커 ──────────────────────────────────────────────────────────
-// 개발: Mosquitto 평문 1883(allow_anonymous). 운영은 TLS(mqtts/8883)로 교체해야 한다
-// (PROJECT_RULES §5) — WiFiClientSecure로 netClient를 바꾸고 CA 인증서를 넣으면 된다.
-// 기기 인증은 MQTT ID/PW 전제(CLAUDE.md 고정 결정) — 운영 배포 전 반드시 실제 계정으로 교체.
+// 개발 브로커도 인증을 요구한다(allow_anonymous false) — MQTT_USERNAME은 이 보드의
+// device.code(예: "1f-esp32-a")와 반드시 같아야 하고, MQTT_PASSWORD는
+// `pnpm --filter @smarthome/db run provision:mqtt-auth` 실행 시 콘솔에 한 번만 출력되는
+// 값을 그대로 붙여넣는다(평문은 DB에 남지 않아 재출력 불가 — 잃어버리면 그 보드만
+// --rotate로 재발급). ACL로 이 보드는 자기 자신+자기 채널 토픽만 쓸 수 있다.
+// 운영은 TLS(mqtts/8883)로도 교체해야 한다(PROJECT_RULES §5) — WiFiClientSecure로
+// netClient를 바꾸고 CA 인증서를 넣으면 된다.
 #define MQTT_HOST     "192.168.0.10"
 #define MQTT_PORT     1883
-#define MQTT_USERNAME "" // 비워두면 익명 접속(개발 브로커 전용)
-#define MQTT_PASSWORD ""
+#define MQTT_USERNAME "1f-esp32-a"
+#define MQTT_PASSWORD "PASTE_PROVISIONED_PASSWORD_HERE"
 
 // ── 이 보드의 UNS 좌표(packages/db/src/seed-esp32-sample.ts 와 반드시 일치) ────
 #define UNS_SITE     "main-site"

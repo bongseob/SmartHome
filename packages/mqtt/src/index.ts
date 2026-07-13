@@ -74,9 +74,22 @@ export function publishServiceStatus(
   client.publish(buildServiceStatusTopic(service), JSON.stringify(payload), { qos: 1, retain: true });
 }
 
-/** MQTT5 클라이언트 연결 (LWT 등 옵션은 호출부에서 병합) */
+/**
+ * MQTT5 클라이언트 연결 (LWT 등 옵션은 호출부에서 병합).
+ * 브로커 인증(PROJECT_RULES §5) — MQTT_USERNAME/MQTT_PASSWORD가 있으면 자동으로 싣는다.
+ * 백엔드 프로세스(api/gateway/scheduler/device-simulator)는 전부 이 함수를 통해서만
+ * 연결하므로, 여기 한 곳만 고치면 모든 호출부에 계정이 적용된다 — 호출부가 명시적으로
+ * username/password를 넘기면 그 값이 우선한다.
+ */
 export function connect(url: string, options: IClientOptions = {}): MqttClient {
-  return mqtt.connect(url, { protocolVersion: 5, ...options });
+  const username = options.username ?? process.env.MQTT_USERNAME;
+  const password = options.password ?? process.env.MQTT_PASSWORD;
+  return mqtt.connect(url, {
+    protocolVersion: 5,
+    ...(username ? { username } : {}),
+    ...(password ? { password } : {}),
+    ...options,
+  });
 }
 
 /**

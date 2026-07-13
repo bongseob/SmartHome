@@ -16,7 +16,9 @@ services:
       - "1883:1883"   # MQTT
       - "9001:9001"   # MQTT over WebSocket (대시보드 구독)
     volumes:
-      - ./mosquitto:/mosquitto/config:ro   # mosquitto.conf (읽기 전용)
+      # passwd/acl은 packages/db provision:mqtt-auth 스크립트가 컨테이너 안에서 직접 갱신하므로
+      # 쓰기 가능해야 한다(더 이상 :ro 아님) — mosquitto.conf 자체는 그대로 우리가 관리한다.
+      - ./mosquitto:/mosquitto/config
       - mosquitto-data:/mosquitto/data     # retained 메시지·세션 영속
       - mosquitto-log:/mosquitto/log
     healthcheck:

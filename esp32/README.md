@@ -42,7 +42,7 @@ cp include/config.example.h include/config.h
 |---|---|
 | `WIFI_SSID` / `WIFI_PASSWORD` | 이 보드가 붙을 Wi-Fi |
 | `MQTT_HOST` / `MQTT_PORT` | Mosquitto 브로커 주소(개발: 평문 1883) |
-| `MQTT_USERNAME` / `MQTT_PASSWORD` | 기기 MQTT 계정(CLAUDE.md 고정 결정: 기기는 MQTT ID/PW) |
+| `MQTT_USERNAME` / `MQTT_PASSWORD` | 이 보드의 MQTT 계정. `MQTT_USERNAME`은 `BOARD_CODE`와 동일해야 하고, `MQTT_PASSWORD`는 `pnpm --filter @smarthome/db run provision:mqtt-auth` 실행 시 콘솔에 1회만 출력되는 값(브로커가 `allow_anonymous false` + ACL로 보드별 토픽을 강제한다) |
 | `UNS_SITE` / `UNS_BUILDING` / `UNS_FLOOR` / `BOARD_SLUG` | DB의 `device.code`·`mqtt_topic`과 반드시 일치해야 gateway가 인식한다 |
 | `CHANNELS[]` | GPIO 핀 ↔ 담당 Area(방) ↔ `device.code` 매핑 |
 
