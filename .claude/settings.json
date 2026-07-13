@@ -18,7 +18,9 @@
       "Bash(pnpm --filter @smarthome/db run seed)",
       "Bash(node check-editmode-final.mjs)",
       "Bash(node check-editmode6.mjs)",
-      "Bash(node check-editmode7.mjs)"
+      "Bash(node check-editmode7.mjs)",
+      "Bash(pip install *)",
+      "Bash(python -m platformio --version)"
     ]
   }
 }
