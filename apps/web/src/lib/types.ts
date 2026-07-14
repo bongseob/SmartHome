@@ -250,6 +250,8 @@ export interface SchedulerRecord {
   eventTrigger: unknown;
   payload: { command?: string; args?: Record<string, unknown> };
   enabled: boolean;
+  /** true면 다운타임 중 놓친 발화도 재기동 후 최대 10분까지 실행한다(기본 false=cron과 동일). */
+  catchUpEnabled: boolean;
 }
 
 export interface CreateSchedulerRequest {
@@ -262,6 +264,7 @@ export interface CreateSchedulerRequest {
   daysOfWeek?: number[];
   dayOfMonth?: number;
   payload: { command: string; args?: Record<string, unknown> };
+  catchUpEnabled?: boolean;
 }
 
 export interface ScheduleRunRecord {

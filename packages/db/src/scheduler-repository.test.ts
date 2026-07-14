@@ -37,6 +37,7 @@ class FakeSchedulerDb implements QueryExecutor {
         event_trigger: params?.[8],
         payload: params?.[9],
         enabled: true,
+        catch_up_enabled: params?.[11] ?? false,
       };
       return { rows: [this.schedulerRow as unknown as T], rowCount: 1 };
     }
@@ -101,6 +102,7 @@ describe("scheduler repository", () => {
       event_trigger: null,
       payload: {},
       enabled: true,
+      catch_up_enabled: false,
     });
     const locked = await lockSchedulerById(db, "sched-1");
     expect(locked?.id).toBe("sched-1");

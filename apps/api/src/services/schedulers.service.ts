@@ -9,6 +9,7 @@ import {
   listSchedulers,
   query,
   setSchedulerEnabled,
+  updateScheduler,
 } from "@smarthome/db";
 
 const schedulerExecutor = { query };
@@ -24,6 +25,8 @@ export interface CreateSchedulerRequest {
   dayOfMonth?: number;
   eventTrigger?: unknown;
   payload: Record<string, unknown>;
+  /** 기본 false(cron과 동일 — 다운타임 캐치업 없음). true면 최대 10분까지 늦은 발화도 실행한다. */
+  catchUpEnabled?: boolean;
 }
 
 /** SRS 2.1.5 · PROJECT_RULES §6 — 스케줄러 관리는 ADMIN 전용, 변경은 감사 대상. */
@@ -46,6 +49,7 @@ export class SchedulersService {
       eventTrigger: body.eventTrigger,
       payload: body.payload,
       createdBy: auth.userId,
+      catchUpEnabled: body.catchUpEnabled ?? false,
     });
     await insertAuditLog(schedulerExecutor, {
       actorType: "ADMIN",
@@ -54,6 +58,38 @@ export class SchedulersService {
       targetId: scheduler.id,
       command: "CREATE_SCHEDULER",
       reason: `scheduler '${scheduler.name}' created`,
+      executionStatus: "SUCCEEDED",
+      mqttReasonCode: null,
+      sessionId: null,
+      commandId: null,
+    });
+    return scheduler;
+  }
+
+  async update(id: string, body: CreateSchedulerRequest, auth: AuthContext): Promise<unknown> {
+    const scheduler = await updateScheduler(schedulerExecutor, id, {
+      name: body.name,
+      targetType: body.targetType,
+      targetId: body.targetId,
+      scheduleType: body.scheduleType,
+      runAt: body.runAt ? new Date(body.runAt) : null,
+      cronExpr: body.cronExpr ?? null,
+      daysOfWeek: body.daysOfWeek ?? null,
+      dayOfMonth: body.dayOfMonth ?? null,
+      eventTrigger: body.eventTrigger,
+      payload: body.payload,
+      catchUpEnabled: body.catchUpEnabled ?? false,
+    });
+    if (!scheduler) {
+      throw new NotFoundException(`scheduler not found: ${id}`);
+    }
+    await insertAuditLog(schedulerExecutor, {
+      actorType: "ADMIN",
+      actorId: auth.userId,
+      targetType: "SCHEDULER",
+      targetId: scheduler.id,
+      command: "UPDATE_SCHEDULER",
+      reason: `scheduler '${scheduler.name}' updated`,
       executionStatus: "SUCCEEDED",
       mqttReasonCode: null,
       sessionId: null,

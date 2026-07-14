@@ -17,6 +17,8 @@ export interface SchedulerRecord {
   eventTrigger: unknown;
   payload: unknown;
   enabled: boolean;
+  /** true면 다운타임 캐치업(최대 10분 유예)을 허용한다 — 기본 false는 cron과 동일(1분 유예만). */
+  catchUpEnabled: boolean;
 }
 
 interface SchedulerRow extends QueryResultRow {
@@ -32,6 +34,7 @@ interface SchedulerRow extends QueryResultRow {
   event_trigger: unknown;
   payload: unknown;
   enabled: boolean;
+  catch_up_enabled: boolean;
 }
 
 function toScheduler(row: SchedulerRow): SchedulerRecord {
@@ -48,12 +51,13 @@ function toScheduler(row: SchedulerRow): SchedulerRecord {
     eventTrigger: row.event_trigger,
     payload: row.payload,
     enabled: row.enabled,
+    catchUpEnabled: row.catch_up_enabled,
   };
 }
 
 const SCHEDULER_COLUMNS = `
   id::text, name, target_type, target_id::text, schedule_type, run_at, cron_expr,
-  days_of_week, day_of_month, event_trigger, payload, enabled
+  days_of_week, day_of_month, event_trigger, payload, enabled, catch_up_enabled
 `;
 
 export interface CreateSchedulerInput {
@@ -68,6 +72,8 @@ export interface CreateSchedulerInput {
   eventTrigger?: unknown;
   payload: Record<string, unknown>;
   createdBy?: string | null;
+  /** 기본 false(cron과 동일 — 다운타임 캐치업 없음). true면 최대 10분까지 늦은 발화도 실행한다. */
+  catchUpEnabled?: boolean;
 }
 
 export async function createScheduler(
@@ -77,9 +83,9 @@ export async function createScheduler(
   const r = await db.query<SchedulerRow>(
     `INSERT INTO scheduler (
        name, target_type, target_id, schedule_type, run_at, cron_expr,
-       days_of_week, day_of_month, event_trigger, payload, created_by
+       days_of_week, day_of_month, event_trigger, payload, created_by, catch_up_enabled
      )
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
      RETURNING ${SCHEDULER_COLUMNS}`,
     [
       input.name,
@@ -93,6 +99,7 @@ export async function createScheduler(
       input.eventTrigger ? JSON.stringify(input.eventTrigger) : null,
       JSON.stringify(input.payload),
       input.createdBy ?? null,
+      input.catchUpEnabled ?? false,
     ],
   );
   const row = r.rows[0];
@@ -129,6 +136,51 @@ export async function lockSchedulerById(db: QueryExecutor, id: string): Promise<
   const r = await db.query<SchedulerRow>(
     `SELECT ${SCHEDULER_COLUMNS} FROM scheduler WHERE id::text = $1 FOR UPDATE SKIP LOCKED`,
     [id],
+  );
+  const row = r.rows[0];
+  return row ? toScheduler(row) : null;
+}
+
+export interface UpdateSchedulerInput {
+  name: string;
+  targetType: TargetType;
+  targetId: string;
+  scheduleType: ScheduleType;
+  runAt?: Date | null;
+  cronExpr?: string | null;
+  daysOfWeek?: number[] | null;
+  dayOfMonth?: number | null;
+  eventTrigger?: unknown;
+  payload: Record<string, unknown>;
+  catchUpEnabled?: boolean;
+}
+
+export async function updateScheduler(
+  db: QueryExecutor,
+  id: string,
+  input: UpdateSchedulerInput,
+): Promise<SchedulerRecord | null> {
+  const r = await db.query<SchedulerRow>(
+    `UPDATE scheduler SET
+       name = $2, target_type = $3, target_id = $4, schedule_type = $5, run_at = $6,
+       cron_expr = $7, days_of_week = $8, day_of_month = $9, event_trigger = $10, payload = $11,
+       catch_up_enabled = $12
+     WHERE id::text = $1
+     RETURNING ${SCHEDULER_COLUMNS}`,
+    [
+      id,
+      input.name,
+      input.targetType,
+      input.targetId,
+      input.scheduleType,
+      input.runAt ?? null,
+      input.cronExpr ?? null,
+      input.daysOfWeek ?? null,
+      input.dayOfMonth ?? null,
+      input.eventTrigger ? JSON.stringify(input.eventTrigger) : null,
+      JSON.stringify(input.payload),
+      input.catchUpEnabled ?? false,
+    ],
   );
   const row = r.rows[0];
   return row ? toScheduler(row) : null;

@@ -16,6 +16,7 @@ function baseSchedule(overrides: Partial<SchedulerRecord> = {}): SchedulerRecord
     eventTrigger: null,
     payload: {},
     enabled: true,
+    catchUpEnabled: false,
     ...overrides,
   };
 }
@@ -31,13 +32,19 @@ describe("computeDueState — ONE_TIME", () => {
     expect(computeDueState(schedule, now, null)).toBe("NOT_DUE");
   });
 
-  it("run_at 도달 + grace 이내면 DUE", () => {
+  it("run_at 도달 + 기본 유예(1분) 이내면 DUE", () => {
     const schedule = baseSchedule({ scheduleType: "ONE_TIME", runAt: new Date("2026-07-10T10:00:00Z") });
-    const now = new Date("2026-07-10T10:05:00Z");
+    const now = new Date("2026-07-10T10:00:30Z");
     expect(computeDueState(schedule, now, null)).toBe("DUE");
   });
 
-  it("grace를 넘겨 늦으면 MISSED", () => {
+  it("기본(캐치업 꺼짐)은 1분만 넘겨도 리눅스 cron처럼 MISSED — 뒤늦게 실행하지 않는다", () => {
+    const schedule = baseSchedule({ scheduleType: "ONE_TIME", runAt: new Date("2026-07-10T10:00:00Z") });
+    const now = new Date("2026-07-10T10:02:00Z");
+    expect(computeDueState(schedule, now, null)).toBe("MISSED");
+  });
+
+  it("기본 유예를 크게 넘겨 늦으면 MISSED", () => {
     const schedule = baseSchedule({ scheduleType: "ONE_TIME", runAt: new Date("2026-07-10T10:00:00Z") });
     const now = new Date("2026-07-10T10:30:00Z");
     expect(computeDueState(schedule, now, null)).toBe("MISSED");
@@ -50,6 +57,38 @@ describe("computeDueState — ONE_TIME", () => {
   });
 });
 
+describe("computeDueState — 캐치업 옵트인(catchUpEnabled)", () => {
+  it("꺼짐(기본)이면 8분 지연도 MISSED", () => {
+    const schedule = baseSchedule({
+      scheduleType: "ONE_TIME",
+      runAt: new Date("2026-07-10T10:00:00Z"),
+      catchUpEnabled: false,
+    });
+    const now = new Date("2026-07-10T10:08:00Z");
+    expect(computeDueState(schedule, now, null)).toBe("MISSED");
+  });
+
+  it("켜져 있으면 8분 지연은 확장 유예(10분) 이내라 DUE", () => {
+    const schedule = baseSchedule({
+      scheduleType: "ONE_TIME",
+      runAt: new Date("2026-07-10T10:00:00Z"),
+      catchUpEnabled: true,
+    });
+    const now = new Date("2026-07-10T10:08:00Z");
+    expect(computeDueState(schedule, now, null)).toBe("DUE");
+  });
+
+  it("켜져 있어도 확장 유예(10분)를 넘기면 MISSED", () => {
+    const schedule = baseSchedule({
+      scheduleType: "ONE_TIME",
+      runAt: new Date("2026-07-10T10:00:00Z"),
+      catchUpEnabled: true,
+    });
+    const now = new Date("2026-07-10T10:15:00Z");
+    expect(computeDueState(schedule, now, null)).toBe("MISSED");
+  });
+});
+
 describe("computeDueState — DAILY", () => {
   it("당일 시각 도달 전이면 NOT_DUE", () => {
     const schedule = baseSchedule({ scheduleType: "DAILY", runAt: new Date("2000-01-01T09:00:00Z") });
@@ -59,7 +98,7 @@ describe("computeDueState — DAILY", () => {
 
   it("당일 시각 도달 + 오늘 기록 없으면 DUE", () => {
     const schedule = baseSchedule({ scheduleType: "DAILY", runAt: new Date("2000-01-01T09:00:00Z") });
-    const now = new Date("2026-07-10T09:02:00Z");
+    const now = new Date("2026-07-10T09:00:30Z");
     expect(computeDueState(schedule, now, null)).toBe("DUE");
   });
 
@@ -71,7 +110,7 @@ describe("computeDueState — DAILY", () => {
 
   it("어제 실행 기록은 오늘 재발화를 막지 않는다", () => {
     const schedule = baseSchedule({ scheduleType: "DAILY", runAt: new Date("2000-01-01T09:00:00Z") });
-    const now = new Date("2026-07-10T09:02:00Z");
+    const now = new Date("2026-07-10T09:00:30Z");
     expect(computeDueState(schedule, now, run(new Date("2026-07-09T09:00:30Z")))).toBe("DUE");
   });
 });
@@ -94,7 +133,7 @@ describe("computeDueState — WEEKLY", () => {
       runAt: new Date("2000-01-01T09:00:00Z"),
       daysOfWeek: [5],
     });
-    const now = new Date("2026-07-10T09:02:00Z");
+    const now = new Date("2026-07-10T09:00:30Z");
     expect(computeDueState(schedule, now, null)).toBe("DUE");
   });
 });
@@ -117,7 +156,7 @@ describe("computeDueState — MONTHLY", () => {
       dayOfMonth: 31,
     });
     // 2026년 2월은 28일까지
-    const now = new Date("2026-02-28T09:02:00Z");
+    const now = new Date("2026-02-28T09:00:30Z");
     expect(computeDueState(schedule, now, null)).toBe("DUE");
   });
 });
@@ -125,7 +164,7 @@ describe("computeDueState — MONTHLY", () => {
 describe("computeDueState — CRON", () => {
   it("매시 정각 cron, 직전 발화 시점 이후면 DUE", () => {
     const schedule = baseSchedule({ scheduleType: "CRON", cronExpr: "0 * * * *" });
-    const now = new Date("2026-07-10T10:02:00Z");
+    const now = new Date("2026-07-10T10:00:30Z");
     expect(computeDueState(schedule, now, null)).toBe("DUE");
   });
 

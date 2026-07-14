@@ -9,6 +9,7 @@ import {
   listSchedulers,
   listGroupControlSummaries,
   setSchedulerEnabled,
+  updateScheduler,
 } from "../lib/api";
 import type { CreateSchedulerRequest, DeviceListItem, GroupControlSummary, ScheduleRunRecord, SchedulerRecord } from "../lib/types";
 import { useConfirm } from "./ConfirmDialog";
@@ -75,6 +76,82 @@ function timeToUtcIso(time: string): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+/** datetime-local input은 로컬 시각 문자열을 쓴다 — handleSubmit의 `new Date(form.oneTimeAt)`과 대칭. */
+function isoToDatetimeLocal(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** DAILY/WEEKLY/MONTHLY의 runAt은 UTC 시:분만 의미가 있다(timeToUtcIso와 대칭). */
+function isoToUtcTimeOfDay(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+}
+
+function formFromScheduler(s: SchedulerRecord): FormState {
+  const hasRepeatingTime = s.scheduleType === "DAILY" || s.scheduleType === "WEEKLY" || s.scheduleType === "MONTHLY";
+  return {
+    name: s.name,
+    targetType: s.targetType,
+    targetId: s.targetId,
+    scheduleType: s.scheduleType,
+    oneTimeAt: s.scheduleType === "ONE_TIME" && s.runAt ? isoToDatetimeLocal(s.runAt) : "",
+    timeOfDay: hasRepeatingTime && s.runAt ? isoToUtcTimeOfDay(s.runAt) : "09:00",
+    daysOfWeek: s.daysOfWeek ?? [],
+    dayOfMonth: s.dayOfMonth ?? 1,
+    cronExpr: s.cronExpr ?? "",
+    command: s.payload.command ?? "",
+    argsJson: s.payload.args ? JSON.stringify(s.payload.args) : "",
+    catchUpEnabled: s.catchUpEnabled,
+  };
+}
+
+/** 대상 셀 — DEVICE/GROUP은 이름을 찾아 보여주고 클릭하면 그 대상의 관제 화면으로 이동한다.
+ * AREA는 스케줄 fan-out 자체가 아직 지원되지 않아(§M10) 이동 없이 표시만 한다. */
+function renderTarget(
+  s: SchedulerRecord,
+  devices: DeviceListItem[],
+  groups: GroupControlSummary[],
+  onNavigateToDevice?: (device: DeviceListItem) => void,
+  onNavigateToGroup?: (groupId: string) => void,
+): JSX.Element {
+  if (s.targetType === "DEVICE") {
+    const device = devices.find((d) => d.id === s.targetId);
+    const label = device ? `${device.name} (${device.code})` : `DEVICE · ${s.targetId.slice(0, 8)}`;
+    if (device && onNavigateToDevice) {
+      return (
+        <button type="button" className="scheduler-table__target-link" onClick={() => onNavigateToDevice(device)}>
+          {label}
+        </button>
+      );
+    }
+    return <span>{label}</span>;
+  }
+  if (s.targetType === "GROUP") {
+    const group = groups.find((g) => g.id === s.targetId);
+    const label = group ? group.name : `GROUP · ${s.targetId.slice(0, 8)}`;
+    if (onNavigateToGroup) {
+      return (
+        <button
+          type="button"
+          className="scheduler-table__target-link"
+          onClick={() => onNavigateToGroup(s.targetId)}
+        >
+          {label}
+        </button>
+      );
+    }
+    return <span>{label}</span>;
+  }
+  return (
+    <span>
+      {s.targetType} · {s.targetId.slice(0, 8)}
+    </span>
+  );
+}
+
 interface FormState {
   name: string;
   targetType: TargetType;
@@ -87,6 +164,8 @@ interface FormState {
   cronExpr: string;
   command: string;
   argsJson: string;
+  /** true면 다운타임 중 놓친 발화도 재기동 후 최대 10분까지 실행한다(기본 false=cron과 동일). */
+  catchUpEnabled: boolean;
 }
 
 const INITIAL_FORM: FormState = {
@@ -101,15 +180,24 @@ const INITIAL_FORM: FormState = {
   cronExpr: "",
   command: "",
   argsJson: "",
+  catchUpEnabled: false,
 };
 
-export function SchedulerAdmin(): JSX.Element {
+interface SchedulerAdminProps {
+  /** 대상(DEVICE) 클릭 시 그 기기의 관제(Floor Map) 화면으로 이동 요청 — App이 층 해석까지 담당한다. */
+  onNavigateToDevice?: (device: DeviceListItem) => void;
+  /** 대상(GROUP) 클릭 시 그룹별 제어 화면에서 해당 그룹을 펼쳐 보여달라는 요청. */
+  onNavigateToGroup?: (groupId: string) => void;
+}
+
+export function SchedulerAdmin({ onNavigateToDevice, onNavigateToGroup }: SchedulerAdminProps): JSX.Element {
   const confirm = useConfirm();
   const [schedulers, setSchedulers] = useState<SchedulerRecord[]>([]);
   const [devices, setDevices] = useState<DeviceListItem[]>([]);
   const [groups, setGroups] = useState<GroupControlSummary[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(INITIAL_FORM);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -155,6 +243,18 @@ export function SchedulerAdmin(): JSX.Element {
           setLoadError(err instanceof ApiError ? err.detail : "삭제에 실패했습니다.");
         });
     });
+  };
+
+  const handleEdit = (s: SchedulerRecord) => {
+    setEditingId(s.id);
+    setForm(formFromScheduler(s));
+    setFormError(null);
+    setShowForm(true);
+  };
+
+  const closeForm = () => {
+    setShowForm(false);
+    setEditingId(null);
   };
 
   const handleShowRuns = (s: SchedulerRecord) => {
@@ -227,6 +327,7 @@ export function SchedulerAdmin(): JSX.Element {
       targetId: form.targetId,
       scheduleType: form.scheduleType,
       payload: { command: form.command.trim(), ...(args ? { args } : {}) },
+      catchUpEnabled: form.catchUpEnabled,
     };
 
     if (form.scheduleType === "ONE_TIME") {
@@ -266,14 +367,20 @@ export function SchedulerAdmin(): JSX.Element {
     }
 
     setSubmitting(true);
-    createScheduler(body)
-      .then((created) => {
-        setSchedulers((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
-        setShowForm(false);
+    const request = editingId ? updateScheduler(editingId, body) : createScheduler(body);
+    request
+      .then((saved) => {
+        setSchedulers((prev) => {
+          const next = editingId ? prev.map((x) => (x.id === saved.id ? saved : x)) : [...prev, saved];
+          return next.sort((a, b) => a.name.localeCompare(b.name));
+        });
+        closeForm();
         setForm(INITIAL_FORM);
       })
       .catch((err: unknown) => {
-        setFormError(err instanceof ApiError ? err.detail : "스케줄 생성에 실패했습니다.");
+        setFormError(
+          err instanceof ApiError ? err.detail : `스케줄 ${editingId ? "수정" : "생성"}에 실패했습니다.`,
+        );
       })
       .finally(() => setSubmitting(false));
   };
@@ -282,7 +389,15 @@ export function SchedulerAdmin(): JSX.Element {
     <div className="scheduler-admin">
       <div className="scheduler-admin__header" style={{ display: "flex", gap: "1rem", alignItems: "center", marginBottom: "1rem" }}>
         <h2>스케줄 / 예약 관리</h2>
-        <button type="button" className="primary" onClick={() => setShowForm(true)}>
+        <button
+          type="button"
+          className="primary"
+          onClick={() => {
+            setEditingId(null);
+            setForm(INITIAL_FORM);
+            setShowForm(true);
+          }}
+        >
           + 새 스케줄
         </button>
       </div>
@@ -293,7 +408,7 @@ export function SchedulerAdmin(): JSX.Element {
       {showForm && (
         <div className="modal-overlay">
           <form className="modal-content" onSubmit={handleSubmit}>
-            <h3>새 스케줄 예약 등록</h3>
+            <h3>{editingId ? "스케줄 수정" : "새 스케줄 예약 등록"}</h3>
             <div className="device-admin__form">
               <label>
                 이름
@@ -451,15 +566,30 @@ export function SchedulerAdmin(): JSX.Element {
                   />
                 </label>
               </div>
+
+              <label className="scheduler-form__checkbox">
+                <input
+                  type="checkbox"
+                  checked={form.catchUpEnabled}
+                  onChange={(e) => updateForm({ catchUpEnabled: e.target.checked })}
+                />
+                다운타임 중 놓친 발화도 재기동 후 최대 10분까지 실행(캐치업 허용)
+              </label>
+              <p className="scheduler-form__hint">
+                기본(꺼짐)은 리눅스 cron과 동일하게 동작합니다 — 시스템이 꺼져 있던 동안 지나간
+                예약은 재기동해도 실행하지 않고 건너뜁니다(SKIPPED). 사람이 "이미 실행됐거나 아예
+                실행 안 됐겠지"라고 가정하는 시점에 장비가 예기치 않게 상태를 바꾸는 걸 막기 위한
+                기본값이니, 정말 필요한 경우에만 켜세요.
+              </p>
             </div>
 
             {formError && <p className="error-text">{formError}</p>}
 
             <div className="modal-actions">
               <button type="submit" className="primary" disabled={submitting}>
-                {submitting ? "생성 중…" : "생성"}
+                {submitting ? (editingId ? "저장 중…" : "생성 중…") : editingId ? "저장" : "생성"}
               </button>
-              <button type="button" onClick={() => setShowForm(false)}>
+              <button type="button" onClick={closeForm}>
                 취소
               </button>
             </div>
@@ -485,10 +615,19 @@ export function SchedulerAdmin(): JSX.Element {
               <Fragment key={s.id}>
                 <tr>
                   <td>{s.name}</td>
+                  <td>{renderTarget(s, devices, groups, onNavigateToDevice, onNavigateToGroup)}</td>
                   <td>
-                    {s.targetType} · {s.targetId.slice(0, 8)}
+                    {summarizeSchedule(s)}
+                    {s.catchUpEnabled && (
+                      <span
+                        className="status-chip status-chip--muted"
+                        title="다운타임 중 놓친 발화도 재기동 후 최대 10분까지 실행합니다(기본값 아님)."
+                        style={{ marginLeft: "0.4rem" }}
+                      >
+                        캐치업 10분
+                      </span>
+                    )}
                   </td>
-                  <td>{summarizeSchedule(s)}</td>
                   <td>{s.payload.command ?? "-"}</td>
                   <td>
                     <button
@@ -500,6 +639,9 @@ export function SchedulerAdmin(): JSX.Element {
                     </button>
                   </td>
                   <td className="scheduler-table__actions">
+                    <button type="button" onClick={() => handleEdit(s)}>
+                      수정
+                    </button>
                     <button type="button" onClick={() => handleShowRuns(s)}>
                       이력
                     </button>

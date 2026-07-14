@@ -62,6 +62,8 @@ export function App(): JSX.Element {
   const [view, setView] = useState<"dashboard" | "fullMonitoring" | "map" | "groupControl" | "schedulers" | "systemInfo" | "floorMaps" | "areas" | "devices" | "recommendations">("dashboard");
   // 전체 모니터링에서 감시장비 선택 → 관제 화면에서 그 감시장비의 접점별 개별 제어를 펼치기 위한 포커스.
   const [focusEquipmentId, setFocusEquipmentId] = useState<string | null>(null);
+  // 스케줄러 등 다른 화면에서 특정 그룹의 개별제어 패널을 펼쳐달라는 요청.
+  const [focusGroupId, setFocusGroupId] = useState<string | null>(null);
 
   // 도면 편집 모드(ui-ux-design.md §4.1-mode) — ADMIN 전용. 실행 모드에서는 조회/제어만 가능하다.
   const [mode, setMode] = useState<"execute" | "edit">("execute");
@@ -201,6 +203,30 @@ export function App(): JSX.Element {
         setHistoryError(err instanceof Error ? err.message : "이력을 불러오지 못했습니다.");
       });
   }, [handleLogout]);
+
+  /** 스케줄러 등에서 DEVICE 대상을 클릭 → 그 기기가 속한 층으로 전환하고 Floor Map에서 선택한다.
+   * 기기의 areaTopicPrefix(enterprise/site/building/floor/area)가 floor.topicPrefix로 시작하는지로
+   * 소속 층을 역산한다(백엔드에 별도 조회 없이 프런트에서 바로 해석 가능). */
+  const handleNavigateToDevice = useCallback(
+    (device: DeviceListItem) => {
+      const floor = floors.find(
+        (f) => device.areaTopicPrefix?.startsWith(`${f.topicPrefix}/`),
+      );
+      if (dirtyCount > 0) setPendingPositions({});
+      setLayoutError(null);
+      setMode("execute");
+      if (floor) setSelectedFloorId(floor.id);
+      setView("map");
+      handleSelectDevice(device);
+    },
+    [floors, dirtyCount, handleSelectDevice],
+  );
+
+  /** 스케줄러 등에서 GROUP 대상을 클릭 → 그룹별 제어 화면으로 이동해 해당 그룹을 펼친다. */
+  const handleNavigateToGroup = useCallback((groupId: string) => {
+    setView("groupControl");
+    setFocusGroupId(groupId);
+  }, []);
 
   const handleSendCommand = useCallback(
     (command: "turn_on" | "turn_off") => {
@@ -513,11 +539,15 @@ export function App(): JSX.Element {
         </div>
       ) : view === "groupControl" ? (
         <div className="app-shell__body app-shell__body--single">
-          <GroupControl onAuthExpired={handleLogout} />
+          <GroupControl
+            onAuthExpired={handleLogout}
+            initialOpenGroupId={focusGroupId}
+            onInitialFocusHandled={() => setFocusGroupId(null)}
+          />
         </div>
       ) : view === "schedulers" ? (
         <div className="app-shell__body app-shell__body--single">
-          <SchedulerAdmin />
+          <SchedulerAdmin onNavigateToDevice={handleNavigateToDevice} onNavigateToGroup={handleNavigateToGroup} />
         </div>
       ) : view === "systemInfo" ? (
         <div className="app-shell__body app-shell__body--single">

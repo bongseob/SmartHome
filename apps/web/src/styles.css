@@ -1188,6 +1188,20 @@ body {
   gap: 0.75rem;
 }
 
+.scheduler-form__checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+}
+
+.scheduler-form__hint {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--ui-muted, #64748b);
+  line-height: 1.4;
+}
+
 .scheduler-form__weekdays {
   display: flex;
   gap: 0.35rem;
@@ -1263,6 +1277,30 @@ body {
   background: #dc2626;
   border-color: #dc2626;
   color: white;
+}
+
+/* 공용 button:hover:not(:disabled)(밝은 배경)이 켜짐/꺼짐 배경을 덮어써 글씨가 안 보이던 문제 —
+   .mode-toggle button:hover와 동일한 패턴으로 자기 색을 유지하도록 스코프한다. */
+.scheduler-toggle--on:hover:not(:disabled) {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: white;
+}
+
+.scheduler-toggle--off:hover:not(:disabled) {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: white;
+}
+
+.scheduler-table__target-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--ui-link, #2563eb);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
 }
 
 .scheduler-table__runs {
@@ -1557,33 +1595,42 @@ body {
   box-shadow: var(--ui-shadow-soft);
 }
 
-.device-admin__table {
+.device-admin__grid {
   width: 100%;
-  min-width: 1350px;
-  border-collapse: separate;
-  border-spacing: 0;
-  font-size: 0.85rem;
+  min-height: 220px;
+  border-radius: 8px;
+  overflow: hidden;
 }
 
-.device-admin__table td:last-child {
-  white-space: nowrap;
+.device-admin__grid .ag-root-wrapper {
+  border: 0;
 }
 
-.device-admin__table th,
-.device-admin__table td {
-  padding: 0.5rem 0.6rem;
-  border-bottom: 1px solid #ecf0f1;
-  text-align: left;
-  vertical-align: middle;
+.device-admin__grid .ag-cell {
+  display: flex;
+  align-items: center;
 }
 
-.device-admin__table button {
-  padding: 0.25rem 0.6rem;
+.device-admin__grid .status-chip,
+.device-admin__grid .lifecycle-badge {
+  margin: 0.3rem 0;
+}
+
+.device-admin__actions {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 0.3rem;
+}
+
+.device-admin__actions button {
+  padding: 0.2rem 0.6rem;
   border: 1px solid #ccd1d9;
   background: white;
   border-radius: 4px;
   cursor: pointer;
-  margin-right: 0.3rem;
+  font-size: 0.78rem;
+  height: 28px;
+  line-height: 1;
 }
 
 .device-admin__code {
@@ -2091,8 +2138,7 @@ select {
 .scheduler-table,
 .system-info__table,
 .floor-map-admin__table,
-.area-admin__table,
-.device-admin__table {
+.area-admin__table {
   border-collapse: separate;
   border-spacing: 0;
   border: 1px solid var(--ui-border);
@@ -2104,8 +2150,7 @@ select {
 .scheduler-table th,
 .system-info__table th,
 .floor-map-admin__table th,
-.area-admin__table th,
-.device-admin__table th {
+.area-admin__table th {
   background: var(--ui-panel-soft);
   color: var(--ui-muted);
   font-size: 0.76rem;
@@ -2119,9 +2164,7 @@ select {
 .floor-map-admin__table th,
 .floor-map-admin__table td,
 .area-admin__table th,
-.area-admin__table td,
-.device-admin__table th,
-.device-admin__table td {
+.area-admin__table td {
   padding: 0.62rem 0.68rem;
   border-bottom-color: var(--ui-border-soft);
 }
@@ -2129,8 +2172,7 @@ select {
 .scheduler-table tr:last-child td,
 .system-info__table tr:last-child td,
 .floor-map-admin__table tr:last-child td,
-.area-admin__table tr:last-child td,
-.device-admin__table tr:last-child td {
+.area-admin__table tr:last-child td {
   border-bottom: 0;
 }
 
@@ -2708,10 +2750,3 @@ select {
   font-size: 0.8rem;
 }
 
-/* 기기 관리 테이블 mqtt_topic 컬럼 가로 한도 제한 및 말줄임(Ellipsis) 적용 */
-.device-admin__table td.device-admin__topic {
-  max-width: 240px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}

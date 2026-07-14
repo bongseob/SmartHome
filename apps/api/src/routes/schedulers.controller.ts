@@ -24,6 +24,16 @@ export class SchedulersController {
   }
 
   @Roles("ADMIN")
+  @Patch(":id")
+  update(
+    @Param("id") id: string,
+    @Body() body: CreateSchedulerRequest,
+    @CurrentAuth() auth: AuthContext,
+  ): Promise<unknown> {
+    return this.schedulers.update(id, body, auth);
+  }
+
+  @Roles("ADMIN")
   @Patch(":id/enabled")
   setEnabled(
     @Param("id") id: string,

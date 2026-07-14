@@ -405,8 +405,16 @@ MVP 범위 밖으로 의도적으로 제외한 것(ui-ux-design.md 전체 스펙
   event는 이벤트 소스가 SRS/PROJECT_RULES에 정의돼 있지 않아 제외(스킵, 후속 필요)
 - distributed lock 완료: `SELECT ... FOR UPDATE SKIP LOCKED`로 scheduler row를 잠그고 짧은 트랜잭션 안에서
   due 판정 + claim(schedule_run 선기록)까지 끝낸 뒤 커밋 — 실제 MQTT 발행(네트워크 I/O)은 락 밖에서 수행
-- missed schedule 처리 완료: 의도된 발화 시각보다 `MISSED_GRACE_MINUTES`(10분) 넘게 늦으면 발행 대신
-  `SKIPPED`로 기록
+- missed schedule 처리 — **2026-07-14 안전 정책 변경**: 기본값을 `DEFAULT_GRACE_MINUTES`(1분,
+  폴링 주기 15초의 정상 지연만 흡수)로 낮춰 리눅스 cron과 동일하게 동작하도록 함 — 다운타임 동안
+  놓친 발화는 재기동해도 뒤늦게 실행하지 않고 `SKIPPED`로만 기록한다. 사람이 "이미 실행됐거나
+  아예 실행 안 됐겠지"라고 가정하는 시점에 장비가 예기치 않게 상태를 바꾸는 위험(고위험 장비일수록
+  치명적) 때문에 사용자가 직접 지적한 문제. 처음엔 고위험 장비만 다르게 다루는 방안도 검토했으나,
+  최종적으로 "전체 기본값을 cron 수준으로 낮추고, 캐치업이 필요한 스케줄만 사용자가 직접 옵트인"하는
+  방향으로 결정 — `scheduler.catch_up_enabled`(마이그레이션 0024, 기본 false) 컬럼 추가, true인
+  스케줄만 `EXTENDED_GRACE_MINUTES`(10분) 유예 적용. 웹 스케줄 생성/수정 폼에 체크박스로 노출,
+  목록에 "캐치업 10분" 배지로 표시. 실인프라에서 두 경로 모두 실제로 확인:
+  기본값(3분 지연) → SKIPPED·기기 상태 불변, 캐치업 켬(5분 지연) → FIRED·SUCCEEDED·기기 상태 반영
 - schedule_run 기록 완료: DEVICE 타깃은 1행, GROUP 타깃은 대상 기기 수만큼 각각 별도 행(스키마에 다중
   command_id를 담을 컬럼이 없어 이렇게 설계)
 - command path 재사용 완료: `@smarthome/command-flow`의 `publishDeviceCommand`를 그대로 사용

@@ -356,6 +356,13 @@ export function createScheduler(body: CreateSchedulerRequest): Promise<Scheduler
   });
 }
 
+export function updateScheduler(id: string, body: CreateSchedulerRequest): Promise<SchedulerRecord> {
+  return authedJson<SchedulerRecord>(`/api/v1/schedulers/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
 export function setSchedulerEnabled(id: string, enabled: boolean): Promise<SchedulerRecord> {
   return authedJson<SchedulerRecord>(`/api/v1/schedulers/${id}/enabled`, {
     method: "PATCH",

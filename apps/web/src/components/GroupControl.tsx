@@ -80,7 +80,19 @@ function describeError(err: unknown, fallback: string): string {
   return fallback;
 }
 
-export function GroupControl({ onAuthExpired }: { onAuthExpired: () => void }): JSX.Element {
+interface GroupControlProps {
+  onAuthExpired: () => void;
+  /** 외부(스케줄러 등)에서 특정 그룹의 개별제어 패널을 펼쳐달라는 요청. */
+  initialOpenGroupId?: string | null;
+  /** 포커스를 적용한 뒤 부모의 상태를 비우도록 알린다(중복 적용 방지). */
+  onInitialFocusHandled?: () => void;
+}
+
+export function GroupControl({
+  onAuthExpired,
+  initialOpenGroupId,
+  onInitialFocusHandled,
+}: GroupControlProps): JSX.Element {
   const [groups, setGroups] = useState<GroupControlSummary[]>([]);
   const [membersByGroup, setMembersByGroup] = useState<Record<string, DeviceListItem[]>>({});
   const [selectedByGroup, setSelectedByGroup] = useState<Record<string, Set<string>>>({});
@@ -166,6 +178,13 @@ export function GroupControl({ onAuthExpired }: { onAuthExpired: () => void }): 
     },
     [membersByGroup, onAuthExpired],
   );
+
+  useEffect(() => {
+    if (!initialOpenGroupId) return;
+    loadMembers(initialOpenGroupId);
+    onInitialFocusHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialOpenGroupId]);
 
   const updateProgressFromResponse = useCallback(
     (group: GroupControlSummary, command: ControlCommand, response: GroupCommandResponse) => {
