@@ -2,7 +2,8 @@
 
 - 기준 문서: [iot_smarthome_srs.md](../iot_smarthome_srs.md), [PROJECT_RULES.md](../PROJECT_RULES.md)
 - 작성일: 2026-07-09 (최근 갱신: 2026-07-14 — M12/M13 실기기·MQTT 인증 진행 + M13 TLS 설정 준비 +
-  `device.simulated`(가상/실기기 구분) + M11 AI/HITL 안전 인프라 + M14 CI 파이프라인 반영)
+  `device.simulated`(가상/실기기 구분) + M11 AI/HITL 안전 인프라 + M14 CI 파이프라인 + M14 Testcontainers
+  통합 테스트 반영)
 - 상태 기준: 현재 체크아웃의 코드, 문서, `pnpm build/typecheck/test` 검증 결과
 - 목적: 완료/진행/미완료 범위를 한 곳에서 추적하고, 다음 작업자가 바로 이어서 구현할 수 있게 한다.
 
@@ -33,7 +34,7 @@
 | 운영 보안 | 진행 중 | Mosquitto auth/ACL(보드별 계정 발급 + ACL, `allow_anonymous` 폐지) 완료(2026-07-13). TLS(mqtts/wss) **설정 준비** 완료(2026-07-14, `docs/tls-deployment.md`) — 실제 프로덕션 배포 검증은 미완료. 서비스간은 mTLS 대신 기존 공용 계정(`svc-backend`)을 API Key로 간주하기로 결정 |
 | Device 연결 프로토콜 | 완료(백엔드) | Device↔Gateway 구간 연결 방식(TCP_IP/SERIAL/MODBUS_TCP/MODBUS_RTU/ZIGBEE/ZWAVE) + 연결 파라미터를 `PATCH /devices/:id/connection`(ADMIN, audit)으로 설정. Gateway↔플랫폼(MQTT)은 무관·불변. 관리 UI는 M16으로 이동 |
 | Admin 관리 화면 (M16) | 완료 | 스케줄/예약, 시스템 기본정보, 도면, 지역(Area), 기기 등록/수정/연결 설정/소프트 폐기까지 실인프라·Playwright E2E 검증 완료 |
-| 통합/E2E/성능 테스트 | 미완료 | CI 파이프라인(lint+typecheck+기존 유닛테스트 124케이스 자동 실행) 완료(2026-07-14, ESLint 최초 도입 포함). 통합(testcontainers)·E2E(Playwright)·성능은 미착수 |
+| 통합/E2E/성능 테스트 | 진행 중 | CI 파이프라인(lint+typecheck+기존 유닛테스트 124케이스 자동 실행) 완료(2026-07-14, ESLint 최초 도입 포함). **통합(Testcontainers) 완료(2026-07-14)** — `packages/test-support` + `apps/gateway`/`apps/api` 통합 테스트 6케이스 + `integration.yml` CI 편입. E2E(Playwright)·성능은 미착수 |
 
 ---
 
@@ -1051,9 +1052,61 @@ M13은 "설정은 끝났지만 실제 배포 인프라에서 검증되지 않은
 4. `pnpm typecheck && pnpm build` 전체 통과(21/21). `pnpm test`는 이 세션 환경의 시스템 메모리
    부족으로 재검증 못 함(코드와 무관한 환경 제약)
 
+완료된 M14 Testcontainers 통합 테스트 작업 단위 (2026-07-14):
+
+배경: `pnpm test`로 도는 기존 테스트(`packages/db` 포함)는 전부 가짜 in-memory `QueryExecutor`
+mock을 쓰는 유닛 테스트라, 실제 Postgres 마이그레이션·Mosquitto 와이어 프로토콜(QoS/LWT/retained)·
+Redis correlation을 검증하는 자동 테스트가 하나도 없었다. `docs/test-strategy.md` §2가 명시한
+`api↔DB`, `gateway↔broker↔DB` integration 계층을 채운다.
+
+1. `packages/test-support`(신규, private) — Postgres(`postgres:15`)/Redis(`redis:7-alpine`)/
+   Mosquitto(`eclipse-mosquitto:2`, 테스트 전용 `allow_anonymous true`)를 Testcontainers로 병렬
+   기동하는 `startTestInfra()`, `packages/db/migrations`를 대상 DB에 적용하는 `runMigrations()`,
+   `packages/db/src/seed.ts`를 자식 프로세스로 실행하는 `runSeed()`(seed가 끝에서 `process.exit(0)`을
+   호출해 import 불가 — 별도 프로세스 필수), 세 개를 묶은 `startTestEnvironment()`, 그리고
+   비동기 MQTT 왕복을 폴링하는 `waitFor()` 헬퍼. `apps/api`/`apps/gateway` 통합 테스트가 공용으로 쓴다.
+2. `apps/gateway/src/gateway.integration.test.ts` — `apps/gateway/src/index.ts`는 최상위에서 즉시
+   실행되는 무한루프 프로세스라 import로 재사용할 수 없어, 빌드된 `dist/index.js`를 자식 프로세스로
+   스폰해 블랙박스로 검증한다. 3케이스: telemetry 발행→DB 적재, OFFLINE state 수신→
+   `device.current_status` 갱신+`alarm_log` 생성, `publishDeviceCommand()`로 명령 발행→테스트 클라이언트가
+   device 역할로 SUCCEEDED ack 응답→`command`/`audit_log`(CREATED→PENDING→IN_PROGRESS→SUCCEEDED) 확인.
+3. `apps/api/src/api.integration.test.ts` — `apps/api/src/modules/app.module.ts`는 부작용 없는 순수
+   NestJS 모듈이라 `@nestjs/testing`(`Test.createTestingModule`)으로 in-process 부트스트랩(자동실행되는
+   `index.ts`는 쓰지 않음), `supertest`로 HTTP 호출. 3케이스: 로그인 성공/실패(`audit_log` SUCCEEDED/
+   FAILED 확인), `POST /commands`가 DB(command/audit_log)에 반영되고 실제 Mosquitto에 QoS1로 `cmd`를
+   발행하는지 확인(device ack 왕복은 2번 gateway 테스트가 이미 커버해 중복 안 함).
+4. **실제 버그 2건을 이 과정에서 발견해 수정**:
+   - Nest+Vitest 호환성: Vitest 기본 변환기(esbuild)가 TypeScript의 `emitDecoratorMetadata`를 내지
+     않아 `Reflector` 등 모든 생성자 주입이 `undefined`가 되고 모든 요청이 500이 됨 — 공식 Nest 레시피와
+     동일한 문제. `vitest.integration.config.ts`에 `unplugin-swc`(decoratorMetadata: true) 플러그인을
+     추가해 해결.
+   - **refresh token 발급 충돌**: `packages/auth`의 `issueJwt()`가 `jti`(nonce) 없이 `sub+iat+exp` 등만
+     서명해, 같은 사용자가 같은 초(second) 안에 두 번 로그인하면 byte-identical refresh JWT가 나와
+     `refresh_token.token_hash` UNIQUE 제약 위반으로 로그인 자체가 500이 되는 실제 재현 가능한 버그였다
+     (통합 테스트가 로그인을 연속 호출하며 우연히 재현). `JwtPayload`에 랜덤 `jti`를 추가해 해결 —
+     탭 여러 개로 빠르게 재로그인하는 실사용 시나리오에서 발생할 수 있는 문제였다.
+5. `turbo.json`에 `test:integration` 태스크(`dependsOn: ["^build"]`, `cache: false`) 추가, 루트
+   `package.json`에 `test:integration` 스크립트 추가. `apps/api`/`apps/gateway`는 `vitest.config.ts`
+   (기본 `test`가 `*.integration.test.ts` 제외)와 `vitest.integration.config.ts`(그 반대) 분리 —
+   Docker 없이 도는 기존 `pnpm test`는 영향받지 않는다.
+6. `.github/workflows/integration.yml` 신규 — `ci.yml`과 동일 트리거, `pnpm run build` →
+   `pnpm run test:integration`. Testcontainers가 테스트 안에서 직접 컨테이너를 기동하므로
+   `services:` 블록은 불필요(ubuntu-latest에 Docker 기본 설치). `ci.yml` 헤더 주석을 갱신해
+   integration이 이 워크플로로 분리됐음을 명시.
+7. 로컬 검증(Docker Desktop): 신규 통합 테스트 6케이스 전부 통과, 기존 `pnpm test`(유닛)는 Docker 없이도
+   그대로 통과 확인(격리 검증).
+
+알려진 단순화(후속 필요):
+- Testcontainers Mosquitto는 테스트 전용 `allow_anonymous true`(격리된 1회성 컨테이너) — 프로덕션
+  보드별 계정/ACL(M13) 경로 자체는 검증하지 않는다.
+- gateway 통합 테스트는 spawn한 자식 프로세스의 표준출력 로그 문자열("공유구독 시작")로 준비 완료를
+  판단한다 — 로그 문구가 바뀌면 같이 갱신해야 한다.
+- api 통합 테스트는 명령의 device ack 왕복(SUCCEEDED 전이)까지는 검증하지 않는다(그 부분은 gateway
+  테스트가 커버) — 순수하게 "api가 올바른 QoS/payload로 실제 발행했는가"만 본다.
+
 다음 작업 단위 후보:
 1. M11 AI/HITL — 추천 저장, confidence threshold, 고위험 기기 게이트, approve/reject, 학습데이터 저장
-   (정책값은 구현 전 사용자 확인 필요)
+   (정책값은 구현 전 사용자 확인 필요) — **2026-07-14에 이미 완료**(§M11 참고), 이 목록 항목은 갱신 필요
 2. M13 실배포 검증 — 배포 인프라(부록 A.2) 확정 후, 실제 호스트에서 mqtts/wss 핸드셰이크·
    `docker-compose.prod.yml` 기동 확인. ESP32 `MQTT_USE_TLS=true` 경로는 `pio run` 컴파일부터
    재검증 필요(이 세션 환경에 PlatformIO 없음)
@@ -1062,5 +1115,6 @@ M13은 "설정은 끝났지만 실제 배포 인프라에서 검증되지 않은
 4. EVENT 스케줄 트리거 — 이벤트 소스 정의 필요(구현 전 사용자 결정)
 5. Notification Channel/Escalation Rule 관리 API(현재는 SQL 직접 조작으로만 검증됨)
 6. 권한 변경 API 구현 시 audit 강제, Group API 추가 시 group access guard 적용(별도 트랙)
-7. M14 자동 검증 체계 — 현재 수동 실행 스크립트인 M16 Playwright E2E를 CI에 편입하고 API/Gateway/Web
-   통합 테스트를 Testcontainers 기반으로 확장
+7. M14 나머지 — Playwright E2E 도입(현재 `scripts/m16-device-e2e.cjs`가 `playwright`를 직접 require하는
+   미커밋 ad-hoc 스크립트로만 존재 — `@playwright/test` 기반 정식 spec으로 전환) + CI 편입(풀스택
+   프로세스 오케스트레이션 필요), 성능 테스트(k6/artillery) 착수

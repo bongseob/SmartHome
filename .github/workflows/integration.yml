@@ -1,0 +1,35 @@
+name: Integration
+
+# docs/test-strategy.md §9 integration 게이트(api↔DB, gateway↔broker↔DB). Testcontainers가
+# 각 테스트 안에서 Postgres/Redis/Mosquitto를 직접 기동하므로 별도 `services:` 블록은 필요 없다
+# (ubuntu-latest에는 Docker가 이미 설치돼 있음). 컨테이너 이미지 최초 pull + 빌드 때문에
+# ci.yml(lint/typecheck/unit)보다 느려 별도 워크플로로 분리했다(docs/implementation-tracker.md M14).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: integration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.9
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm run test:integration

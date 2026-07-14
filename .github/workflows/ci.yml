@@ -1,8 +1,9 @@
 name: CI
 
 # docs/test-strategy.md §9 "PR 게이트: lint + typecheck + unit + contract + integration 통과 필수"
-# 중 lint + typecheck + (unit·contract) test까지 다룬다. integration/E2E는 testcontainers·
-# Playwright가 아직 도입되지 않아 후속 워크플로로 분리한다(docs/implementation-tracker.md M14 참고).
+# 중 lint + typecheck + (unit·contract) test까지 다룬다. integration은 `integration.yml`로 분리
+# (Testcontainers 기동 시간이 있어 별도 워크플로, docs/implementation-tracker.md M14 참고).
+# Playwright E2E는 아직 도입 전이라 두 워크플로 어디에도 없다(후속).
 # lint는 2026-07-14 루트 eslint.config.mjs 신설로 게이트에 포함(최초 도입 — 실제 버그를 잡는
 # 규칙 위주로 최소 구성, 점진적으로 강화 예정).
 

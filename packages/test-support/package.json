@@ -1,0 +1,23 @@
+{
+  "name": "@smarthome/test-support",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Testcontainers 기반 통합 테스트 공용 헬퍼(M14) — Postgres/Redis/Mosquitto 기동, 마이그레이션/시드 실행. apps/api·apps/gateway 통합 테스트 전용, 프로덕션 코드에서 참조 금지.",
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "clean": "rimraf dist .turbo"
+  },
+  "dependencies": {
+    "@testcontainers/postgresql": "^10.18.0",
+    "@testcontainers/redis": "^10.18.0",
+    "testcontainers": "^10.18.0"
+  },
+  "devDependencies": { "rimraf": "^6.0.1" }
+}

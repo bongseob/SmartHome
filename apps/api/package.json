@@ -7,6 +7,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "clean": "rimraf dist .turbo",
     "start": "dotenv -e ../../.env -- node dist/index.js"
   },
@@ -26,9 +27,15 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@nestjs/testing": "^11.1.28",
+    "@smarthome/test-support": "workspace:*",
+    "@swc/core": "^1.9.3",
     "@types/multer": "^1.4.12",
+    "@types/supertest": "^6.0.2",
     "@types/ws": "^8.5.13",
     "dotenv-cli": "^8.0.0",
-    "rimraf": "^6.0.1"
+    "rimraf": "^6.0.1",
+    "supertest": "^7.0.0",
+    "unplugin-swc": "^1.5.1"
   }
 }

@@ -87,7 +87,9 @@
 
 ## 9. CI 게이트 & 커버리지
 
-- PR 게이트: lint + typecheck + unit + contract + integration 통과 필수.
+- PR 게이트: lint + typecheck + unit + contract + integration 통과 필수 — lint/typecheck/unit·contract는
+  `.github/workflows/ci.yml`, integration(Testcontainers)은 `.github/workflows/integration.yml`로
+  분리 실행(2026-07-14, 컨테이너 기동 시간 때문에 별도 워크플로).
 - 커버리지 목표: 도메인 로직(상태머신·가드·repository) **높은 커버리지**, §3 불변식은 100% 케이스.
 - 야간: E2E + 성능 + 카오스 리포트.
 
@@ -98,7 +100,11 @@
 
 ## 11. 미해결/후속
 
-- 도구 확정(Vitest vs Jest, k6 vs artillery, testcontainers 구성)
+- ~~도구 확정(Vitest vs Jest, testcontainers 구성)~~ → **확정(2026-07-14)**: Vitest(유닛 전체),
+  Testcontainers(`packages/test-support`, Postgres/Redis/Mosquitto, `apps/api`·`apps/gateway`
+  integration) — 상세는 `docs/implementation-tracker.md` M14 참고. k6 vs artillery(성능)는 미결.
+- Playwright 도입(E2E) — 아직 `@playwright/test` 의존성 없음, `scripts/m16-device-e2e.cjs`가 유일한
+  ad-hoc 실행 스크립트
 - 성능 목표 재현 인프라(10만 기기 부하의 실행 환경)
 - 계약 스키마 언어(Zod ↔ OpenAPI ↔ JSON-Schema) 단일화
 - 시각 회귀(도면/대시보드) 테스트 도입 여부

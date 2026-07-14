@@ -28,6 +28,8 @@ interface JwtPayload extends Record<string, unknown> {
   iat: number;
   exp: number;
   typ: "access" | "refresh";
+  /** 같은 초에 발급된 토큰도 유일하도록(동시/연속 로그인 시 refresh_token.token_hash 충돌 방지) */
+  jti: string;
 }
 
 const ACCESS_LEVEL_ORDER: Record<AccessLevel, number> = {
@@ -102,6 +104,7 @@ export function issueJwt(
     iat: nowSeconds,
     exp: nowSeconds + expiresInSeconds,
     typ: tokenType,
+    jti: randomBytes(9).toString("base64url"),
   };
   const encoded = `${base64Url(JSON.stringify(header))}.${base64Url(JSON.stringify(payload))}`;
   return `${encoded}.${sign(encoded, secret)}`;
