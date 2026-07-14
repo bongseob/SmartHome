@@ -11,10 +11,16 @@ import {
   setSchedulerEnabled,
 } from "../lib/api";
 import type { CreateSchedulerRequest, DeviceListItem, GroupControlSummary, ScheduleRunRecord, SchedulerRecord } from "../lib/types";
+import { useConfirm } from "./ConfirmDialog";
 
 const SCHEDULE_TYPES: ScheduleType[] = ["ONE_TIME", "DAILY", "WEEKLY", "MONTHLY", "CRON"];
 const TARGET_TYPES: TargetType[] = ["DEVICE", "GROUP", "AREA"];
 const WEEKDAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
+/** 현재 기기/그룹 제어에서 실제로 지원하는 명령만 노출한다(오타 방지 — 자유 입력 금지). */
+const COMMAND_OPTIONS: { value: string; label: string }[] = [
+  { value: "turn_on", label: "전원 켜기 (turn_on)" },
+  { value: "turn_off", label: "전원 끄기 (turn_off)" },
+];
 
 function summarizeSchedule(s: SchedulerRecord): string {
   const time = s.runAt ? new Date(s.runAt).toISOString().slice(11, 16) : "--:--";
@@ -98,6 +104,7 @@ const INITIAL_FORM: FormState = {
 };
 
 export function SchedulerAdmin(): JSX.Element {
+  const confirm = useConfirm();
   const [schedulers, setSchedulers] = useState<SchedulerRecord[]>([]);
   const [devices, setDevices] = useState<DeviceListItem[]>([]);
   const [groups, setGroups] = useState<GroupControlSummary[]>([]);
@@ -140,12 +147,14 @@ export function SchedulerAdmin(): JSX.Element {
   };
 
   const handleDelete = (s: SchedulerRecord) => {
-    if (!window.confirm(`'${s.name}' 스케줄을 삭제할까요? 되돌릴 수 없습니다.`)) return;
-    deleteScheduler(s.id)
-      .then(() => setSchedulers((prev) => prev.filter((x) => x.id !== s.id)))
-      .catch((err: unknown) => {
-        setLoadError(err instanceof ApiError ? err.detail : "삭제에 실패했습니다.");
-      });
+    confirm(`'${s.name}' 스케줄을 삭제할까요? 되돌릴 수 없습니다.`, { danger: true }).then((ok) => {
+      if (!ok) return;
+      deleteScheduler(s.id)
+        .then(() => setSchedulers((prev) => prev.filter((x) => x.id !== s.id)))
+        .catch((err: unknown) => {
+          setLoadError(err instanceof ApiError ? err.detail : "삭제에 실패했습니다.");
+        });
+    });
   };
 
   const handleShowRuns = (s: SchedulerRecord) => {
@@ -163,6 +172,12 @@ export function SchedulerAdmin(): JSX.Element {
       });
   };
 
+  /** 폼 필드 갱신 + 이전 검증 에러 메시지 초기화(입력을 고쳤는데 옛 에러가 남아있는 것을 방지). */
+  const updateForm = (patch: Partial<FormState>) => {
+    setForm((prev) => ({ ...prev, ...patch }));
+    setFormError(null);
+  };
+
   const toggleWeekday = (day: number) => {
     setForm((prev) => ({
       ...prev,
@@ -170,14 +185,29 @@ export function SchedulerAdmin(): JSX.Element {
         ? prev.daysOfWeek.filter((d) => d !== day)
         : [...prev.daysOfWeek, day].sort(),
     }));
+    setFormError(null);
   };
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     setFormError(null);
 
-    if (!form.name.trim() || !form.targetId.trim() || !form.command.trim()) {
-      setFormError("이름, 대상 ID, 명령은 필수입니다.");
+    if (!form.name.trim()) {
+      setFormError("이름은 필수입니다.");
+      return;
+    }
+    if (!form.targetId.trim()) {
+      setFormError(
+        form.targetType === "DEVICE"
+          ? "대상 기기를 선택하세요."
+          : form.targetType === "GROUP"
+            ? "대상 그룹을 선택하세요."
+            : "대상 ID를 입력하세요.",
+      );
+      return;
+    }
+    if (!form.command.trim()) {
+      setFormError("명령(command)은 필수입니다.");
       return;
     }
 
@@ -267,7 +297,7 @@ export function SchedulerAdmin(): JSX.Element {
             <div className="device-admin__form">
               <label>
                 이름
-                <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+                <input value={form.name} onChange={(e) => updateForm({ name: e.target.value })} />
               </label>
 
               <div className="scheduler-form__row">
@@ -275,7 +305,7 @@ export function SchedulerAdmin(): JSX.Element {
                   대상 종류
                   <select
                     value={form.targetType}
-                    onChange={(e) => setForm({ ...form, targetType: e.target.value as TargetType, targetId: "" })}
+                    onChange={(e) => updateForm({ targetType: e.target.value as TargetType, targetId: "" })}
                   >
                     {TARGET_TYPES.map((t) => (
                       <option key={t} value={t}>
@@ -288,7 +318,7 @@ export function SchedulerAdmin(): JSX.Element {
                 {form.targetType === "DEVICE" && (
                   <label>
                     대상 기기
-                    <select value={form.targetId} onChange={(e) => setForm({ ...form, targetId: e.target.value })}>
+                    <select value={form.targetId} onChange={(e) => updateForm({ targetId: e.target.value })}>
                       <option value="">선택하세요</option>
                       {devices.map((d) => (
                         <option key={d.id} value={d.id}>
@@ -302,7 +332,7 @@ export function SchedulerAdmin(): JSX.Element {
                 {form.targetType === "GROUP" && (
                   <label>
                     대상 그룹
-                    <select value={form.targetId} onChange={(e) => setForm({ ...form, targetId: e.target.value })}>
+                    <select value={form.targetId} onChange={(e) => updateForm({ targetId: e.target.value })}>
                       <option value="">선택하세요</option>
                       {groups.map((g) => (
                         <option key={g.id} value={g.id}>
@@ -318,7 +348,7 @@ export function SchedulerAdmin(): JSX.Element {
                     대상 ID
                     <input
                       value={form.targetId}
-                      onChange={(e) => setForm({ ...form, targetId: e.target.value })}
+                      onChange={(e) => updateForm({ targetId: e.target.value })}
                       placeholder="공간(Area) ID (UUID)"
                     />
                   </label>
@@ -329,7 +359,7 @@ export function SchedulerAdmin(): JSX.Element {
                 반복 방식
                 <select
                   value={form.scheduleType}
-                  onChange={(e) => setForm({ ...form, scheduleType: e.target.value as ScheduleType })}
+                  onChange={(e) => updateForm({ scheduleType: e.target.value as ScheduleType })}
                 >
                   {SCHEDULE_TYPES.map((t) => (
                     <option key={t} value={t}>
@@ -345,7 +375,7 @@ export function SchedulerAdmin(): JSX.Element {
                   <input
                     type="datetime-local"
                     value={form.oneTimeAt}
-                    onChange={(e) => setForm({ ...form, oneTimeAt: e.target.value })}
+                    onChange={(e) => updateForm({ oneTimeAt: e.target.value })}
                   />
                 </label>
               )}
@@ -356,7 +386,7 @@ export function SchedulerAdmin(): JSX.Element {
                   <input
                     type="time"
                     value={form.timeOfDay}
-                    onChange={(e) => setForm({ ...form, timeOfDay: e.target.value })}
+                    onChange={(e) => updateForm({ timeOfDay: e.target.value })}
                   />
                 </label>
               )}
@@ -384,7 +414,7 @@ export function SchedulerAdmin(): JSX.Element {
                     min={1}
                     max={31}
                     value={form.dayOfMonth}
-                    onChange={(e) => setForm({ ...form, dayOfMonth: Number(e.target.value) })}
+                    onChange={(e) => updateForm({ dayOfMonth: Number(e.target.value) })}
                   />
                 </label>
               )}
@@ -394,7 +424,7 @@ export function SchedulerAdmin(): JSX.Element {
                   cron 식
                   <input
                     value={form.cronExpr}
-                    onChange={(e) => setForm({ ...form, cronExpr: e.target.value })}
+                    onChange={(e) => updateForm({ cronExpr: e.target.value })}
                     placeholder="0 9 * * 1-5"
                   />
                 </label>
@@ -403,17 +433,20 @@ export function SchedulerAdmin(): JSX.Element {
               <div className="scheduler-form__row">
                 <label>
                   명령(command)
-                  <input
-                    value={form.command}
-                    onChange={(e) => setForm({ ...form, command: e.target.value })}
-                    placeholder="turn_on"
-                  />
+                  <select value={form.command} onChange={(e) => updateForm({ command: e.target.value })}>
+                    <option value="">선택하세요</option>
+                    {COMMAND_OPTIONS.map((c) => (
+                      <option key={c.value} value={c.value}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label>
                   args (JSON, 선택)
                   <input
                     value={form.argsJson}
-                    onChange={(e) => setForm({ ...form, argsJson: e.target.value })}
+                    onChange={(e) => updateForm({ argsJson: e.target.value })}
                     placeholder='{"level": 3}'
                   />
                 </label>
@@ -460,7 +493,7 @@ export function SchedulerAdmin(): JSX.Element {
                   <td>
                     <button
                       type="button"
-                      className={s.enabled ? "active" : ""}
+                      className={`scheduler-toggle ${s.enabled ? "scheduler-toggle--on" : "scheduler-toggle--off"}`}
                       onClick={() => handleToggleEnabled(s)}
                     >
                       {s.enabled ? "ON" : "OFF"}

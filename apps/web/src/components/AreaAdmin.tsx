@@ -12,6 +12,7 @@ import {
 } from "../lib/api";
 import type { Area, FloorOverview, FloorSummary } from "../lib/types";
 import { useHtmlImage } from "../lib/useHtmlImage";
+import { useConfirm } from "./ConfirmDialog";
 
 const FALLBACK_WIDTH = 800;
 const FALLBACK_HEIGHT = 600;
@@ -29,6 +30,7 @@ function polygonPoints(polygon: unknown): number[] | null {
 }
 
 export function AreaAdmin(): JSX.Element {
+  const confirm = useConfirm();
   const [floors, setFloors] = useState<FloorSummary[]>([]);
   const [selectedFloorId, setSelectedFloorId] = useState<string | null>(null);
   const [overview, setOverview] = useState<FloorOverview | null>(null);
@@ -150,10 +152,12 @@ export function AreaAdmin(): JSX.Element {
 
   const handleDelete = (area: Area) => {
     if (!selectedFloorId) return;
-    if (!window.confirm(`'${area.name}' 지역을 삭제할까요? 배정된 기기는 area 없음 상태가 됩니다.`)) return;
-    deleteArea(area.id)
-      .then(() => reloadOverview(selectedFloorId))
-      .catch((err: unknown) => setError(err instanceof ApiError ? err.detail : "삭제에 실패했습니다."));
+    confirm(`'${area.name}' 지역을 삭제할까요? 배정된 기기는 area 없음 상태가 됩니다.`, { danger: true }).then((ok) => {
+      if (!ok) return;
+      deleteArea(area.id)
+        .then(() => reloadOverview(selectedFloorId))
+        .catch((err: unknown) => setError(err instanceof ApiError ? err.detail : "삭제에 실패했습니다."));
+    });
   };
 
   return (

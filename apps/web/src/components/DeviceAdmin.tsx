@@ -17,6 +17,7 @@ import type {
   FloorSummary,
 } from "../lib/types";
 import { ConnectionProtocolFields } from "./ConnectionProtocolFields";
+import { useConfirm } from "./ConfirmDialog";
 
 const CATEGORIES = ["DEVICE", "SENSOR", "GATEWAY"] as const;
 const DEVICE_ROLES: Array<{ value: DeviceRole; label: string }> = [
@@ -27,6 +28,7 @@ const SENSOR_SIGNAL_TYPES: SensorSignalType[] = ["DIGITAL", "ANALOG"];
 const SENSOR_IO_TYPES: SensorIoType[] = ["DI", "DO", "AI", "AO"];
 
 export function DeviceAdmin(): JSX.Element {
+  const confirm = useConfirm();
   const [floors, setFloors] = useState<FloorSummary[]>([]);
   const [selectedFloorId, setSelectedFloorId] = useState<string | null>(null);
   const [overview, setOverview] = useState<FloorOverview | null>(null);
@@ -157,16 +159,19 @@ export function DeviceAdmin(): JSX.Element {
   };
 
   const handleDecommission = (device: DeviceListItem) => {
-    if (!window.confirm(`'${device.name}' (${device.code}) 기기를 폐기할까요?\n소프트 전이로 lifecycle이 DECOMMISSIONED로 변경됩니다. 이력은 보존됩니다.`)) {
-      return;
-    }
-    decommissionDevice(device.id)
-      .then(() => {
-        if (selectedFloorId) reloadOverview(selectedFloorId);
-      })
-      .catch((err: unknown) =>
-        setLoadError(err instanceof ApiError ? err.detail : "폐기에 실패했습니다."),
-      );
+    confirm(
+      `'${device.name}' (${device.code}) 기기를 폐기할까요?\n소프트 전이로 lifecycle이 DECOMMISSIONED로 변경됩니다. 이력은 보존됩니다.`,
+      { danger: true },
+    ).then((ok) => {
+      if (!ok) return;
+      decommissionDevice(device.id)
+        .then(() => {
+          if (selectedFloorId) reloadOverview(selectedFloorId);
+        })
+        .catch((err: unknown) =>
+          setLoadError(err instanceof ApiError ? err.detail : "폐기에 실패했습니다."),
+        );
+    });
   };
 
   return (

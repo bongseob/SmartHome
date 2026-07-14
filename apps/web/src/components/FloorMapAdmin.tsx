@@ -10,6 +10,7 @@ import {
   uploadImage,
 } from "../lib/api";
 import type { FloorSummary, ImageRecord } from "../lib/types";
+import { useConfirm } from "./ConfirmDialog";
 
 function readImageDimensions(file: File): Promise<{ width: number; height: number }> {
   return new Promise((resolve, reject) => {
@@ -34,6 +35,7 @@ interface ImageLibraryProps {
 }
 
 function ImageLibrary({ images, onCreated, onRemoved }: ImageLibraryProps): JSX.Element {
+  const confirm = useConfirm();
   const [name, setName] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -67,14 +69,16 @@ function ImageLibrary({ images, onCreated, onRemoved }: ImageLibraryProps): JSX.
   };
 
   const handleDelete = (image: ImageRecord) => {
-    if (!window.confirm(`'${image.name}' 이미지를 삭제할까요? 이미 매핑된 배경은 별도 도면 기록으로 유지됩니다.`)) {
-      return;
-    }
-    deleteImage(image.id)
-      .then(() => onRemoved(image.id))
-      .catch((err: unknown) => {
-        setError(err instanceof ApiError ? err.detail : "이미지 삭제에 실패했습니다.");
-      });
+    confirm(`'${image.name}' 이미지를 삭제할까요? 이미 매핑된 배경은 별도 도면 기록으로 유지됩니다.`, { danger: true }).then(
+      (ok) => {
+        if (!ok) return;
+        deleteImage(image.id)
+          .then(() => onRemoved(image.id))
+          .catch((err: unknown) => {
+            setError(err instanceof ApiError ? err.detail : "이미지 삭제에 실패했습니다.");
+          });
+      },
+    );
   };
 
   return (
