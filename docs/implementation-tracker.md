@@ -2,7 +2,7 @@
 
 - 기준 문서: [iot_smarthome_srs.md](../iot_smarthome_srs.md), [PROJECT_RULES.md](../PROJECT_RULES.md)
 - 작성일: 2026-07-09 (최근 갱신: 2026-07-14 — M12/M13 실기기·MQTT 인증 진행 + M13 TLS 설정 준비 +
-  `device.simulated`(가상/실기기 구분) + M11 AI/HITL 안전 인프라 반영)
+  `device.simulated`(가상/실기기 구분) + M11 AI/HITL 안전 인프라 + M14 CI 파이프라인 반영)
 - 상태 기준: 현재 체크아웃의 코드, 문서, `pnpm build/typecheck/test` 검증 결과
 - 목적: 완료/진행/미완료 범위를 한 곳에서 추적하고, 다음 작업자가 바로 이어서 구현할 수 있게 한다.
 
@@ -33,7 +33,7 @@
 | 운영 보안 | 진행 중 | Mosquitto auth/ACL(보드별 계정 발급 + ACL, `allow_anonymous` 폐지) 완료(2026-07-13). TLS(mqtts/wss) **설정 준비** 완료(2026-07-14, `docs/tls-deployment.md`) — 실제 프로덕션 배포 검증은 미완료. 서비스간은 mTLS 대신 기존 공용 계정(`svc-backend`)을 API Key로 간주하기로 결정 |
 | Device 연결 프로토콜 | 완료(백엔드) | Device↔Gateway 구간 연결 방식(TCP_IP/SERIAL/MODBUS_TCP/MODBUS_RTU/ZIGBEE/ZWAVE) + 연결 파라미터를 `PATCH /devices/:id/connection`(ADMIN, audit)으로 설정. Gateway↔플랫폼(MQTT)은 무관·불변. 관리 UI는 M16으로 이동 |
 | Admin 관리 화면 (M16) | 완료 | 스케줄/예약, 시스템 기본정보, 도면, 지역(Area), 기기 등록/수정/연결 설정/소프트 폐기까지 실인프라·Playwright E2E 검증 완료 |
-| 통합/E2E/성능 테스트 | 미완료 | 현재는 contracts 중심 테스트 |
+| 통합/E2E/성능 테스트 | 미완료 | CI 파이프라인(typecheck+기존 유닛테스트 124케이스 자동 실행) 완료(2026-07-14). 통합(testcontainers)·E2E(Playwright)·성능은 미착수 |
 
 ---
 
@@ -646,20 +646,54 @@ state를 발행하면 경쟁 상태 발생). ESP32처럼 실기기가 하나씩 
 
 ### M14. 테스트/검증 체계
 
-상태: 미완료
+상태: 진행 중 (CI 파이프라인 완료 2026-07-14 — 나머지는 미착수)
+
+2026-07-14 착수 전 조사에서 확인한 실제 상태(그동안 "미완료"로만 표시돼 있었지만 세부는 불명확했음):
+- **유닛 테스트는 이미 상당히 있었다** — 22개 파일 약 124케이스(`packages/contracts` 7파일,
+  `packages/db` 10파일, `packages/auth`/`notify`/`command-flow`, `apps/scheduler`의
+  `schedule-math.test.ts`). 다만 `packages/db` 쪽은 전부 손수 만든 in-memory fake `QueryExecutor`
+  기준이라 실제 Postgres는 한 번도 쓰지 않는다 — "unit"이지 "integration"이 아니다.
+- **gateway/device-simulator는 테스트가 전혀 없다** — 로직이 진입점 스크립트(`apps/gateway/src/index.ts`
+  564줄 등)에 그대로 인라인돼 있어 핸들러가 별도 함수로 분리·export되지 않았다. 라이브 MQTT/DB
+  연결 없이는 유닛테스트 자체가 불가능한 구조 — 테스트를 추가하려면 먼저 리팩터링이 필요하다.
+- **Playwright 미도입** — `scripts/m16-device-e2e.cjs`는 `@playwright/test`가 아니라 playwright
+  라이브러리를 직접 불러 쓰는 임시 Node 스크립트, `playwright.config.ts`도 없다.
+- **testcontainers 미도입** — 어떤 `package.json`에도 없다.
+- `docs/test-strategy.md`(2026-07-09)에 테스트 피라미드·PR 게이트 정책이 이미 합의돼 있었지만
+  구현은 거의 0%였다.
+
+2026-07-14 사용자 결정: 위 항목 중 **CI 파이프라인부터** 진행(gateway 리팩터링·testcontainers는
+후속 — 특히 이 세션은 메모리 문제로 Docker를 꺼둔 상태라 testcontainers 검증 자체가 지금 어려움).
 
 작업:
-- repository unit test
-- gateway integration test
-- Mosquitto + Postgres testcontainers
-- simulator E2E
-- Playwright dashboard test
-- command/audit 불변식 테스트
-- QoS/retained/LWT 테스트
+- repository unit test — 기존에 이미 있었음(위 참고). 이번 라운드에서 추가 작성 없음
+- gateway integration test — 미착수(먼저 `apps/gateway/src/index.ts` 핸들러 분리 필요)
+- Mosquitto + Postgres testcontainers — 미착수(Docker 꺼진 상태, 후속)
+- simulator E2E — 미착수
+- Playwright dashboard test — 미착수(`@playwright/test` 자체가 미설치)
+- command/audit 불변식 테스트 — 기존 `command-service.test.ts`(9케이스, fake DB 기준)가 정상/불법
+  전이/중복 commandId는 커버. 타임아웃 경로·실제 QoS/retained/LWT는 여전히 미검증
+- QoS/retained/LWT 테스트 — 미착수(라이브 브로커 필요)
+- **CI 파이프라인 — 완료(2026-07-14)**: `.github/workflows/ci.yml` 신설, push(main)/PR마다
+  `pnpm install --frozen-lockfile` → `pnpm run build` → `pnpm run typecheck` → `pnpm run test`
+  (기존 124케이스 전부 포함) 자동 실행. `docs/test-strategy.md` §9 "PR 게이트: lint+typecheck+
+  unit+contract+integration"의 typecheck/unit/contract 부분만 우선 구현 — lint는 ESLint 설정
+  자체가 없어(§11 미해결) 뺐고(빈 스텝으로 통과한 것처럼 보이게 하지 않음), integration은
+  testcontainers 도입 후 별도 워크플로로 추가 예정
 
 완료 조건:
-- PROJECT_RULES 위반이 테스트에서 잡힌다.
-- command/audit 경로는 정상/실패/타임아웃/중복 케이스를 모두 검증한다.
+- PROJECT_RULES 위반이 테스트에서 잡힌다. 부분 완료 — 기존 유닛테스트가 잡는 범위(상태전이·payload
+  스키마 등)는 CI에서 자동 실행되지만, QoS/retained/LWT/HITL 게이트 등 라이브 인프라가 필요한
+  불변식은 여전히 수동 검증에 의존
+- command/audit 경로는 정상/실패/타임아웃/중복 케이스를 모두 검증한다. 부분 완료 — 정상/불법전이/
+  중복은 fake DB 유닛테스트로, 타임아웃은 실인프라 수동 E2E로만 검증됨(자동화 안 됨)
+
+알려진 단순화(후속 필요):
+- gateway 핸들러를 함수로 분리해야 유닛테스트를 붙일 수 있다(현재는 진입점 스크립트에 인라인)
+- testcontainers 도입 시 `packages/db`의 fake `QueryExecutor` 기반 테스트를 실제 Postgres 대상
+  통합 테스트로 확장할지, 유닛(fake)과 통합(real)을 층으로 나눠 공존시킬지 결정 필요
+- Playwright 정식 도입 + `scripts/m16-device-e2e.cjs`류 임시 스크립트의 정식 test spec 전환
+- CI에 lint 게이트를 추가하려면 ESLint 설정부터 필요(도구 자체가 미정)
 
 ### M15. 성능/운영
 

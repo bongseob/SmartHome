@@ -30,7 +30,8 @@
       "Bash(NODE_OPTIONS=\"--max-old-space-size=1024\" npx tsc -p tsconfig.json --noEmit)",
       "Bash(npx dotenv *)",
       "Bash(echo \"---device-simulator build exit $?---\")",
-      "Bash(NODE_OPTIONS=\"--max-old-space-size=1024\" npx vitest run)"
+      "Bash(NODE_OPTIONS=\"--max-old-space-size=1024\" npx vitest run)",
+      "Bash(NODE_OPTIONS=\"--max-old-space-size=1024\" npx turbo run test --concurrency=1)"
     ]
   }
 }
