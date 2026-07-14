@@ -33,7 +33,7 @@
 | 운영 보안 | 진행 중 | Mosquitto auth/ACL(보드별 계정 발급 + ACL, `allow_anonymous` 폐지) 완료(2026-07-13). TLS(mqtts/wss) **설정 준비** 완료(2026-07-14, `docs/tls-deployment.md`) — 실제 프로덕션 배포 검증은 미완료. 서비스간은 mTLS 대신 기존 공용 계정(`svc-backend`)을 API Key로 간주하기로 결정 |
 | Device 연결 프로토콜 | 완료(백엔드) | Device↔Gateway 구간 연결 방식(TCP_IP/SERIAL/MODBUS_TCP/MODBUS_RTU/ZIGBEE/ZWAVE) + 연결 파라미터를 `PATCH /devices/:id/connection`(ADMIN, audit)으로 설정. Gateway↔플랫폼(MQTT)은 무관·불변. 관리 UI는 M16으로 이동 |
 | Admin 관리 화면 (M16) | 완료 | 스케줄/예약, 시스템 기본정보, 도면, 지역(Area), 기기 등록/수정/연결 설정/소프트 폐기까지 실인프라·Playwright E2E 검증 완료 |
-| 통합/E2E/성능 테스트 | 미완료 | CI 파이프라인(typecheck+기존 유닛테스트 124케이스 자동 실행) 완료(2026-07-14). 통합(testcontainers)·E2E(Playwright)·성능은 미착수 |
+| 통합/E2E/성능 테스트 | 미완료 | CI 파이프라인(lint+typecheck+기존 유닛테스트 124케이스 자동 실행) 완료(2026-07-14, ESLint 최초 도입 포함). 통합(testcontainers)·E2E(Playwright)·성능은 미착수 |
 
 ---
 
@@ -675,16 +675,22 @@ state를 발행하면 경쟁 상태 발생). ESP32처럼 실기기가 하나씩 
   전이/중복 commandId는 커버. 타임아웃 경로·실제 QoS/retained/LWT는 여전히 미검증
 - QoS/retained/LWT 테스트 — 미착수(라이브 브로커 필요)
 - **CI 파이프라인 — 완료(2026-07-14)**: `.github/workflows/ci.yml` 신설, push(main)/PR마다
-  `pnpm install --frozen-lockfile` → `pnpm run build` → `pnpm run typecheck` → `pnpm run test`
-  (기존 124케이스 전부 포함) 자동 실행. `docs/test-strategy.md` §9 "PR 게이트: lint+typecheck+
-  unit+contract+integration"의 typecheck/unit/contract 부분만 우선 구현 — lint는 ESLint 설정
-  자체가 없어(§11 미해결) 뺐고(빈 스텝으로 통과한 것처럼 보이게 하지 않음), integration은
-  testcontainers 도입 후 별도 워크플로로 추가 예정
+  `pnpm install --frozen-lockfile` → `pnpm run lint` → `pnpm run build` → `pnpm run typecheck` →
+  `pnpm run test`(기존 124케이스 전부 포함) 자동 실행. `docs/test-strategy.md` §9 "PR 게이트:
+  lint+typecheck+unit+contract+integration"의 lint/typecheck/unit/contract까지 구현 —
+  integration은 testcontainers 도입 후 별도 워크플로로 추가 예정
+- **ESLint 최초 도입 — 완료(2026-07-14)**: 루트 `eslint.config.mjs`(flat config) 하나로 모노레포
+  전체를 `eslint .`로 검사(패키지별 lint 스크립트 불필요 — pnpm workspace 하위마다 eslint
+  의존성을 추가할 필요가 없어짐). 최초 도입이라 실제 버그를 잡는 규칙(미사용 변수,
+  react-hooks 의존성 배열) 위주로 최소 구성, 스타일 규칙(포매터)은 아직 없음. 처음 돌려서
+  나온 지적 3건 모두 실제로 고침(빈 규칙 끄기로 회피하지 않음): `FloorMap.tsx`의
+  `useMemo` 의존성 누락(`areaMatch`를 `useCallback`으로 안정화해 해결), `scripts/*.cjs`가
+  `require()`를 쓰는 걸 오탐하던 규칙은 `.cjs` 파일에 한해 끔(CommonJS 확장자이므로 정상 관용구)
 
 완료 조건:
-- PROJECT_RULES 위반이 테스트에서 잡힌다. 부분 완료 — 기존 유닛테스트가 잡는 범위(상태전이·payload
-  스키마 등)는 CI에서 자동 실행되지만, QoS/retained/LWT/HITL 게이트 등 라이브 인프라가 필요한
-  불변식은 여전히 수동 검증에 의존
+- PROJECT_RULES 위반이 테스트에서 잡힌다. 부분 완료 — 기존 유닛테스트+lint가 잡는 범위(상태전이·
+  payload 스키마·react-hooks 등)는 CI에서 자동 실행되지만, QoS/retained/LWT/HITL 게이트 등 라이브
+  인프라가 필요한 불변식은 여전히 수동 검증에 의존
 - command/audit 경로는 정상/실패/타임아웃/중복 케이스를 모두 검증한다. 부분 완료 — 정상/불법전이/
   중복은 fake DB 유닛테스트로, 타임아웃은 실인프라 수동 E2E로만 검증됨(자동화 안 됨)
 
@@ -693,7 +699,8 @@ state를 발행하면 경쟁 상태 발생). ESP32처럼 실기기가 하나씩 
 - testcontainers 도입 시 `packages/db`의 fake `QueryExecutor` 기반 테스트를 실제 Postgres 대상
   통합 테스트로 확장할지, 유닛(fake)과 통합(real)을 층으로 나눠 공존시킬지 결정 필요
 - Playwright 정식 도입 + `scripts/m16-device-e2e.cjs`류 임시 스크립트의 정식 test spec 전환
-- CI에 lint 게이트를 추가하려면 ESLint 설정부터 필요(도구 자체가 미정)
+- ESLint 규칙은 최소 구성 — 포매터(Prettier 등) 도입, 규칙 강화(예: `no-explicit-any` 다시 켜기)는
+  후속 판단 필요
 
 ### M15. 성능/운영
 

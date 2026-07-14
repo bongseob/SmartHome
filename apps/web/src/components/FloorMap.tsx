@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type Konva from "konva";
 import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } from "react-konva";
 import type { DeviceStatus } from "@smarthome/contracts";
@@ -232,10 +232,12 @@ export function FloorMap({
   }, [sensors]);
 
   // 지역 필터: 선택된 지역이 있으면 그 지역 소속 기기만 렌더한다.
-  const areaMatch = (device: DeviceListItem): boolean =>
-    selectedAreaId === null || device.areaId === selectedAreaId;
-  const visibleEquipments = useMemo(() => equipments.filter(areaMatch), [equipments, selectedAreaId]);
-  const visibleSensors = useMemo(() => sensors.filter(areaMatch), [sensors, selectedAreaId]);
+  const areaMatch = useCallback(
+    (device: DeviceListItem): boolean => selectedAreaId === null || device.areaId === selectedAreaId,
+    [selectedAreaId],
+  );
+  const visibleEquipments = useMemo(() => equipments.filter(areaMatch), [equipments, areaMatch]);
+  const visibleSensors = useMemo(() => sensors.filter(areaMatch), [sensors, areaMatch]);
 
   const renderedDevices = monitoringLevel === "equipment" ? visibleEquipments : visibleSensors;
 
