@@ -6,7 +6,10 @@ import type {
   DeviceRole,
   DeviceStatus,
   ExecutionStatus,
+  HitlDecision,
   LoadClass,
+  RecommendationStatus,
+  RecommendationType,
   Role,
   ScheduleRunStatus,
   ScheduleType,
@@ -282,4 +285,36 @@ export interface BuildingRecord {
   siteId: string;
   slug: string;
   name: string;
+}
+
+// ─── AI 추천 · HITL 승인 (SRS 3.5) ────────────────────────────────────
+
+export interface RecommendationRecord {
+  id: string;
+  type: RecommendationType;
+  targetType: TargetType;
+  targetId: string;
+  proposedCommand: string;
+  proposedPayload: unknown;
+  confidenceScore: number;
+  requiresHitl: boolean;
+  status: RecommendationStatus;
+  modelVersion: string | null;
+  commandId: string | null;
+  createdAt: string;
+}
+
+export interface CreateRecommendationRequest {
+  type: RecommendationType;
+  targetType: "DEVICE";
+  targetId: string;
+  proposedCommand: string;
+  proposedPayload?: unknown;
+  confidenceScore: number;
+  modelVersion?: string | null;
+}
+
+export interface RecommendationDecisionRequest {
+  decision: HitlDecision;
+  reason?: string | null;
 }

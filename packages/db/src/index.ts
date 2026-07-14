@@ -20,6 +20,8 @@ export * from "./image-repository.js";
 export * from "./event-history-repository.js";
 export * from "./system-setting-repository.js";
 export * from "./group-repository.js";
+export * from "./ai-repository.js";
+export * from "./hitl-service.js";
 
 /** 명령 상태전이 + audit_log 는 반드시 동일 트랜잭션(withTransaction)으로 기록한다. */
 export const AUDIT_REQUIRED_IN_TX = true as const;

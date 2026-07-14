@@ -26,6 +26,7 @@ import { SystemInfoAdmin } from "./components/SystemInfoAdmin";
 import { FloorMapAdmin } from "./components/FloorMapAdmin";
 import { AreaAdmin } from "./components/AreaAdmin";
 import { DeviceAdmin } from "./components/DeviceAdmin";
+import { RecommendationsAdmin } from "./components/RecommendationsAdmin";
 import { Dashboard } from "./components/Dashboard";
 import { GroupControl } from "./components/GroupControl";
 import { FullMonitoring } from "./components/FullMonitoring";
@@ -58,7 +59,7 @@ export function App(): JSX.Element {
   const feedSeq = useRef(0);
 
   // 최상위 화면 전환(M16 Admin) — ADMIN 전용 스케줄러/시스템정보 화면과 기존 Floor Map 관제 화면을 오간다.
-  const [view, setView] = useState<"dashboard" | "fullMonitoring" | "map" | "groupControl" | "schedulers" | "systemInfo" | "floorMaps" | "areas" | "devices">("dashboard");
+  const [view, setView] = useState<"dashboard" | "fullMonitoring" | "map" | "groupControl" | "schedulers" | "systemInfo" | "floorMaps" | "areas" | "devices" | "recommendations">("dashboard");
   // 전체 모니터링에서 감시장비 선택 → 관제 화면에서 그 감시장비의 접점별 개별 제어를 펼치기 위한 포커스.
   const [focusEquipmentId, setFocusEquipmentId] = useState<string | null>(null);
 
@@ -68,6 +69,7 @@ export function App(): JSX.Element {
   const [layoutError, setLayoutError] = useState<string | null>(null);
   const [savingLayout, setSavingLayout] = useState(false);
   const isAdmin = user?.roles.includes("ADMIN") ?? false;
+  const isHitlApprover = user?.roles.includes("HITL_APPROVER") ?? false;
   const dirtyCount = Object.keys(pendingPositions).length;
 
   // overview.devices는 실시간으로 갱신되므로, 선택된 기기는 id로만 들고 매 렌더에서 최신 값을 파생한다
@@ -442,6 +444,24 @@ export function App(): JSX.Element {
             <button type="button" className={view === "devices" ? "active" : ""} onClick={() => setView("devices")}>
               기기 관리
             </button>
+            <button
+              type="button"
+              className={view === "recommendations" ? "active" : ""}
+              onClick={() => setView("recommendations")}
+            >
+              AI 추천 승인
+            </button>
+          </div>
+        )}
+        {!isAdmin && isHitlApprover && (
+          <div className="mode-toggle">
+            <button
+              type="button"
+              className={view === "recommendations" ? "active" : ""}
+              onClick={() => setView("recommendations")}
+            >
+              AI 추천 승인
+            </button>
           </div>
         )}
         {isAdmin && (
@@ -514,6 +534,10 @@ export function App(): JSX.Element {
       ) : view === "devices" ? (
         <div className="app-shell__body app-shell__body--single">
           <DeviceAdmin />
+        </div>
+      ) : view === "recommendations" ? (
+        <div className="app-shell__body app-shell__body--single">
+          <RecommendationsAdmin />
         </div>
       ) : (
         <div className="app-shell__body">

@@ -315,4 +315,47 @@ export class CommandsService implements OnModuleInit, OnModuleDestroy {
     }
     return command;
   }
+
+  /**
+   * HITL 승인(또는 confidence≥임계치+비고위험 자동승인) 후 실제 제어 발행 — RecommendationsService
+   * 전용. actorType은 항상 AI로 고정한다(PROJECT_RULES §9 "AI가 유발한 제어의 Audit_Log
+   * Actor Type은 AI"). role은 특정 human role이 없는 AI 액터라 null(scheduler의 SYSTEM 액터와
+   * 동일 패턴 — MQTT User Property Role은 command-flow가 ADMIN으로 폴백).
+   */
+  async dispatchAsAi(deviceId: string, command: string, args?: Record<string, unknown>): Promise<CommandResponse> {
+    const mqtt = this.mqtt;
+    const redis = this.redis;
+    if (!mqtt || !redis) {
+      throw new BadRequestException("api command service is not ready");
+    }
+
+    const device = await getDeviceState(commandExecutor, deviceId);
+    if (!device) {
+      throw new NotFoundException(`device not found: ${deviceId}`);
+    }
+    const identity: DeviceIdentity | null = parseDeviceBase(device.mqttTopic);
+    if (!identity) {
+      throw new BadRequestException(`device has invalid mqtt_topic: ${device.code}`);
+    }
+
+    const commandId = `CMD-${Date.now()}-${randomUUID().slice(0, 8)}`;
+    const sessionId = `S-${randomUUID()}`;
+    const result = await publishDeviceCommand(mqtt, redis, {
+      commandId,
+      sessionId,
+      actorType: "AI",
+      actorId: null,
+      role: null,
+      targetId: device.id,
+      target: identity,
+      command,
+      ...(args ? { args } : {}),
+    });
+
+    return {
+      commandId: result.command.commandId,
+      status: result.command.status,
+      published: result.published,
+    };
+  }
 }

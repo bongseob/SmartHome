@@ -8,5 +8,6 @@ export * from "./payloads.js";
 export * from "./userProperties.js";
 export * from "./lifecycle.js";
 export * from "./alarmLifecycle.js";
+export * from "./hitlLifecycle.js";
 export * from "./realtime.js";
 export * from "./deviceConnection.js";

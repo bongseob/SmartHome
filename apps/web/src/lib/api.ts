@@ -6,6 +6,7 @@ import type {
   CommandCreateResponse,
   CommandRecord,
   CreateDeviceRequest,
+  CreateRecommendationRequest,
   CreateSchedulerRequest,
   DeviceHistory,
   DeviceListItem,
@@ -14,6 +15,8 @@ import type {
   GroupCommandResponse,
   GroupControlSummary,
   ImageRecord,
+  RecommendationDecisionRequest,
+  RecommendationRecord,
   ScheduleRunRecord,
   SchedulerRecord,
   SetDeviceConnectionRequest,
@@ -484,4 +487,28 @@ export interface SystemStatus {
 /** 서버 상태 위젯 — web/api/mqtt/redis/gateway/scheduler/simulator 7개 항목을 한 번에 조회한다. */
 export function getSystemStatus(): Promise<SystemStatus> {
   return authedJson<SystemStatus>("/health/system");
+}
+
+// ─── AI 추천 · HITL 승인 (SRS 3.5, M11) ────────────────────────────────
+
+export function createRecommendation(body: CreateRecommendationRequest): Promise<RecommendationRecord> {
+  return authedJson<RecommendationRecord>("/api/v1/recommendations", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function listRecommendations(status?: string): Promise<RecommendationRecord[]> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+  return authedJson<RecommendationRecord[]>(`/api/v1/recommendations${qs}`);
+}
+
+export function decideRecommendation(
+  id: string,
+  body: RecommendationDecisionRequest,
+): Promise<RecommendationRecord> {
+  return authedJson<RecommendationRecord>(`/api/v1/recommendations/${id}/decision`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
