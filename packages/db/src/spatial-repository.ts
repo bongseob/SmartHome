@@ -441,6 +441,7 @@ export interface DeviceListItem {
   lifecycleStatus: DeviceLifecycle;
   monitoringVisible: boolean;
   enabled: boolean;
+  simulated: boolean;
   parentDeviceId: string | null;
   sensorSignalType: SensorSignalType | null;
   sensorIoType: SensorIoType | null;
@@ -471,6 +472,7 @@ interface DeviceListRow extends QueryResultRow {
   lifecycle_status: DeviceLifecycle;
   monitoring_visible: boolean;
   enabled: boolean;
+  simulated: boolean;
   parent_device_id: string | null;
   sensor_signal_type: SensorSignalType | null;
   sensor_io_type: SensorIoType | null;
@@ -502,6 +504,7 @@ function toDeviceListItem(row: DeviceListRow): DeviceListItem {
     lifecycleStatus: row.lifecycle_status,
     monitoringVisible: row.monitoring_visible,
     enabled: row.enabled,
+    simulated: row.simulated,
     parentDeviceId: row.parent_device_id,
     sensorSignalType: row.sensor_signal_type,
     sensorIoType: row.sensor_io_type,
@@ -521,7 +524,7 @@ function toDeviceListItem(row: DeviceListRow): DeviceListItem {
 const DEVICE_SELECT_COLUMNS = `
   d.id::text, d.code, d.name, d.category, d.device_role, d.device_type, d.manufacturer, d.model,
   d.firmware_version, d.mqtt_topic, d.current_status, d.lifecycle_status,
-  d.monitoring_visible, d.enabled, d.parent_device_id::text, d.sensor_signal_type, d.sensor_io_type,
+  d.monitoring_visible, d.enabled, d.simulated, d.parent_device_id::text, d.sensor_signal_type, d.sensor_io_type,
   d.channel_address, d.terminal_block, d.load_class, d.area_id::text, d.pos_x::text, d.pos_y::text,
   d.connection_protocol, d.connection_config,
   d.updated_at,

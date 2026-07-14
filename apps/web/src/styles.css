@@ -2196,6 +2196,12 @@ select {
   color: #64748b;
 }
 
+/* 가상 기기(device-simulator가 대신 응답 중) — 실기기(초록 ok)와 헷갈리지 않도록 보라 계열로 구분 */
+.status-chip--simulated {
+  background: #ede9fe;
+  color: #6d28d9;
+}
+
 .lifecycle-badge--active {
   background: #dcfce7;
   color: #166534;

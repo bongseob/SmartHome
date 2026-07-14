@@ -6,6 +6,7 @@ import {
   type CreateDeviceRequest,
   type SetDeviceConnectionRequest,
   type SetDeviceMonitoringRequest,
+  type SetDeviceSimulatedRequest,
   type UpdateDeviceRequest,
 } from "../services/devices.service.js";
 
@@ -87,5 +88,19 @@ export class DevicesController {
     @CurrentAuth() auth: AuthContext,
   ): Promise<unknown> {
     return this.devices.setMonitoring(id, body, auth);
+  }
+
+  /**
+   * 시뮬레이터 응답 대상 여부 설정 — ADMIN 전용. true(기본)면 device-simulator의
+   * MockResponder가 이 기기의 cmd에 대신 응답한다. 실기기를 연결하면 false로 바꾼다.
+   */
+  @Roles("ADMIN")
+  @Patch(":id/simulated")
+  setSimulated(
+    @Param("id") id: string,
+    @Body() body: SetDeviceSimulatedRequest,
+    @CurrentAuth() auth: AuthContext,
+  ): Promise<unknown> {
+    return this.devices.setSimulated(id, body, auth);
   }
 }

@@ -23,7 +23,13 @@
       "Bash(python -m platformio --version)",
       "Bash(NODE_OPTIONS=\"--max-old-space-size=768\" npx turbo run typecheck --concurrency=1)",
       "Bash(NODE_OPTIONS=\"--max-old-space-size=768\" npx turbo run test --concurrency=1)",
-      "Bash(npx turbo *)"
+      "Bash(npx turbo *)",
+      "Bash(node -e \"console.log\\(\\(require\\('os'\\).freemem\\(\\)/1e9\\).toFixed\\(2\\), 'GB free /', \\(require\\('os'\\).totalmem\\(\\)/1e9\\).toFixed\\(2\\), 'GB total'\\)\")",
+      "Bash(NODE_OPTIONS=\"--max-old-space-size=1400\" npx tsc -p tsconfig.json --noEmit)",
+      "Bash(NODE_OPTIONS=\"--max-old-space-size=1024\" npx tsc -p tsconfig.json)",
+      "Bash(NODE_OPTIONS=\"--max-old-space-size=1024\" npx tsc -p tsconfig.json --noEmit)",
+      "Bash(npx dotenv *)",
+      "Bash(echo \"---device-simulator build exit $?---\")"
     ]
   }
 }

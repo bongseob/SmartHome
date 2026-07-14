@@ -7,6 +7,9 @@ import {
   type DeviceStatus,
   type StatePayload,
 } from "@smarthome/contracts";
+import { listSimulatedDeviceCodes, query } from "@smarthome/db";
+
+const SIMULATED_REFRESH_MS = 30_000;
 
 /**
  * 브로커 전역 목(mock) 응답기 — 모든 기기의 `/cmd`를 와일드카드로 받아
@@ -20,10 +23,18 @@ import {
  *  - contracts(AckPayload/StatePayload/CommandPayload) + mqtt(publish/topicFor)를 그대로 사용해
  *    게이트웨이 입장에서 실기기와 구분되지 않는다(QoS/retained 규칙 준수).
  *  - 멱등성: 동일 commandId 재수신 시 재실행 없이 기존 ack만 재전송.
+ *  - **device.simulated=false인 기기는 건드리지 않는다** — 실기기가 이미 그 기기의 cmd에
+ *    직접 응답하므로, 여기서 함께 응답하면 retained state를 서로 덮어쓰는 경쟁이 생긴다.
+ *    30초 주기로 DB의 simulated 목록을 새로 읽는다(알람 정책 캐시와 동일한 패턴). DB 조회가
+ *    실패하면 이전 목록을 유지하고, 최초 조회 전(null)에는 안전하게 "전부 응답"으로 동작한다
+ *    (DB 연결 없이도 기존처럼 쓸 수 있게 하는 fail-open — 이 도구는 데모/개발 편의용이라
+ *    DB가 없는 순수 MQTT 환경에서도 그냥 켜지는 편이 낫다).
  */
 export class MockResponder {
   private client: MqttClient | undefined;
   private readonly processed = new Map<string, AckPayload>();
+  private simulatedCodes: Set<string> | null = null;
+  private refreshTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(private readonly url: string) {}
 
@@ -39,6 +50,20 @@ export class MockResponder {
     });
     client.on("message", (topic: string, payload: Buffer) => this.handle(topic, payload));
     client.on("error", (err: Error) => console.error(`[sim-mock] error: ${err.message}`));
+
+    void this.refreshSimulatedCodes();
+    this.refreshTimer = setInterval(() => void this.refreshSimulatedCodes(), SIMULATED_REFRESH_MS);
+  }
+
+  private async refreshSimulatedCodes(): Promise<void> {
+    try {
+      const codes = await listSimulatedDeviceCodes({ query });
+      this.simulatedCodes = new Set(codes);
+    } catch (err) {
+      console.error(
+        `[sim-mock] simulated 목록 조회 실패(DATABASE_URL 확인) — 이전 목록으로 계속: ${(err as Error).message}`,
+      );
+    }
   }
 
   private handle(topic: string, raw: Buffer): void {
@@ -46,6 +71,8 @@ export class MockResponder {
     const base = topic.slice(0, -"/cmd".length);
     const identity = parseDeviceBase(base);
     if (!identity) return;
+    // simulated=false(실기기 연결됨)로 표시된 기기는 건드리지 않는다.
+    if (this.simulatedCodes && !this.simulatedCodes.has(identity.device)) return;
 
     let json: unknown;
     try {
@@ -91,6 +118,7 @@ export class MockResponder {
   }
 
   async stop(): Promise<void> {
+    if (this.refreshTimer) clearInterval(this.refreshTimer);
     const client = this.client;
     if (!client) return;
     await new Promise<void>((resolve) => {

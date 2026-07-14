@@ -468,6 +468,17 @@ export function FloorMap({
                     listening={false}
                   />
                 )}
+                {/* 가상 기기(device-simulator가 대신 응답 중) — 실기기와 한눈에 구분되도록 보라
+                    점선 테두리를 덧그린다. 알람 링(빨강)보다 안쪽이라 동시에 표시돼도 겹치지 않는다. */}
+                {device.simulated && (
+                  <Circle
+                    radius={isEquipment ? 16 : 13}
+                    stroke="#7c3aed"
+                    strokeWidth={1.5}
+                    dash={[2, 2]}
+                    listening={false}
+                  />
+                )}
                 {isEquipment ? (
                   <>
                     <Rect

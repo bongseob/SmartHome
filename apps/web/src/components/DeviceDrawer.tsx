@@ -72,6 +72,16 @@ export function DeviceDrawer({
           style={{ backgroundColor: DEVICE_STATUS_COLOR[device.currentStatus] }}
         >
           {device.currentStatus}
+        </span>{" "}
+        <span
+          className={device.simulated ? "status-chip status-chip--simulated" : "status-chip status-chip--ok"}
+          title={
+            device.simulated
+              ? "device-simulator가 이 기기의 명령에 대신 응답합니다(실기기 아님)."
+              : "실기기가 이 기기의 명령에 직접 응답합니다."
+          }
+        >
+          {device.simulated ? "가상" : "실기기"}
         </span>
       </p>
       <div className="device-drawer__actions">

@@ -21,6 +21,7 @@ import {
   updateDevice,
   updateDeviceConnection,
   updateDeviceMonitoringFlags,
+  updateDeviceSimulated,
   withTransaction,
 } from "@smarthome/db";
 
@@ -35,6 +36,10 @@ export interface SetDeviceConnectionRequest {
 export interface SetDeviceMonitoringRequest {
   monitoringVisible?: boolean;
   enabled?: boolean;
+}
+
+export interface SetDeviceSimulatedRequest {
+  simulated: boolean;
 }
 
 export interface CreateDeviceRequest {
@@ -509,6 +514,47 @@ export class DevicesService {
       mqttReasonCode: null,
       sessionId: null,
       commandId: null,
+      });
+      return updated;
+    });
+  }
+
+  /**
+   * 실기기 없이 개발/시연하기 위한 시뮬레이터 응답 대상 여부 토글(§device.simulated).
+   * true(기본)면 device-simulator의 MockResponder가 이 기기의 cmd에 대신 응답한다 — 실기기를
+   * 연결하면 false로 바꿔 목 응답을 끈다. monitoringVisible/enabled와 달리 관제 화면 노출과는
+   * 무관해 별도 엔드포인트로 둔다.
+   */
+  async setSimulated(id: string, body: SetDeviceSimulatedRequest, auth: AuthContext): Promise<unknown> {
+    if (typeof body.simulated !== "boolean") {
+      throw new BadRequestException("simulated는 boolean이어야 합니다.");
+    }
+
+    return withTransaction(async (client) => {
+      const before = await getDeviceState(client, id);
+      if (!before) {
+        throw new NotFoundException(`device not found: ${id}`);
+      }
+      if (before.lifecycleStatus === "DECOMMISSIONED") {
+        throw new ConflictException("decommissioned device cannot be changed");
+      }
+
+      const updated = await updateDeviceSimulated(client, id, body.simulated);
+      if (!updated) {
+        throw new NotFoundException(`device not found: ${id}`);
+      }
+
+      await insertAuditLog(client, {
+        actorType: "ADMIN",
+        actorId: auth.userId,
+        targetType: "DEVICE",
+        targetId: id,
+        command: "DEVICE_SIMULATED_UPDATE",
+        reason: `simulated ${before.simulated} → ${body.simulated}`,
+        executionStatus: "SUCCEEDED",
+        mqttReasonCode: null,
+        sessionId: null,
+        commandId: null,
       });
       return updated;
     });

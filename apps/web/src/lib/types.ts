@@ -79,6 +79,9 @@ export interface DeviceListItem {
   lifecycleStatus: DeviceLifecycle;
   monitoringVisible: boolean;
   enabled: boolean;
+  /** true(기본)면 device-simulator MockResponder가 이 기기의 cmd를 대신 응답 중이다 —
+   *  즉 실기기가 아니라 가상 기기 상태. 실기기를 연결하면 false로 바꾼다. */
+  simulated: boolean;
   parentDeviceId: string | null;
   sensorSignalType: SensorSignalType | null;
   sensorIoType: SensorIoType | null;
@@ -160,6 +163,10 @@ export interface SetDeviceConnectionRequest {
 export interface SetDeviceMonitoringRequest {
   monitoringVisible?: boolean;
   enabled?: boolean;
+}
+
+export interface SetDeviceSimulatedRequest {
+  simulated: boolean;
 }
 
 export interface FloorOverview {

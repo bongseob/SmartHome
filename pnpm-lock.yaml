@@ -91,6 +91,9 @@ importers:
       '@smarthome/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@smarthome/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@smarthome/mqtt':
         specifier: workspace:*
         version: link:../../packages/mqtt

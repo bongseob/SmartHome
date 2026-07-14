@@ -30,6 +30,9 @@ export interface DeviceStateRecord {
   lifecycleStatus: DeviceLifecycle;
   monitoringVisible: boolean;
   enabled: boolean;
+  /** true(기본)면 device-simulator MockResponder가 이 기기의 cmd를 대신 응답한다.
+   *  실기기를 연결하면 false로 바꾼다 — 토픽/기기 row는 그대로, 목 응답만 꺼진다. */
+  simulated: boolean;
   parentDeviceId: string | null;
   sensorSignalType: SensorSignalType | null;
   sensorIoType: SensorIoType | null;
@@ -106,6 +109,7 @@ interface DeviceStateRow extends QueryResultRow {
   lifecycle_status: DeviceLifecycle;
   monitoring_visible: boolean;
   enabled: boolean;
+  simulated: boolean;
   parent_device_id: string | null;
   sensor_signal_type: SensorSignalType | null;
   sensor_io_type: SensorIoType | null;
@@ -158,7 +162,7 @@ interface DeviceAlarmHistoryRow extends QueryResultRow {
 const DEVICE_COLUMNS = `
   id::text, code, name, category, device_role, device_type, manufacturer, model, firmware_version,
   mqtt_topic, current_status, lifecycle_status, area_id::text, pos_x::text, pos_y::text,
-  monitoring_visible, enabled, parent_device_id::text, sensor_signal_type, sensor_io_type,
+  monitoring_visible, enabled, simulated, parent_device_id::text, sensor_signal_type, sensor_io_type,
   channel_address, terminal_block, load_class, description, gateway_id::text, connection_protocol, connection_config, updated_at
 `;
 
@@ -178,6 +182,7 @@ function toDeviceState(row: DeviceStateRow): DeviceStateRecord {
     lifecycleStatus: row.lifecycle_status,
     monitoringVisible: row.monitoring_visible,
     enabled: row.enabled,
+    simulated: row.simulated,
     parentDeviceId: row.parent_device_id,
     sensorSignalType: row.sensor_signal_type,
     sensorIoType: row.sensor_io_type,
@@ -319,6 +324,33 @@ export async function updateDeviceMonitoringFlags(
   );
   const row = result.rows[0];
   return row ? toDeviceState(row) : null;
+}
+
+/** 실기기 연결 시 목 응답을 끄기 위한 토글(§device.simulated) — monitoring_visible/enabled와
+ *  달리 관제 화면 노출과는 무관하므로 별도 함수로 둔다. */
+export async function updateDeviceSimulated(
+  db: QueryExecutor,
+  deviceId: string,
+  simulated: boolean,
+): Promise<DeviceStateRecord | null> {
+  const result = await db.query<DeviceStateRow>(
+    `UPDATE device
+     SET simulated = $2, updated_at = now()
+     WHERE id::text = $1
+     RETURNING ${DEVICE_COLUMNS}`,
+    [deviceId, simulated],
+  );
+  const row = result.rows[0];
+  return row ? toDeviceState(row) : null;
+}
+
+/** device-simulator의 MockResponder가 "지금 내가 대신 응답해도 되는" 기기 코드 목록을 얻는 데 쓴다
+ *  — 폐기된 기기는 제외(더 이상 아무도 응답할 필요가 없다). */
+export async function listSimulatedDeviceCodes(db: QueryExecutor): Promise<string[]> {
+  const result = await db.query<{ code: string }>(
+    `SELECT code FROM device WHERE simulated = true AND lifecycle_status <> 'DECOMMISSIONED'`,
+  );
+  return result.rows.map((row) => row.code);
 }
 
 export async function getDeviceHistory(

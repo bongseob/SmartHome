@@ -18,6 +18,7 @@ import type {
   SchedulerRecord,
   SetDeviceConnectionRequest,
   SetDeviceMonitoringRequest,
+  SetDeviceSimulatedRequest,
   SiteRecord,
   TokenPair,
   UpdateDeviceRequest,
@@ -292,6 +293,16 @@ export function setDeviceMonitoring(
   body: SetDeviceMonitoringRequest,
 ): Promise<DeviceListItem> {
   return authedJson<DeviceListItem>(`/api/v1/devices/${id}/monitoring`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function setDeviceSimulated(
+  id: string,
+  body: SetDeviceSimulatedRequest,
+): Promise<DeviceListItem> {
+  return authedJson<DeviceListItem>(`/api/v1/devices/${id}/simulated`, {
     method: "PATCH",
     body: JSON.stringify(body),
   });

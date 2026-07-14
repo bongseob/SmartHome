@@ -12,7 +12,8 @@ import { MockResponder } from "./mock-responder.js";
  *                 예) SIM_FAULT=noack:turn_off  → turn_off에 ack 미발행(TIMED_OUT 유도)
  *                     SIM_FAULT=fail:turn_on:135 → turn_on에 FAILED(135) ack
  *  - SIM_MOCK_ALL 설정 시 단일 가상기기 대신 "전역 목 응답기"를 띄운다 —
- *                 모든 기기의 cmd에 SUCCEEDED ack + state를 발행(데모: 샘플 380기기 제어 완료).
+ *                 device.simulated=true인 기기의 cmd에만 SUCCEEDED ack + state를 발행한다
+ *                 (DATABASE_URL로 30초마다 목록을 갱신 — 없으면 안전하게 전부 응답).
  */
 function parseFault(spec: string | undefined): CommandFault[] {
   if (!spec) return [];

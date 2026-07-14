@@ -1,7 +1,8 @@
 # 구현 추적 문서 — SmartHome IoT 관제 시스템
 
 - 기준 문서: [iot_smarthome_srs.md](../iot_smarthome_srs.md), [PROJECT_RULES.md](../PROJECT_RULES.md)
-- 작성일: 2026-07-09 (최근 갱신: 2026-07-14 — M12/M13 실기기·MQTT 인증 진행 + M13 TLS 설정 준비 반영)
+- 작성일: 2026-07-09 (최근 갱신: 2026-07-14 — M12/M13 실기기·MQTT 인증 진행 + M13 TLS 설정 준비 +
+  `device.simulated`(가상/실기기 구분) 반영)
 - 상태 기준: 현재 체크아웃의 코드, 문서, `pnpm build/typecheck/test` 검증 결과
 - 목적: 완료/진행/미완료 범위를 한 곳에서 추적하고, 다음 작업자가 바로 이어서 구현할 수 있게 한다.
 
@@ -484,10 +485,48 @@ MVP 범위 밖으로 의도적으로 제외한 것(ui-ux-design.md 전체 스펙
    OFFLINE을 재현해 10개 채널 전부 캐스케이드되는 것과 알람 10건이 정상 발생하는 것을 확인
 8. MQTT 계정/ACL 발급 자체는 [M13](#m13-운영-보안)에 기록(같은 트랙, 보안 마일스톤 쪽에 상세 있음)
 
+완료된 작업 단위 — 가상/실기기 구분(`device.simulated`, 2026-07-14):
+
+배경: 이 시스템은 기기가 실제로 MQTT에 붙어 응답해야 상태가 존재한다 — 실기기가 하나도 없으면
+개발/시연 자체가 어렵다(사용자 요청 배경). `device-simulator`의 `MockResponder`(`SIM_MOCK_ALL`)가
+이미 "실기기 없이 전부 가상으로 개발/시연"은 지원했지만, DB를 전혀 보지 않고 브로커의 모든 기기
+`cmd`에 무조건 응답해 **실기기와 가상 기기를 섞어 쓸 수 없었다**(둘 다 같은 기기의 retained
+state를 발행하면 경쟁 상태 발생). ESP32처럼 실기기가 하나씩 배포되는 상황을 지원하려면 "이
+기기는 이제 실기기가 맡았다"를 표시할 방법이 필요했다.
+
+1. 마이그레이션 0023 — `device.simulated boolean NOT NULL DEFAULT true`. UNS 토픽(`buildTopic()`)은
+   전혀 바꾸지 않는다 — 순수 메타데이터로, "누가 이 기기의 cmd에 응답할 자격이 있는가"만 가른다
+   (토픽을 가상/실기기별로 분기하는 방안은 검토 후 기각 — Area 권한 와일드카드·도면 마커·그룹·
+   알람 정책이 전부 "한 자리에 기기 하나" 전제라 이중 관리 부담만 커짐)
+2. `packages/db`: `device-repository.ts`(`updateDeviceSimulated`, `listSimulatedDeviceCodes`),
+   `spatial-repository.ts`(`DeviceListItem.simulated`) — 기존 `monitoring_visible`/`enabled`
+   (0021)와 동일한 배선 패턴 재사용
+3. `apps/api`: `PATCH /api/v1/devices/:id/simulated`(ADMIN 전용, `DEVICE_SIMULATED_UPDATE` audit) —
+   `setMonitoring`과 동일 패턴이지만 관제 화면 노출 여부와는 무관해 별도 엔드포인트로 분리
+4. `apps/device-simulator`: `@smarthome/db` 의존성 추가(기존엔 순수 MQTT 클라이언트로 DB 접근
+   없었음 — `MockResponder`는 데모 편의 도구라는 성격상 예외적으로 허용). `MockResponder`가 30초
+   주기로 `simulated=true`인 device.code 목록을 캐시하고, 그 목록에 없는(=실기기가 맡은) 기기의
+   cmd는 건드리지 않는다. DB 조회 실패 시 fail-open(이전 목록 유지, 최초 조회 전엔 전부 응답)해
+   DB 없는 순수 MQTT 데모 환경도 그대로 지원
+5. `apps/web`: `DeviceAdmin.tsx`(가상/실기기 배지 + 전환 버튼), `FloorMap.tsx`(마커에 보라 점선
+   테두리로 가상 기기 표시 — 알람 링과 반지름을 달리해 동시 표시돼도 안 겹침), `DeviceDrawer.tsx`
+   (가상/실기기 배지)
+6. 실인프라(Postgres) 마이그레이션 적용 확인 — 기존 기기 117대 전부 `simulated=true`로 채워짐
+   (실기기가 아직 하나도 배포되지 않은 현재 상태와 일치)
+7. `pnpm typecheck`+`build`(db/api/web/device-simulator 개별) 통과 확인. 전체 워크스페이스
+   `turbo run`은 이 세션 환경의 시스템 메모리 부족으로 개별 패키지 단위로 나눠 검증
+
+사용 흐름: 실기기를 연결하면 `PATCH .../simulated { simulated: false }`(Admin 화면의 "실기기로
+전환" 버튼) 한 번으로 `MockResponder`가 그 기기를 더 이상 건드리지 않는다 — 토픽/Area 배정/도면
+위치/그룹/알람 정책은 전부 그대로 유지된다(마이그레이션·재배선 불필요).
+
 알려진 단순화(후속 필요):
 - credential 회수(기기 폐기 시 자동 revoke) 미구현
 - OTA(job 생성/명령/상태 추적) 전체가 미착수
 - 실제 물리 ESP32 하드웨어로 현장 배선·전원 테스트는 미완료 — 이번엔 `pio run` 컴파일 검증까지만
+- `device.simulated`를 실기기로 전환해도 `apps/device-simulator`의 단일 기기 모드(`VirtualDevice`,
+  thermostat-01 하드코딩)는 이 플래그를 보지 않는다 — 그 경로는 애초에 특정 기기 하나만 흉내내는
+  전용 테스트 도구라 영향 범위 밖(향후 fleet 확장 시 함께 정리)
 
 ### M13. 운영 보안
 

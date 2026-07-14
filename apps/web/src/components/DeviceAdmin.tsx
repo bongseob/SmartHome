@@ -8,6 +8,7 @@ import {
   listDevices,
   listFloors,
   setDeviceMonitoring,
+  setDeviceSimulated,
   updateDevice,
 } from "../lib/api";
 import type {
@@ -328,6 +329,7 @@ export function DeviceAdmin(): JSX.Element {
               <th>lifecycle</th>
               <th>모니터링</th>
               <th>사용</th>
+              <th>가상</th>
               <th>연결</th>
               <th></th>
             </tr>
@@ -452,6 +454,18 @@ function DeviceRow({
             {device.enabled ? "사용" : "미사용"}
           </span>
         </td>
+        <td>
+          <span
+            className={device.simulated ? "status-chip status-chip--simulated" : "status-chip status-chip--ok"}
+            title={
+              device.simulated
+                ? "device-simulator가 이 기기의 명령에 대신 응답합니다. 실기기를 연결하면 '실기기'로 전환하세요."
+                : "실기기가 이 기기의 명령에 직접 응답합니다."
+            }
+          >
+            {device.simulated ? "가상" : "실기기"}
+          </span>
+        </td>
         <td>{device.connectionProtocol ?? "—"}</td>
         <td>
           <button type="button" onClick={() => setEditing(true)} disabled={isDecommissioned}>
@@ -487,6 +501,20 @@ function DeviceRow({
             disabled={isDecommissioned}
           >
             {device.enabled ? "미사용" : "사용"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setDeviceSimulated(device.id, { simulated: !device.simulated })
+                .then(onUpdated)
+                .catch((err: unknown) =>
+                  setError(err instanceof ApiError ? err.detail : "가상/실기기 전환에 실패했습니다."),
+                );
+            }}
+            disabled={isDecommissioned}
+          >
+            {device.simulated ? "실기기로 전환" : "가상으로 전환"}
           </button>
           <button type="button" onClick={onDecommission} disabled={isDecommissioned}>
             폐기
