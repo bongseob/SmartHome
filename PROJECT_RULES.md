@@ -221,6 +221,10 @@ CREATED → PENDING → IN_PROGRESS → SUCCEEDED
   별도 인프라 없이 단일 서버 배포 전제와 일치. "시스템 기본정보 관리"는 **Site/Building 이름 수정만**
   포함하고 조직 계층(enterprise/site/building) 생성·삭제는 범위에서 제외한다 — enterprise는 단일
   고정이며 멀티테넌시 확장(SRS 7)은 후속 과제로 남긴다.
+- **TLS/인증서 전략(2026-07-14 합의, SRS/§5.1, 구현 → docs/tls-deployment.md)**: 이번 라운드는
+  **프로덕션 설정만 준비**한다(로컬 개발은 계속 평문 — 배포 인프라 자체가 미정이라 실배포 검증은
+  후속). 인증서는 **자체 서명 사설 CA**(공인 CA는 도메인·배포 인프라 확정 후 전환 검토, → A.2).
+  ESP32 릴레이 보드도 TLS(`WiFiClientSecure`) 대상에 포함한다.
 
 ### A.2 남은 열린 항목 (구현 진행하며 결정)
 - Notification Channel 구현체(push/email/SMS provider)

@@ -20,7 +20,10 @@
       "Bash(node check-editmode6.mjs)",
       "Bash(node check-editmode7.mjs)",
       "Bash(pip install *)",
-      "Bash(python -m platformio --version)"
+      "Bash(python -m platformio --version)",
+      "Bash(NODE_OPTIONS=\"--max-old-space-size=768\" npx turbo run typecheck --concurrency=1)",
+      "Bash(NODE_OPTIONS=\"--max-old-space-size=768\" npx turbo run test --concurrency=1)",
+      "Bash(npx turbo *)"
     ]
   }
 }

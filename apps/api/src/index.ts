@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { readFileSync } from "node:fs";
 import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import type { Server as HttpServer } from "node:http";
@@ -18,9 +19,25 @@ process.on("unhandledRejection", (reason) => {
   console.error("[api] 처리되지 않은 프로미스 거부(계속 실행):", reason);
 });
 
+/**
+ * TLS(https/wss, PROJECT_RULES §5.1) — TLS_CERT_FILE/TLS_KEY_FILE이 둘 다 있으면 NestJS가
+ * https.Server로 뜨고, RealtimeWsServer(ws 패키지)는 그 서버에 그대로 attach되므로 wss도
+ * 자동으로 따라온다. 개발(두 env 없음)에서는 http로 그대로 동작한다.
+ */
+function loadHttpsOptions(): { cert: Buffer; key: Buffer } | undefined {
+  const certFile = process.env.TLS_CERT_FILE;
+  const keyFile = process.env.TLS_KEY_FILE;
+  if (!certFile || !keyFile) return undefined;
+  return { cert: readFileSync(certFile), key: readFileSync(keyFile) };
+}
+
 export async function main(): Promise<void> {
   ensureFloorMapsDir();
-  const app = await NestFactory.create<NestExpressApplication>(AppModule, { cors: true });
+  const httpsOptions = loadHttpsOptions();
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    cors: true,
+    ...(httpsOptions ? { httpsOptions } : {}),
+  });
   app.useGlobalFilters(new ProblemJsonFilter());
   // 도면 이미지(M16) — 로컬 파일시스템에 저장된 파일을 /uploads/... 경로로 정적 서빙
   app.useStaticAssets(UPLOADS_ROOT, { prefix: "/uploads" });
@@ -30,7 +47,8 @@ export async function main(): Promise<void> {
   const realtime = new RealtimeWsServer(app.getHttpServer() as HttpServer);
   await realtime.start();
 
-  console.log(`[api] listening on http://localhost:${port}`);
+  const scheme = httpsOptions ? "https" : "http";
+  console.log(`[api] listening on ${scheme}://localhost:${port}`);
 
   const shutdown = (): void => {
     void realtime.close().then(() => process.exit(0));

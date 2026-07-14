@@ -19,12 +19,25 @@
 // `pnpm --filter @smarthome/db run provision:mqtt-auth` 실행 시 콘솔에 한 번만 출력되는
 // 값을 그대로 붙여넣는다(평문은 DB에 남지 않아 재출력 불가 — 잃어버리면 그 보드만
 // --rotate로 재발급). ACL로 이 보드는 자기 자신+자기 채널 토픽만 쓸 수 있다.
-// 운영은 TLS(mqtts/8883)로도 교체해야 한다(PROJECT_RULES §5) — WiFiClientSecure로
-// netClient를 바꾸고 CA 인증서를 넣으면 된다.
 #define MQTT_HOST     "192.168.0.10"
 #define MQTT_PORT     1883
 #define MQTT_USERNAME "1f-esp32-a"
 #define MQTT_PASSWORD "PASTE_PROVISIONED_PASSWORD_HERE"
+
+// ── TLS(mqtts, PROJECT_RULES §5.1) ──────────────────────────────────────
+// 프로덕션은 true로 바꾸고 MQTT_PORT를 8883으로, MQTT_CA_CERT를
+// infra/tls/generate-certs.sh가 만든 out/ca.crt 내용으로 채운다(사설 CA — 보드가
+// Mosquitto의 자체 서명 서버 인증서를 검증하는 데 필요). 이 CA는 서버 인증서 검증용일
+// 뿐 보드 자신의 신원증명(계정)과는 무관 — MQTT_USERNAME/PASSWORD는 그대로 쓴다.
+// 주의: TLS 핸드셰이크는 실제 시각(NTP) 동기화 후에만 인증서 유효기간 검증이 되고,
+// WiFiClientSecure는 평문 대비 메모리를 더 쓴다 — 실기기 검증 전까지는 기본 false 권장.
+#define MQTT_USE_TLS  false
+
+static const char* MQTT_CA_CERT = R"EOF(
+-----BEGIN CERTIFICATE-----
+PASTE infra/tls/out/ca.crt CONTENTS HERE (MQTT_USE_TLS=true 일 때만 사용됨)
+-----END CERTIFICATE-----
+)EOF";
 
 // ── 이 보드의 UNS 좌표(packages/db/src/seed-esp32-sample.ts 와 반드시 일치) ────
 #define UNS_SITE     "main-site"

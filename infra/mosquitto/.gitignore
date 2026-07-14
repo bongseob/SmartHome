@@ -1,3 +1,6 @@
 # provision:mqtt-auth가 생성하는 실제 자격증명/ACL — 커밋 금지.
 passwd
 acl
+
+# infra/tls/generate-certs.sh 산출물 복사본(개인키 포함) — 커밋 금지.
+tls/

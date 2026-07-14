@@ -23,6 +23,7 @@
 | 시스템 아키텍처 (HLD/LLD) | [docs/architecture.md](architecture.md) | 초안 v0.1 |
 | 기기 수명주기 & 펌웨어 OTA | [docs/device-lifecycle-ota.md](device-lifecycle-ota.md) | 초안 v0.1 |
 | SRS 부속 — 조명/부하 제어 도메인 | [docs/srs-lighting-control-addendum.md](srs-lighting-control-addendum.md) | 초안 v0.1 |
+| TLS 배포 가이드 | [docs/tls-deployment.md](tls-deployment.md) | 설정 준비 완료(실배포 미검증) |
 
 ## 개발 지원 산출물 (SRS 외)
 

@@ -4,7 +4,10 @@
 #include <ArduinoJson.h>
 #include <time.h>
 #include <string.h>
-#include "config.h"
+#include "config.h" // MQTT_USE_TLS 등 매크로를 정의 — 아래 #if보다 먼저 include돼야 한다
+#if MQTT_USE_TLS
+#include <WiFiClientSecure.h>
+#endif
 
 /**
  * ESP32 릴레이 보드 펌웨어 — 디지털아웃 10채널로 전등을 제어한다.
@@ -24,7 +27,11 @@
  * 클라이언트로도 프로토콜 계약을 100% 만족한다.
  */
 
+#if MQTT_USE_TLS
+WiFiClientSecure netClient;
+#else
 WiFiClient netClient;
+#endif
 PubSubClient mqtt(netClient);
 
 bool channelState[CHANNEL_COUNT];
@@ -138,6 +145,17 @@ static void connectWiFi() {
   Serial.printf("\n[wifi] 연결됨 — IP %s\n", WiFi.localIP().toString().c_str());
 
   configTime(0, 0, "pool.ntp.org", "time.google.com"); // ts를 실제 epoch로 채우기 위한 NTP 동기화
+
+#if MQTT_USE_TLS
+  // TLS 인증서 유효기간(notBefore/notAfter) 검증은 보드의 실제 시각이 필요하다 — NTP 동기화
+  // 전에 TLS 핸드셰이크를 시도하면 실패한다(시각이 1970년 근처). 동기화될 때까지 대기.
+  Serial.print("[time] NTP 동기화 대기 중");
+  while (time(nullptr) < 1700000000) {
+    delay(300);
+    Serial.print(".");
+  }
+  Serial.println(" 완료");
+#endif
 }
 
 static void reconnectMqtt() {
@@ -183,6 +201,9 @@ void setup() {
 
   connectWiFi();
 
+#if MQTT_USE_TLS
+  netClient.setCACert(MQTT_CA_CERT);
+#endif
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setCallback(onMqttMessage);
   mqtt.setBufferSize(512);

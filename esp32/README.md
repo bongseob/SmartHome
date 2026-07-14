@@ -41,10 +41,28 @@ cp include/config.example.h include/config.h
 | 항목 | 설명 |
 |---|---|
 | `WIFI_SSID` / `WIFI_PASSWORD` | 이 보드가 붙을 Wi-Fi |
-| `MQTT_HOST` / `MQTT_PORT` | Mosquitto 브로커 주소(개발: 평문 1883) |
+| `MQTT_HOST` / `MQTT_PORT` | Mosquitto 브로커 주소(개발: 평문 1883, 프로덕션: TLS 8883 — 아래 TLS 절 참고) |
 | `MQTT_USERNAME` / `MQTT_PASSWORD` | 이 보드의 MQTT 계정. `MQTT_USERNAME`은 `BOARD_CODE`와 동일해야 하고, `MQTT_PASSWORD`는 `pnpm --filter @smarthome/db run provision:mqtt-auth` 실행 시 콘솔에 1회만 출력되는 값(브로커가 `allow_anonymous false` + ACL로 보드별 토픽을 강제한다) |
 | `UNS_SITE` / `UNS_BUILDING` / `UNS_FLOOR` / `BOARD_SLUG` | DB의 `device.code`·`mqtt_topic`과 반드시 일치해야 gateway가 인식한다 |
 | `CHANNELS[]` | GPIO 핀 ↔ 담당 Area(방) ↔ `device.code` 매핑 |
+
+### TLS(mqtts, PROJECT_RULES §5.1 — 프로덕션 전용)
+
+개발은 평문(1883)을 그대로 쓴다. 프로덕션 배포 시:
+
+1. `infra/tls/generate-certs.sh <배포 호스트명 또는 IP>`로 사설 CA + 서버 인증서 생성(자세한
+   내용은 [docs/tls-deployment.md](../docs/tls-deployment.md))
+2. `config.h`에서 `MQTT_USE_TLS`를 `true`로, `MQTT_PORT`를 `8883`으로 바꾼다
+3. `infra/tls/out/ca.crt` 파일 내용을 그대로 복사해 `MQTT_CA_CERT` PEM 블록에 붙여넣는다
+   (이 CA는 서버 인증서 검증용이며, 보드 자신의 계정(`MQTT_USERNAME`/`PASSWORD`)과는 무관)
+
+알려진 한계(미검증):
+- `WiFiClientSecure` TLS 핸드셰이크는 평문보다 RAM을 더 쓰고(수십 KB 스택), 핸드셰이크 자체도
+  1~3초 걸릴 수 있다 — 이번 변경은 컴파일 스위치만 추가했을 뿐 실기기로 TLS 핸드셰이크를
+  검증하지는 못했다(pio가 이 세션 환경에 없어 `pio run` 컴파일조차 재검증 못 함 — 다음
+  작업자가 `pio run`/실기기 플래시로 확인할 것)
+- 인증서 유효기간(notBefore/notAfter) 검증에는 보드의 실제 시각이 필요해, TLS 활성화 시
+  `connectWiFi()`가 NTP 동기화가 끝날 때까지 대기하도록 했다(부팅이 몇 초 늦어질 수 있음)
 
 예시값(`config.example.h`)은 시드 스크립트가 만든 **`1f-esp32-a`** 보드와 정확히 일치한다.
 다른 보드를 플래시할 때는 `UNS_FLOOR`/`BOARD_SLUG`와 `CHANNELS[]`의 `device.code`만 그
@@ -83,6 +101,10 @@ pio device monitor      # 시리얼 로그 확인(115200bps)
 
 ## 검증
 
-`pio run`으로 컴파일 성공을 확인했다(RAM 14.7%, Flash 58.6% 사용, 경고 없음). 실기기가 없어
-현장 플래시/실동작 테스트는 못 했다 — 최초 배포 시 `pio device monitor`로 Wi-Fi/MQTT 연결
-로그와 각 채널 `turn_on`/`turn_off` ack를 직접 확인할 것을 권장한다.
+`MQTT_USE_TLS=false`(기본값, 개발) 경로는 `pio run`으로 컴파일 성공을 확인했다(RAM 14.7%,
+Flash 58.6% 사용, 경고 없음). 실기기가 없어 현장 플래시/실동작 테스트는 못 했다 — 최초 배포
+시 `pio device monitor`로 Wi-Fi/MQTT 연결 로그와 각 채널 `turn_on`/`turn_off` ack를 직접
+확인할 것을 권장한다.
+
+`MQTT_USE_TLS=true`(TLS) 경로는 이번 세션 환경에 PlatformIO CLI가 없어 컴파일조차
+재검증하지 못했다 — 프로덕션에 처음 적용할 때는 반드시 `pio run`으로 컴파일부터 확인할 것.

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import mqtt from "mqtt";
 import type { IClientOptions, IClientPublishOptions, MqttClient } from "mqtt";
 import {
@@ -80,14 +81,22 @@ export function publishServiceStatus(
  * 백엔드 프로세스(api/gateway/scheduler/device-simulator)는 전부 이 함수를 통해서만
  * 연결하므로, 여기 한 곳만 고치면 모든 호출부에 계정이 적용된다 — 호출부가 명시적으로
  * username/password를 넘기면 그 값이 우선한다.
+ *
+ * TLS(mqtts, PROJECT_RULES §5.1) — MQTT_CA_FILE이 있으면 그 파일(사설 CA, 자체 서명)을
+ * 신뢰 목록에 추가해 연결한다. dev(mqtt://, 평문)에서는 이 env가 없으니 그대로 무시된다.
+ * 공인 CA로 발급받은 mqtts라면 MQTT_CA_FILE 없이 url만 mqtts://로 바꾸면 된다(mqtt.js가
+ * Node 기본 신뢰 저장소를 쓴다).
  */
 export function connect(url: string, options: IClientOptions = {}): MqttClient {
   const username = options.username ?? process.env.MQTT_USERNAME;
   const password = options.password ?? process.env.MQTT_PASSWORD;
+  const caFile = process.env.MQTT_CA_FILE;
+  const ca = options.ca ?? (caFile ? readFileSync(caFile) : undefined);
   return mqtt.connect(url, {
     protocolVersion: 5,
     ...(username ? { username } : {}),
     ...(password ? { password } : {}),
+    ...(ca ? { ca } : {}),
     ...options,
   });
 }
