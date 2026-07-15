@@ -19,25 +19,28 @@ import { closePool, query } from "@smarthome/db";
 
 const GATEWAY_DIST_ENTRY = resolve(dirname(fileURLToPath(import.meta.url)), "../dist/index.js");
 
+// area는 seed.ts 기준 실제 시딩된 슬러그와 일치해야 한다(2026-07-15 지역 중심 전환 이후 모든
+// 기본 시드 기기가 단일 'default' area에 속함) — 불일치 시 이 테스트들이 참조하는 토픽이
+// device 테이블의 실제 mqtt_topic과 어긋나 회귀를 놓칠 수 있다.
 const THERMOSTAT: DeviceIdentity = {
   site: "site1",
   building: "bldg-a",
   floor: "2f",
-  area: "living-room",
+  area: "default",
   device: "thermostat-01",
 };
 const LIGHT_01: DeviceIdentity = {
   site: "site1",
   building: "bldg-a",
   floor: "2f",
-  area: "living-room",
+  area: "default",
   device: "light-01",
 };
 const LIGHT_02: DeviceIdentity = {
   site: "site1",
   building: "bldg-a",
   floor: "2f",
-  area: "bedroom",
+  area: "default",
   device: "light-02",
 };
 

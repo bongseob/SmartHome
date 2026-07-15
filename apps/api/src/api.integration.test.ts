@@ -84,7 +84,7 @@ describe("api 통합 — 명령 발행 경로", () => {
     site: "site1",
     building: "bldg-a",
     floor: "2f",
-    area: "living-room",
+    area: "default",
     device: "thermostat-01",
   };
   let mqttSpy: MqttClient;
