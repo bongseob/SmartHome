@@ -13,7 +13,7 @@ interface DeviceDrawerProps {
   historyError: string | null;
   pendingCommand: PendingCommand | null;
   onClose: () => void;
-  onSendCommand: (command: "turn_on" | "turn_off") => void;
+  onSendCommand: (command: "turn_on" | "turn_off" | "query_state") => void;
   onSetMonitoring?: (flags: { monitoringVisible?: boolean; enabled?: boolean }) => void;
   /** 편집 모드에서는 오조작 방지를 위해 제어를 비활성화한다(ui-ux-design.md §4.1-mode). */
   editMode?: boolean;
@@ -90,6 +90,14 @@ export function DeviceDrawer({
         </button>
         <button type="button" disabled={commandDisabled} onClick={() => onSendCommand("turn_off")}>
           OFF
+        </button>
+        <button
+          type="button"
+          disabled={commandDisabled}
+          onClick={() => onSendCommand("query_state")}
+          title="기기에 현재 상태를 즉시 재보고하도록 요청합니다."
+        >
+          상태 재확인
         </button>
       </div>
       {editMode && <p className="device-drawer__edit-note">편집 모드 — 제어 비활성화(위치만 이동 가능)</p>}

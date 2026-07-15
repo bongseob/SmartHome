@@ -14,7 +14,7 @@ const epochMs = z.number().int().nonnegative();
 export const CommandPayload = z.object({
   sessionId: z.string().min(1),
   commandId: z.string().min(1), // 전역 유일 · 멱등성 키
-  command: z.string().min(1), // turn_on, ptz_move, ota_update ...
+  command: z.string().min(1), // turn_on, turn_off, query_state, ptz_move, ota_update ...
   target: z.string().min(1), // 대상 device code
   timestamp: epochMs,
   args: z.record(z.unknown()).optional(),

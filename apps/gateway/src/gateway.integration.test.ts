@@ -214,4 +214,67 @@ describe("gateway 통합 — 명령 발행 → device ack 왕복", () => {
       expect.arrayContaining(["CREATED", "PENDING", "IN_PROGRESS", "SUCCEEDED"]),
     );
   });
+
+  it("query_state 명령도 동일한 수명주기·Audit_Log로 처리된다(신규 command 문자열 하드코딩 불필요 검증)", async () => {
+    const deviceId = await deviceIdFor("thermostat-01");
+    const commandId = `test-cmd-${Date.now()}`;
+    const cmdTopic = topicFor(THERMOSTAT, "cmd");
+
+    const ackSent = new Promise<void>((resolvePromise) => {
+      const onMessage = (topic: string, payload: Buffer): void => {
+        if (topic !== cmdTopic) return;
+        const received = JSON.parse(payload.toString()) as { commandId: string; command: string };
+        if (received.commandId !== commandId) return;
+        testClient.unsubscribe(cmdTopic);
+        testClient.removeListener("message", onMessage);
+        expect(received.command).toBe("query_state");
+        // 실기기라면 여기서 현재 retained state를 재발행한다(VirtualDevice.handleCommand와 동일 동작)
+        publish(testClient, THERMOSTAT, "state", { status: "ON", ts: Date.now() });
+        publish(testClient, THERMOSTAT, "cmd/ack", {
+          commandId,
+          status: "SUCCEEDED",
+          ts: Date.now(),
+          deviceId: "thermostat-01",
+        });
+        resolvePromise();
+      };
+      testClient.on("message", onMessage);
+    });
+    await new Promise<void>((resolvePromise, reject) => {
+      testClient.subscribe(cmdTopic, { qos: 1 }, (err) => (err ? reject(err) : resolvePromise()));
+    });
+
+    await publishDeviceCommand(testClient, redis, {
+      commandId,
+      sessionId: "test-session",
+      actorType: "USER",
+      actorId: null,
+      role: "ADMIN",
+      targetId: deviceId,
+      target: THERMOSTAT,
+      command: "query_state",
+    });
+
+    await ackSent;
+
+    await waitFor(
+      async () => {
+        const result = await query<{ status: string }>(
+          "SELECT status FROM command WHERE command_id = $1",
+          [commandId],
+        );
+        return result.rows[0]?.status === "SUCCEEDED" ? true : undefined;
+      },
+      { message: "query_state command가 SUCCEEDED로 종결되지 않았다" },
+    );
+
+    const audit = await query<{ execution_status: string }>(
+      "SELECT execution_status FROM audit_log WHERE command_id = $1 ORDER BY log_id ASC",
+      [commandId],
+    );
+    const statuses = audit.rows.map((r) => r.execution_status);
+    expect(statuses).toEqual(
+      expect.arrayContaining(["CREATED", "PENDING", "IN_PROGRESS", "SUCCEEDED"]),
+    );
+  });
 });

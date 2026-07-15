@@ -146,10 +146,11 @@ export class VirtualDevice {
             deviceId: this.code,
           };
 
-    // 성공 시 상태 반영 (turn_on/turn_off)
+    // 성공 시 상태 반영 (turn_on/turn_off), query_state는 상태 변경 없이 현재 상태만 재발행
     if (ack.status === "SUCCEEDED") {
       if (cmd.command === "turn_on") this.publishState("ON");
       else if (cmd.command === "turn_off") this.publishState("OFF");
+      else if (cmd.command === "query_state") this.publishState(this.status);
     }
 
     this.processed.set(cmd.commandId, ack);
