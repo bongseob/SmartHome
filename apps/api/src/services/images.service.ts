@@ -2,16 +2,20 @@ import { BadRequestException, Injectable, NotFoundException } from "@nestjs/comm
 import type { AuthContext } from "@smarthome/auth";
 import {
   deleteImage,
+  getImageById,
   insertAuditLog,
   insertImage,
   listImages,
   query,
+  updateImage,
+  type ImageRecord,
 } from "@smarthome/db";
 
 const imageExecutor = { query };
 
 export interface CreateImageInput {
   name: string;
+  description?: string | null;
   imageUrl: string;
   widthPx: number | null;
   heightPx: number | null;
@@ -30,6 +34,7 @@ export class ImagesService {
 
     const image = await insertImage(imageExecutor, {
       name,
+      description: input.description?.trim() || null,
       imageUrl: input.imageUrl,
       widthPx: Number.isFinite(input.widthPx) ? input.widthPx : null,
       heightPx: Number.isFinite(input.heightPx) ? input.heightPx : null,
@@ -37,6 +42,55 @@ export class ImagesService {
     });
     await this.audit(auth, "CREATE_IMAGE", image.id, `image '${image.name}' uploaded`);
     return image;
+  }
+
+  /**
+   * 이름 수정 및/또는 파일 교체 — id(키)는 그대로 유지한다. area.image_id 등 이 이미지를 참조하는
+   * 쪽은 아무것도 바꾸지 않아도 다음 조회부터 새 파일을 그대로 보게 된다. 파일이 실제로 교체된
+   * 경우에만 이전 파일의 unlink를 컨트롤러가 하도록 previousImageUrl을 돌려준다.
+   */
+  async update(
+    id: string,
+    input: {
+      name?: string | undefined;
+      description?: string | null | undefined;
+      imageUrl?: string | undefined;
+      widthPx?: number | null | undefined;
+      heightPx?: number | null | undefined;
+    },
+    auth: AuthContext,
+  ): Promise<{ image: ImageRecord; previousImageUrl: string | null }> {
+    const before = await getImageById(imageExecutor, id);
+    if (!before) throw new NotFoundException(`image not found: ${id}`);
+
+    const name = input.name !== undefined ? input.name.trim() : undefined;
+    if (name !== undefined && name.length === 0) {
+      throw new BadRequestException("name must not be empty");
+    }
+
+    const image = await updateImage(imageExecutor, id, {
+      ...(name !== undefined ? { name } : {}),
+      ...(input.description !== undefined ? { description: input.description?.trim() || null } : {}),
+      ...(input.imageUrl !== undefined ? { imageUrl: input.imageUrl } : {}),
+      ...(input.widthPx !== undefined ? { widthPx: input.widthPx } : {}),
+      ...(input.heightPx !== undefined ? { heightPx: input.heightPx } : {}),
+    });
+    if (!image) throw new NotFoundException(`image not found: ${id}`);
+
+    const fileReplaced = input.imageUrl !== undefined && input.imageUrl !== before.imageUrl;
+    const nameChanged = name !== undefined && name !== before.name;
+    const descriptionChanged = input.description !== undefined && input.description !== before.description;
+    await this.audit(
+      auth,
+      fileReplaced ? "REPLACE_IMAGE_FILE" : "UPDATE_IMAGE",
+      id,
+      [
+        nameChanged ? `name '${before.name}' → '${name}'` : null,
+        descriptionChanged ? `description → '${input.description ?? "null"}'` : null,
+        fileReplaced ? `file '${before.imageUrl}' → '${input.imageUrl}'` : null,
+      ].filter(Boolean).join(", ") || `image '${before.name}' updated (no-op)`,
+    );
+    return { image, previousImageUrl: fileReplaced ? before.imageUrl : null };
   }
 
   /** DB row 삭제 후, 파일 unlink는 컨트롤러가 반환된 imageUrl로 수행한다. */

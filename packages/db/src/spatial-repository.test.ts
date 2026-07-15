@@ -1,8 +1,8 @@
-﻿import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { QueryResultRow } from "./pool.js";
 import type { QueryExecutor } from "./audit-repository.js";
 import {
-  getFloorOverview,
+  getAreaOverview,
   listAreasByFloor,
   listDevices,
   listFloors,
@@ -21,6 +21,7 @@ class FakeSpatialDb implements QueryExecutor {
 
     // device (FROM device) — device 분기를 최우선 검사
     if (text.includes("FROM device")) {
+      if (values?.[0] && values[0] !== "area-1") return { rows: [], rowCount: 0 };
       return {
         rows: [
           {
@@ -54,8 +55,13 @@ class FakeSpatialDb implements QueryExecutor {
       };
     }
 
-    // area (FROM area + JOIN floor/building/site)
+    // area (FROM area + JOIN floor/building/site[/image])
     if (text.includes("FROM area")) {
+      // 단일 area 조회(a.id::text = $1)만 areaId로 필터한다. floor_id 필터(listAreasByFloor)는
+      // 그대로 통과시킨다 — 이 페이크는 SQL을 파싱하지 않고 텍스트로만 분기한다.
+      if (text.includes("a.id::text = $1") && values?.[0] && values[0] !== "area-1") {
+        return { rows: [], rowCount: 0 };
+      }
       return {
         rows: [
           {
@@ -70,8 +76,18 @@ class FakeSpatialDb implements QueryExecutor {
               [500, 400],
               [100, 400],
             ],
-            site_slug: "site1",
+            kind: "ROOM",
+            image_id: null,
+            image_url: null,
+            image_width_px: null,
+            image_height_px: null,
+            pos_x: null,
+            pos_y: null,
+            floor_name: "2F",
+            building_name: "Building A",
             building_slug: "bldg-a",
+            site_name: "Site 1",
+            site_slug: "site1",
             floor_slug: "2f",
           } as unknown as T,
         ],
@@ -92,11 +108,6 @@ class FakeSpatialDb implements QueryExecutor {
             building_slug: "bldg-a",
             site_name: "Site 1",
             site_slug: "site1",
-            floor_map_id: "map-1",
-            floor_map_url: "https://example.com/map.png",
-            floor_map_width: 800,
-            floor_map_height: 600,
-            floor_map_scale: "0.05",
           } as unknown as T,
         ],
         rowCount: 1,
@@ -108,7 +119,7 @@ class FakeSpatialDb implements QueryExecutor {
 }
 
 describe("spatial repository", () => {
-  it("listFloors — floor_map 정보 + topicPrefix 포함", async () => {
+  it("listFloors — topicPrefix 포함", async () => {
     const db = new FakeSpatialDb();
 
     const floors = await listFloors(db);
@@ -116,7 +127,6 @@ describe("spatial repository", () => {
     expect(floors).toHaveLength(1);
     const floor = floors[0]!;
     expect(floor.id).toBe("floor-1");
-    expect(floor.floorMapUrl).toBe("https://example.com/map.png");
     expect(floor.topicPrefix).toBe("enterprise/site1/bldg-a/2f");
   });
 
@@ -157,21 +167,22 @@ describe("spatial repository", () => {
     expect(db.statements[0]).not.toContain("WHERE");
   });
 
-  it("getFloorOverview — floor가 없으면 null 반환", async () => {
+  it("getAreaOverview — area가 없으면 null 반환", async () => {
     const db = new FakeSpatialDb();
-    const overview = await getFloorOverview(db, "nonexistent-floor");
+    const overview = await getAreaOverview(db, "nonexistent-area");
 
     expect(overview).toBeNull();
   });
 
-  it("getFloorOverview — floor + areas + devices 반환, topicPrefix 채워짐", async () => {
+  it("getAreaOverview — area + 배경 이미지 + devices 반환, topicPrefix 채워짐", async () => {
     const db = new FakeSpatialDb();
 
-    const overview = await getFloorOverview(db, "floor-1");
+    const overview = await getAreaOverview(db, "area-1");
 
     expect(overview).not.toBeNull();
-    expect(overview?.floor.id).toBe("floor-1");
-    expect(overview?.areas).toHaveLength(1);
+    expect(overview?.area.id).toBe("area-1");
+    expect(overview?.area.floorName).toBe("2F");
+    expect(overview?.area.topicPrefix).toBe("enterprise/site1/bldg-a/2f/living-room");
     expect(overview?.devices).toHaveLength(1);
     expect(overview?.devices[0]?.code).toBe("light-01");
     expect(overview?.devices[0]?.areaTopicPrefix).toBe(

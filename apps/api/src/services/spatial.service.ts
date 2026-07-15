@@ -1,4 +1,4 @@
-﻿import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { AuthContext } from "@smarthome/auth";
 import { isAdmin } from "@smarthome/auth";
 import { AreaKind } from "@smarthome/contracts";
@@ -6,23 +6,22 @@ import {
   createArea,
   deleteArea,
   getAreaById,
+  getAreaOverview,
+  getAreaSummaryById,
   getDeviceState,
-  getFloorOverview,
-  getImageById,
   insertAuditLog,
-  insertFloorMap,
+  insertFloor,
+  listAreas,
   listBuildings,
   listFloors,
   listSites,
   query,
-  setFloorFloorMap,
   updateArea,
   updateBuildingName,
   updateDevicePosition,
-  updateFloorMapScale,
   updateSiteName,
   withTransaction,
-  type FloorSummary,
+  type AreaSummary,
 } from "@smarthome/db";
 
 const executor = { query };
@@ -90,7 +89,8 @@ async function mapImageFkError<T>(run: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Area의 polygon은 [[x,y], ...] 최소 삼각형(3점)이어야 한다(FloorMap.tsx의 렌더링 요건과 동일). */
+/** Area의 polygon은 [[x,y], ...] 최소 삼각형(3점)이어야 한다. 지금은 UI에서 안 쓰지만
+ *  createAreaUnderFloor/updateArea의 하위 호환 경로(폴리곤 지정 시)에서 여전히 검증한다. */
 function isValidPolygon(polygon: unknown): polygon is number[][] {
   if (!Array.isArray(polygon) || polygon.length < 3) return false;
   return polygon.every(
@@ -108,69 +108,139 @@ export interface SaveLayoutRequest {
   positions: LayoutPositionInput[];
 }
 
-/**
- * Area ACL 기반 필터링 헬퍼.
- * ADMIN은 전체 접근, 그 외는 topics(ACL wildcard)에 포함된 area만 노출.
- */
-function filterFloorsByAuth(floors: FloorSummary[], auth: AuthContext): FloorSummary[] {
-  if (isAdmin(auth)) return floors;
-  // 사용자의 ACL topic에서 area 레벨 프리픽스 추출
-  // "enterprise/site1/bldg-a/2f/living-room/#" → "enterprise/site1/bldg-a/2f"
-  const allowedFloorPrefixes = new Set(
-    auth.topics
-      .map((t) => t.replace(/\/#$/, ""))
-      .map((t) => t.split("/").slice(0, 4).join("/")),
-  );
-  return floors.filter((f) => allowedFloorPrefixes.has(f.topicPrefix));
+/** 사용자의 ACL topic(User Properties wildcard)에서 "/#" 접미사를 뗀 허용 area topicPrefix 집합. */
+function allowedAreaPrefixes(auth: AuthContext): Set<string> {
+  return new Set(auth.topics.map((t) => t.replace(/\/#$/, "")));
+}
+
+function filterAreasByAuth(areas: AreaSummary[], auth: AuthContext): AreaSummary[] {
+  if (isAdmin(auth)) return areas;
+  const allowed = allowedAreaPrefixes(auth);
+  return areas.filter((a) => allowed.has(a.topicPrefix));
 }
 
 @Injectable()
 export class SpatialService {
-  async listFloors(auth: AuthContext): Promise<unknown> {
-    const floors = await listFloors(executor);
-    return filterFloorsByAuth(floors, auth);
+  /**
+   * 지역(=area) 목록. area가 1차 관리 단위다(2026-07-15 합의) — floor는 여러 지역이 공유하는
+   * 층 태그일 뿐이라 floor 자체는 ACL 대상이 아니고, area의 topicPrefix로 직접 필터링한다.
+   */
+  async listAreas(auth: AuthContext): Promise<unknown> {
+    const areas = await listAreas(executor);
+    return filterAreasByAuth(areas, auth);
   }
 
-  async floorOverview(floorId: string, auth: AuthContext): Promise<unknown> {
-    const overview = await getFloorOverview(executor, floorId);
-    if (!overview) {
-      throw new NotFoundException(`floor not found: ${floorId}`);
-    }
+  /** 전체 모니터링의 층별 집계 + "지역 생성" 시 층 태그 선택용. floor 자체는 ACL 대상이 아니다. */
+  async listFloors(): Promise<unknown> {
+    return listFloors(executor);
+  }
 
-    if (!isAdmin(auth)) {
-      // areas / devices를 권한 있는 area만 필터링
-      const allowedAreaPrefixes = new Set(
-        auth.topics.map((t) => t.replace(/\/#$/, "")),
-      );
-      overview.areas = overview.areas.filter((a) =>
-        allowedAreaPrefixes.has(a.topicPrefix),
-      );
-      overview.devices = overview.devices.filter(
-        (d) => d.areaTopicPrefix !== null && allowedAreaPrefixes.has(d.areaTopicPrefix),
-      );
+  /** 관제 화면(FloorMap)용 — 지역 1개의 배경 이미지 + 기기 목록. */
+  async areaOverview(areaId: string, auth: AuthContext): Promise<unknown> {
+    const overview = await getAreaOverview(executor, areaId);
+    if (!overview) {
+      throw new NotFoundException(`area not found: ${areaId}`);
+    }
+    if (!isAdmin(auth) && !allowedAreaPrefixes(auth).has(overview.area.topicPrefix)) {
+      throw new ForbiddenException("no access to this area");
     }
     return overview;
+  }
+
+  /**
+   * 지역 생성 — 사용자에게는 "지역" 하나의 개념만 노출한다(2026-07-15 합의). floorId(기존 층 태그
+   * 선택) 또는 floorName(새 층 태그 입력) 중 하나를 받아, 새 층 태그면 같은 트랜잭션에서 만든다.
+   * 배경 이미지는 생성 후 updateArea(imageId)로 별도 지정한다. ADMIN 전용, 감사 대상.
+   */
+  async createArea(
+    body: { name: string; floorId?: string; floorName?: string; slug?: string },
+    auth: AuthContext,
+  ): Promise<unknown> {
+    if (!body.name || !body.name.trim()) {
+      throw new BadRequestException("name is required");
+    }
+    const name = body.name.trim();
+    const floorName = body.floorName?.trim();
+    if (!body.floorId && !floorName) {
+      throw new BadRequestException("floorId or floorName is required");
+    }
+
+    return withTransaction(async (client) => {
+      let floorId = body.floorId;
+      if (floorId) {
+        const floors = await listFloors(client);
+        if (!floors.find((f) => f.id === floorId)) {
+          throw new NotFoundException(`floor not found: ${floorId}`);
+        }
+      } else {
+        const buildings = await listBuildings(client);
+        const only = buildings.length === 1 ? buildings[0] : undefined;
+        if (!only) {
+          throw new BadRequestException("floor 자동 생성 실패 — building이 1개가 아닙니다");
+        }
+        floorId = await insertFloor(client, {
+          buildingId: only.id,
+          slug: slugify(floorName as string),
+          name: floorName as string,
+        });
+        await insertAuditLog(client, {
+          actorType: "ADMIN",
+          actorId: auth.userId,
+          targetType: "FLOOR",
+          targetId: floorId,
+          command: "FLOOR_CREATE",
+          reason: `지역 '${name}' 생성을 위해 층 태그 '${floorName}' 자동 생성`,
+          executionStatus: "SUCCEEDED",
+          mqttReasonCode: null,
+          sessionId: null,
+          commandId: null,
+        });
+      }
+
+      const area = await createArea(client, {
+        floorId,
+        slug: body.slug?.trim() || slugify(name),
+        name,
+        polygon: [],
+        createdBy: auth.userId,
+      });
+      await insertAuditLog(client, {
+        actorType: "ADMIN",
+        actorId: auth.userId,
+        targetType: "AREA",
+        targetId: area.id,
+        command: "AREA_CREATE",
+        reason: `지역 '${area.name}' 생성 (floor ${floorId})`,
+        executionStatus: "SUCCEEDED",
+        mqttReasonCode: null,
+        sessionId: null,
+        commandId: null,
+      });
+      // repo의 createArea()는 floorName/imageUrl 등이 빠진 얕은 Area만 반환하므로, 프론트가
+      // 기대하는 AreaSummary(지역 목록/카드 렌더링에 필요한 전체 필드)로 다시 조회해 돌려준다.
+      return getAreaSummaryById(client, area.id);
+    });
   }
 
   /**
    * 도면 편집 모드에서 변경된 기기 좌표를 한 번에 커밋한다(ui-ux-design.md §4.1-mode).
    * 위치 변경은 감사 대상(DEVICE_RELOCATE) — 전체를 한 transaction으로 묶어 부분 실패를 막는다.
    */
-  async saveLayout(floorId: string, body: SaveLayoutRequest, auth: AuthContext): Promise<unknown> {
+  async saveAreaLayout(areaId: string, body: SaveLayoutRequest, auth: AuthContext): Promise<unknown> {
     if (!body.positions || body.positions.length === 0) {
       throw new BadRequestException("positions is required");
     }
 
     return withTransaction(async (client) => {
-      const overview = await getFloorOverview(client, floorId);
+      const overview = await getAreaOverview(client, areaId);
       if (!overview) {
-        throw new NotFoundException(`floor not found: ${floorId}`);
+        throw new NotFoundException(`area not found: ${areaId}`);
       }
-      const floorDeviceIds = new Set(overview.devices.map((device) => device.id));
-      const invalidPosition = body.positions.find((position) => !floorDeviceIds.has(position.deviceId));
+      const areaDeviceIds = new Set(overview.devices.map((device) => device.id));
+      const invalidPosition = body.positions.find((position) => !areaDeviceIds.has(position.deviceId));
       if (invalidPosition) {
         throw new BadRequestException(
-          `device ${invalidPosition.deviceId} does not belong to floor ${floorId}`,
+          `device ${invalidPosition.deviceId} does not belong to area ${areaId}`,
         );
       }
 
@@ -269,142 +339,9 @@ export class SpatialService {
     });
   }
 
-  /**
-   * 도면(Floor Map) 업로드(M16, SRS 2.1.1) — 이미지는 로컬 파일시스템에 저장되고(컨트롤러의
-   * multer diskStorage), 여기서는 floor_map row 생성 + floor에 연결만 담당한다. ADMIN 전용, 감사 대상.
-   */
-  async uploadFloorMap(
-    floorId: string,
-    imageUrl: string,
-    meta: { widthPx: number; heightPx: number; scaleMPerPx: number },
-    auth: AuthContext,
-  ): Promise<unknown> {
-    if (
-      !Number.isFinite(meta.widthPx) || meta.widthPx <= 0 ||
-      !Number.isFinite(meta.heightPx) || meta.heightPx <= 0 ||
-      !Number.isFinite(meta.scaleMPerPx) || meta.scaleMPerPx <= 0
-    ) {
-      throw new BadRequestException("widthPx/heightPx/scaleMPerPx must be positive numbers");
-    }
-    const floors = await listFloors(executor);
-    const floor = floors.find((f) => f.id === floorId);
-    if (!floor) {
-      throw new NotFoundException(`floor not found: ${floorId}`);
-    }
-
-    return withTransaction(async (client) => {
-      const floorMap = await insertFloorMap(client, {
-        imageUrl,
-        widthPx: meta.widthPx,
-        heightPx: meta.heightPx,
-        scaleMPerPx: meta.scaleMPerPx,
-        uploadedBy: auth.userId,
-      });
-      await setFloorFloorMap(client, floorId, floorMap.id);
-      await insertAuditLog(client, {
-      actorType: "ADMIN",
-      actorId: auth.userId,
-      targetType: "FLOOR",
-      targetId: floorId,
-      command: "FLOOR_MAP_UPLOAD",
-      reason: `floor_map ${floorMap.id} (${meta.widthPx}x${meta.heightPx}px, ${meta.scaleMPerPx}m/px), 이전 floor_map ${floor.floorMapId ?? "null"}`,
-      executionStatus: "SUCCEEDED",
-      mqttReasonCode: null,
-      sessionId: null,
-      commandId: null,
-      });
-
-      const updatedFloors = await listFloors(client);
-      return updatedFloors.find((f) => f.id === floorId);
-    });
-  }
-
-  async updateFloorMapScale(floorMapId: string, scaleMPerPx: number, auth: AuthContext): Promise<unknown> {
-    if (!Number.isFinite(scaleMPerPx) || scaleMPerPx <= 0) {
-      throw new BadRequestException("scaleMPerPx must be a positive number");
-    }
-    return withTransaction(async (client) => {
-      const updated = await updateFloorMapScale(client, floorMapId, scaleMPerPx);
-      if (!updated) {
-        throw new NotFoundException(`floor_map not found: ${floorMapId}`);
-      }
-      await insertAuditLog(client, {
-      actorType: "ADMIN",
-      actorId: auth.userId,
-      targetType: "FLOOR_MAP",
-      targetId: floorMapId,
-      command: "FLOOR_MAP_UPDATE_SCALE",
-      reason: `scale_m_per_px → ${scaleMPerPx}`,
-      executionStatus: "SUCCEEDED",
-      mqttReasonCode: null,
-      sessionId: null,
-      commandId: null,
-      });
-      return updated;
-    });
-  }
-
-  /**
-   * 등록된 이미지 라이브러리 항목을 층 배경으로 매핑한다.
-   * 이미지 업로드는 `/api/v1/images`에서 image 기본정보만 저장하고, 여기서 별도 매핑 과정을 거친다.
-   */
-  async assignFloorMapImage(
-    floorId: string,
-    imageId: string,
-    scaleMPerPx: number,
-    auth: AuthContext,
-  ): Promise<unknown> {
-    if (typeof imageId !== "string" || imageId.trim().length === 0) {
-      throw new BadRequestException("imageId is required");
-    }
-    if (!Number.isFinite(scaleMPerPx) || scaleMPerPx <= 0) {
-      throw new BadRequestException("scaleMPerPx must be a positive number");
-    }
-
-    const floors = await listFloors(executor);
-    const floor = floors.find((f) => f.id === floorId);
-    if (!floor) {
-      throw new NotFoundException(`floor not found: ${floorId}`);
-    }
-
-    return withTransaction(async (client) => {
-      const image = await getImageById(client, imageId);
-      if (!image) {
-        throw new NotFoundException(`image not found: ${imageId}`);
-      }
-      if (!image.widthPx || !image.heightPx) {
-        throw new BadRequestException("image width/height metadata is required before mapping");
-      }
-
-      const floorMap = await insertFloorMap(client, {
-        imageUrl: image.imageUrl,
-        widthPx: image.widthPx,
-        heightPx: image.heightPx,
-        scaleMPerPx,
-        uploadedBy: auth.userId,
-      });
-      await setFloorFloorMap(client, floorId, floorMap.id);
-      await insertAuditLog(client, {
-      actorType: "ADMIN",
-      actorId: auth.userId,
-      targetType: "FLOOR",
-      targetId: floorId,
-      command: "FLOOR_MAP_ASSIGN_IMAGE",
-      reason: `image ${image.id} '${image.name}' → floor_map ${floorMap.id}, 이전 floor_map ${floor.floorMapId ?? "null"}`,
-      executionStatus: "SUCCEEDED",
-      mqttReasonCode: null,
-      sessionId: null,
-      commandId: null,
-      });
-
-      const updatedFloors = await listFloors(client);
-      return updatedFloors.find((f) => f.id === floorId);
-    });
-  }
-
-  /** 지역(Area) 관리(M16, SRS 2.1.1) — 생성/수정/삭제. ADMIN 전용, 감사 대상.
-   *  분전반형(addendum §2.3): kind=PANEL·imageId(배경)·posX/posY 선택 지정. */
-  async createArea(
+  /** 층에 이미 소속된 area 아래에 area를 추가하는 하위 호환 경로(분전반 등 향후 확장용).
+   *  프론트는 더 이상 이 경로를 쓰지 않고 최상위 createArea()를 쓴다(2026-07-15). */
+  async createAreaUnderFloor(
     floorId: string,
     body: { name: string; polygon: unknown; slug?: string } & PanelAreaFields,
     auth: AuthContext,
@@ -443,10 +380,11 @@ export class SpatialService {
       sessionId: null,
       commandId: null,
       });
-      return area;
+      return getAreaSummaryById(client, area.id);
     }));
   }
 
+  /** 지역 이름 변경, 배경 이미지 지정(imageId), PANEL 좌표 등. ADMIN 전용, 감사 대상. */
   async updateArea(
     id: string,
     body: { name?: string; polygon?: unknown } & PanelAreaFields,
@@ -480,13 +418,16 @@ export class SpatialService {
       targetType: "AREA",
       targetId: id,
       command: "AREA_UPDATE",
-      reason: `name '${before.name}' → '${updated.name}'${body.polygon !== undefined ? ", polygon 변경" : ""}`,
+      reason: `name '${before.name}' → '${updated.name}'${body.polygon !== undefined ? ", polygon 변경" : ""}${panel.imageId !== undefined ? `, imageId → ${panel.imageId ?? "null"}` : ""}`,
       executionStatus: "SUCCEEDED",
       mqttReasonCode: null,
       sessionId: null,
       commandId: null,
       });
-      return updated;
+      // repo의 updateArea()는 floorName/imageUrl 등이 빠진 얕은 Area만 반환한다 — 프론트(지역
+      // 관리 화면)는 이 응답으로 목록의 해당 row를 통째로 교체하므로, 여기서 채워주지 않으면
+      // 이름수정/이미지매핑을 할 때마다 그 지역의 층/배경 표시가 빈 값으로 덮어써진다.
+      return getAreaSummaryById(client, id);
     }));
   }
 
@@ -506,7 +447,7 @@ export class SpatialService {
       targetType: "AREA",
       targetId: id,
       command: "AREA_DELETE",
-      reason: `area '${before.name}' deleted (기기 area 배정은 SET NULL 처리됨)`,
+      reason: `지역 '${before.name}' 삭제 (기기 area 배정은 SET NULL 처리됨)`,
       executionStatus: "SUCCEEDED",
       mqttReasonCode: null,
       sessionId: null,

@@ -5,6 +5,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   UploadedFile,
   UseInterceptors,
@@ -78,7 +79,7 @@ export class ImagesController {
   )
   async upload(
     @UploadedFile() file: Express.Multer.File | undefined,
-    @Body() body: { name: string; widthPx?: string; heightPx?: string },
+    @Body() body: { name: string; description?: string; widthPx?: string; heightPx?: string },
     @CurrentAuth() auth: AuthContext,
   ): Promise<unknown> {
     if (!file) {
@@ -92,12 +93,68 @@ export class ImagesController {
       return await this.images.create(
         {
           name: body.name,
+          description: body.description ?? null,
           imageUrl: `/uploads/images/${file.filename}`,
           widthPx: body.widthPx !== undefined ? Number(body.widthPx) : null,
           heightPx: body.heightPx !== undefined ? Number(body.heightPx) : null,
         },
         auth,
       );
+    } catch (error) {
+      await unlink(file.path).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  /**
+   * 이름 수정 및/또는 파일 교체 — id(키)는 유지한다. 파일을 새로 보내면 같은 image_id를
+   * 참조하는 area 등이 다음 조회부터 자동으로 새 파일을 보게 된다(참조를 다시 매핑할 필요 없음).
+   * file 파트를 생략하면 이름만 바뀐다.
+   */
+  @Roles("ADMIN")
+  @Patch(":id")
+  @UseInterceptors(
+    FileInterceptor("file", {
+      storage: imageStorage,
+      limits: { fileSize: 10 * 1024 * 1024 },
+      fileFilter: (_req, file, cb) => {
+        const extension = extname(file.originalname).toLowerCase();
+        cb(null, ALLOWED_IMAGE_TYPES.get(extension) === file.mimetype);
+      },
+    }),
+  )
+  async update(
+    @Param("id") id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @Body() body: { name?: string; description?: string; widthPx?: string; heightPx?: string },
+    @CurrentAuth() auth: AuthContext,
+  ): Promise<unknown> {
+    if (!file) {
+      const { image } = await this.images.update(id, { name: body.name, description: body.description }, auth);
+      return image;
+    }
+
+    const extension = extname(file.originalname).toLowerCase();
+    try {
+      if (!(await hasValidImageSignature(file.path, extension))) {
+        throw new BadRequestException("uploaded file content does not match its image extension");
+      }
+      const { image, previousImageUrl } = await this.images.update(
+        id,
+        {
+          name: body.name,
+          description: body.description,
+          imageUrl: `/uploads/images/${file.filename}`,
+          widthPx: body.widthPx !== undefined ? Number(body.widthPx) : undefined,
+          heightPx: body.heightPx !== undefined ? Number(body.heightPx) : undefined,
+        },
+        auth,
+      );
+      if (previousImageUrl) {
+        // 새 파일 커밋 성공 후에만 이전 파일을 지운다(중간 실패 시 이전 파일 보존).
+        await unlink(join(IMAGES_DIR, basename(previousImageUrl))).catch(() => undefined);
+      }
+      return image;
     } catch (error) {
       await unlink(file.path).catch(() => undefined);
       throw error;

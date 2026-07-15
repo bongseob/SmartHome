@@ -89,90 +89,11 @@ export async function updateBuildingName(
   return row ? toBuilding(row) : null;
 }
 
-// ─── 도면(Floor Map) 관리 (M16 — 로컬 파일시스템 저장, PROJECT_RULES 부록 A.1) ─────
-
-export interface FloorMapRecord {
-  id: string;
-  imageUrl: string;
-  widthPx: number | null;
-  heightPx: number | null;
-  scaleMPerPx: string | null;
-  uploadedBy: string | null;
-  uploadedAt: Date;
-}
-
-interface FloorMapRow extends QueryResultRow {
-  id: string;
-  image_url: string;
-  width_px: number | null;
-  height_px: number | null;
-  scale_m_per_px: string | null;
-  uploaded_by: string | null;
-  uploaded_at: Date;
-}
-
-function toFloorMap(row: FloorMapRow): FloorMapRecord {
-  return {
-    id: row.id,
-    imageUrl: row.image_url,
-    widthPx: row.width_px,
-    heightPx: row.height_px,
-    scaleMPerPx: row.scale_m_per_px,
-    uploadedBy: row.uploaded_by,
-    uploadedAt: row.uploaded_at,
-  };
-}
-
-const FLOOR_MAP_COLUMNS = `
-  id::text, image_url, width_px, height_px, scale_m_per_px::text, uploaded_by::text, uploaded_at
-`;
-
-export interface InsertFloorMapInput {
-  imageUrl: string;
-  widthPx: number;
-  heightPx: number;
-  scaleMPerPx: number;
-  uploadedBy: string | null;
-}
-
-export async function insertFloorMap(
-  db: QueryExecutor,
-  input: InsertFloorMapInput,
-): Promise<FloorMapRecord> {
-  const r = await db.query<FloorMapRow>(
-    `INSERT INTO floor_map (image_url, width_px, height_px, scale_m_per_px, uploaded_by)
-     VALUES ($1,$2,$3,$4,$5)
-     RETURNING ${FLOOR_MAP_COLUMNS}`,
-    [input.imageUrl, input.widthPx, input.heightPx, input.scaleMPerPx, input.uploadedBy],
-  );
-  const row = r.rows[0];
-  if (!row) throw new Error("floor_map insert did not return a row");
-  return toFloorMap(row);
-}
-
-export async function updateFloorMapScale(
-  db: QueryExecutor,
-  id: string,
-  scaleMPerPx: number,
-): Promise<FloorMapRecord | null> {
-  const r = await db.query<FloorMapRow>(
-    `UPDATE floor_map SET scale_m_per_px = $2 WHERE id::text = $1 RETURNING ${FLOOR_MAP_COLUMNS}`,
-    [id, scaleMPerPx],
-  );
-  const row = r.rows[0];
-  return row ? toFloorMap(row) : null;
-}
-
-/** 층에 새/기존 floor_map을 연결한다(도면 업로드·교체). */
-export async function setFloorFloorMap(
-  db: QueryExecutor,
-  floorId: string,
-  floorMapId: string,
-): Promise<void> {
-  await db.query(`UPDATE floor SET floor_map_id = $2 WHERE id::text = $1`, [floorId, floorMapId]);
-}
-
 // ─── 공간 계층 (Spatial) ──────────────────────────────────────────────
+// floor는 "지역"(area)에 붙는 메타 태그일 뿐이다(2026-07-15 합의) — 여러 지역이 같은 floor를
+// 공유해 묶일 수 있고(전체 모니터링의 층별 집계용), 지역 자신은 area가 1차 관리 단위다. 배경
+// 이미지도 floor가 아니라 area(image_id)가 직접 가진다 — floor_map 테이블/컬럼은 더 이상
+// 애플리케이션에서 쓰지 않는다(스키마는 남겨두되 신규 코드는 참조하지 않음).
 
 export interface FloorSummary {
   id: string;
@@ -183,11 +104,6 @@ export interface FloorSummary {
   siteName: string;
   siteSlug: string;
   topicPrefix: string; // "enterprise/site1/bldg-a/2f"
-  floorMapId: string | null;
-  floorMapUrl: string | null;
-  floorMapWidth: number | null;
-  floorMapHeight: number | null;
-  floorMapScale: string | null;
 }
 
 interface FloorSummaryRow extends QueryResultRow {
@@ -199,11 +115,6 @@ interface FloorSummaryRow extends QueryResultRow {
   building_slug: string;
   site_name: string;
   site_slug: string;
-  floor_map_id: string | null;
-  floor_map_url: string | null;
-  floor_map_width: number | null;
-  floor_map_height: number | null;
-  floor_map_scale: string | null;
 }
 
 function toFloorSummary(row: FloorSummaryRow): FloorSummary {
@@ -216,38 +127,44 @@ function toFloorSummary(row: FloorSummaryRow): FloorSummary {
     siteName: row.site_name,
     siteSlug: row.site_slug,
     topicPrefix: [UNS_ROOT, row.site_slug, row.building_slug, row.floor_slug].join("/"),
-    floorMapId: row.floor_map_id,
-    floorMapUrl: row.floor_map_url,
-    floorMapWidth: row.floor_map_width,
-    floorMapHeight: row.floor_map_height,
-    floorMapScale: row.floor_map_scale,
   };
 }
 
-/** 전체 층 목록 (floor_map 정보 포함) */
+/** 층(=지역의 층 태그) 목록. 전체 모니터링의 층별 집계, 지역 생성 시 층 선택에 쓰인다. */
 export async function listFloors(db: QueryExecutor): Promise<FloorSummary[]> {
   const r = await db.query<FloorSummaryRow>(
     `SELECT
-       f.id::text         AS id,
-       f.name             AS name,
-       f.slug             AS slug,
-       f.slug             AS floor_slug,
-       b.name             AS building_name,
-       b.slug             AS building_slug,
-       s.name             AS site_name,
-       s.slug             AS site_slug,
-       fm.id::text        AS floor_map_id,
-       fm.image_url       AS floor_map_url,
-       fm.width_px        AS floor_map_width,
-       fm.height_px       AS floor_map_height,
-       fm.scale_m_per_px::text AS floor_map_scale
+       f.id::text AS id,
+       f.name     AS name,
+       f.slug     AS slug,
+       f.slug     AS floor_slug,
+       b.name     AS building_name,
+       b.slug     AS building_slug,
+       s.name     AS site_name,
+       s.slug     AS site_slug
      FROM floor f
      JOIN building b  ON b.id = f.building_id
      JOIN site s      ON s.id = b.site_id
-     LEFT JOIN floor_map fm ON fm.id = f.floor_map_id
      ORDER BY s.slug, b.slug, f.name`,
   );
   return r.rows.map(toFloorSummary);
+}
+
+export interface CreateFloorInput {
+  buildingId: string;
+  slug: string;
+  name: string;
+}
+
+/** 새 층 태그 생성. 지역(area) 생성 시 기존 층 태그가 없으면 호출부(service)가 함께 만든다. */
+export async function insertFloor(db: QueryExecutor, input: CreateFloorInput): Promise<string> {
+  const r = await db.query<{ id: string }>(
+    `INSERT INTO floor (building_id, slug, name) VALUES ($1,$2,$3) RETURNING id::text`,
+    [input.buildingId, input.slug, input.name],
+  );
+  const id = r.rows[0]?.id;
+  if (!id) throw new Error("floor insert did not return an id");
+  return id;
 }
 
 // ─── Area ─────────────────────────────────────────────────────────────
@@ -424,6 +341,120 @@ export async function deleteArea(db: QueryExecutor, id: string): Promise<boolean
   return (r.rowCount ?? 0) > 0;
 }
 
+// ─── Area 목록/개요 (사용자 관점 "지역" 관리·관제 화면용) ────────────────────
+// area가 1차 관리 단위이므로 floor 이름·건물/사업장 이름과 자기 배경 이미지(image_id 조인)를
+// 함께 반환한다. kind='ROOM'만 "지역"으로 노출한다 — PANEL(분전반)은 별개 개념(2026-07-15 합의).
+
+export interface AreaSummary {
+  id: string;
+  name: string;
+  slug: string;
+  kind: AreaKind;
+  floorId: string;
+  floorName: string;
+  buildingName: string;
+  siteName: string;
+  topicPrefix: string; // "enterprise/site1/bldg-a/2f/living-room"
+  imageId: string | null;
+  imageUrl: string | null;
+  imageWidthPx: number | null;
+  imageHeightPx: number | null;
+}
+
+interface AreaSummaryRow extends QueryResultRow {
+  id: string;
+  name: string;
+  slug: string;
+  kind: AreaKind;
+  floor_id: string;
+  floor_name: string;
+  floor_slug: string;
+  building_name: string;
+  building_slug: string;
+  site_name: string;
+  site_slug: string;
+  image_id: string | null;
+  image_url: string | null;
+  image_width_px: number | null;
+  image_height_px: number | null;
+}
+
+function toAreaSummary(row: AreaSummaryRow): AreaSummary {
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    kind: row.kind,
+    floorId: row.floor_id,
+    floorName: row.floor_name,
+    buildingName: row.building_name,
+    siteName: row.site_name,
+    topicPrefix: [UNS_ROOT, row.site_slug, row.building_slug, row.floor_slug, row.slug].join("/"),
+    imageId: row.image_id,
+    imageUrl: row.image_url,
+    imageWidthPx: row.image_width_px,
+    imageHeightPx: row.image_height_px,
+  };
+}
+
+const AREA_SUMMARY_SELECT = `
+  a.id::text, a.name, a.slug, a.kind, a.image_id::text,
+  f.id::text AS floor_id, f.name AS floor_name, f.slug AS floor_slug,
+  b.name AS building_name, b.slug AS building_slug,
+  s.name AS site_name, s.slug AS site_slug,
+  img.image_url, img.width_px AS image_width_px, img.height_px AS image_height_px
+  FROM area a
+  JOIN floor f      ON f.id = a.floor_id
+  JOIN building b   ON b.id = f.building_id
+  JOIN site s       ON s.id = b.site_id
+  LEFT JOIN image img ON img.id = a.image_id
+`;
+
+/** "지역" 목록(kind=ROOM만). PANEL(분전반)은 별개 개념이라 이 목록에 노출하지 않는다. */
+export async function listAreas(db: QueryExecutor): Promise<AreaSummary[]> {
+  const r = await db.query<AreaSummaryRow>(
+    `SELECT ${AREA_SUMMARY_SELECT} WHERE a.kind = 'ROOM' ORDER BY s.slug, b.slug, f.name, a.name`,
+  );
+  return r.rows.map(toAreaSummary);
+}
+
+export async function getAreaSummaryById(db: QueryExecutor, id: string): Promise<AreaSummary | null> {
+  const r = await db.query<AreaSummaryRow>(
+    `SELECT ${AREA_SUMMARY_SELECT} WHERE a.id::text = $1`,
+    [id],
+  );
+  const row = r.rows[0];
+  return row ? toAreaSummary(row) : null;
+}
+
+export interface AreaOverview {
+  area: AreaSummary;
+  devices: DeviceListItem[];
+}
+
+/** 관제 화면(FloorMap)용 — 지역(area) 1개의 배경/기기 목록을 한 번에 조회. */
+export async function getAreaOverview(db: QueryExecutor, areaId: string): Promise<AreaOverview | null> {
+  const area = await getAreaSummaryById(db, areaId);
+  if (!area) return null;
+
+  const devices = await db.query<DeviceListRow>(
+    `SELECT ${DEVICE_SELECT_COLUMNS}
+     FROM device d
+     LEFT JOIN area a      ON a.id = d.area_id
+     LEFT JOIN floor f     ON f.id = a.floor_id
+     LEFT JOIN building b  ON b.id = f.building_id
+     LEFT JOIN site s      ON s.id = b.site_id
+     WHERE d.area_id::text = $1
+       AND d.monitoring_visible = true
+       AND d.enabled = true
+       AND d.lifecycle_status <> 'DECOMMISSIONED'
+     ORDER BY d.name`,
+    [areaId],
+  );
+
+  return { area, devices: devices.rows.map(toDeviceListItem) };
+}
+
 // ─── Device (목록/필터) ───────────────────────────────────────────────
 
 export interface DeviceListItem {
@@ -586,44 +617,3 @@ export async function listDevices(
   return r.rows.map(toDeviceListItem);
 }
 
-// ─── Floor Overview (대시보드용) ──────────────────────────────────────
-
-export interface FloorOverview {
-  floor: FloorSummary;
-  areas: Area[];
-  devices: DeviceListItem[];
-}
-
-/** 특정 층의 floor_map + Area(polygon) + Device 목록을 한 번에 조회 */
-export async function getFloorOverview(
-  db: QueryExecutor,
-  floorId: string,
-): Promise<FloorOverview | null> {
-  const [floors, areas, devices] = await Promise.all([
-    listFloors(db),
-    listAreasByFloor(db, floorId),
-    db.query<DeviceListRow>(
-      `SELECT ${DEVICE_SELECT_COLUMNS}
-       FROM device d
-       LEFT JOIN area a      ON a.id = d.area_id
-       LEFT JOIN floor f     ON f.id = a.floor_id
-       LEFT JOIN building b  ON b.id = f.building_id
-       LEFT JOIN site s      ON s.id = b.site_id
-       WHERE d.area_id IN (SELECT id FROM area WHERE floor_id::text = $1)
-         AND d.monitoring_visible = true
-         AND d.enabled = true
-         AND d.lifecycle_status <> 'DECOMMISSIONED'
-       ORDER BY d.name`,
-      [floorId],
-    ),
-  ]);
-
-  const floor = floors.find((f) => f.id === floorId);
-  if (!floor) return null;
-
-  return {
-    floor,
-    areas,
-    devices: devices.rows.map(toDeviceListItem),
-  };
-}

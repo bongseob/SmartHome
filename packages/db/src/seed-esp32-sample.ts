@@ -6,10 +6,10 @@ import { closePool, query } from "./pool.js";
  * 보드(ESP32) = device_role 'MONITORING_EQUIPMENT'(감시장비, category='GATEWAY').
  * 채널(전등)  = device_role 'SENSOR' + parent_device_id(보드 id), sensor_io_type='DO'.
  *
- * 보드 하나가 물리적으로는 하나의 MQTT 연결만 유지하지만(LWT는 보드 단위), 그 10개 채널이
- * 여러 방(Area)의 전등을 섞어서 담당하는 배선을 가정한다. 그래서 보드 자신은 실제 방과
- * 무관한 분전반(Area.kind='PANEL')에 두고, 각 전등은 실제로 불을 켜는 방(kind='ROOM')에
- * 둔다 — docs/srs-lighting-control-addendum.md §2, 마이그레이션 0016 참고.
+ * 보드와 그 보드가 제어하는 전등은 같은 지역(area)에 배정한다(2026-07-15 합의). 관제 화면은
+ * "감시장비" 모드에서 선택된 지역 소속 감시장비만 보여주므로, 보드를 별도 분전반(PANEL) area에
+ * 두면 그 보드가 켜는 전등이 있는 지역에서는 감시장비가 항상 0개로 보이는 문제가 있었다 — 예전엔
+ * 분전반(Area.kind='PANEL')과 방(kind='ROOM')을 분리했지만, 그 구조를 이 샘플에서는 걷어냈다.
  */
 
 type DeviceStatus = "ON" | "OFF" | "WARNING" | "ALARM" | "OFFLINE";
@@ -17,7 +17,6 @@ type DeviceStatus = "ON" | "OFF" | "WARNING" | "ALARM" | "OFFLINE";
 interface RoomAreaDef {
   slug: "office" | "corridor" | "toilet" | "stairs";
   name: string;
-  polygon: number[][];
   baseX: number;
   baseY: number;
 }
@@ -32,10 +31,10 @@ const CHANNELS_PER_BOARD = 10;
 
 // 보드 채널은 이 4개 방을 순환 배정받는다(채널 1→office, 2→corridor, 3→toilet, 4→stairs, 5→office ...).
 const ROOM_AREAS: RoomAreaDef[] = [
-  { slug: "office", name: "사무실", polygon: [[60, 70], [500, 70], [500, 320], [60, 320]], baseX: 280, baseY: 195 },
-  { slug: "corridor", name: "복도", polygon: [[520, 70], [760, 70], [760, 320], [520, 320]], baseX: 640, baseY: 195 },
-  { slug: "toilet", name: "화장실", polygon: [[60, 340], [260, 340], [260, 520], [60, 520]], baseX: 160, baseY: 430 },
-  { slug: "stairs", name: "계단", polygon: [[290, 340], [500, 340], [500, 520], [290, 520]], baseX: 395, baseY: 430 },
+  { slug: "office", name: "사무실", baseX: 280, baseY: 195 },
+  { slug: "corridor", name: "복도", baseX: 640, baseY: 195 },
+  { slug: "toilet", name: "화장실", baseX: 160, baseY: 430 },
+  { slug: "stairs", name: "계단", baseX: 395, baseY: 430 },
 ];
 
 async function idOf(sql: string, params: unknown[]): Promise<string> {
@@ -96,64 +95,46 @@ async function seedEsp32Sample(): Promise<void> {
   let boardCount = 0;
 
   for (const floor of FLOORS) {
-    const floorMapId = await idOf(
-      `INSERT INTO floor_map (image_url, width_px, height_px, scale_m_per_px)
-       VALUES ($1, 820, 580, 0.05)
-       ON CONFLICT (image_url) DO UPDATE SET
-         width_px = EXCLUDED.width_px,
-         height_px = EXCLUDED.height_px,
-         scale_m_per_px = EXCLUDED.scale_m_per_px
-       RETURNING id::text AS id`,
-      [`https://placehold.co/820x580?text=${encodeURIComponent(floor.name)}`],
-    );
     const floorId = await idOf(
-      `INSERT INTO floor (building_id, slug, name, floor_map_id)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (building_id, slug) DO UPDATE SET
-         name = EXCLUDED.name,
-         floor_map_id = EXCLUDED.floor_map_id
+      `INSERT INTO floor (building_id, slug, name)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (building_id, slug) DO UPDATE SET name = EXCLUDED.name
        RETURNING id::text AS id`,
-      [buildingId, floor.slug, floor.name, floorMapId],
+      [buildingId, floor.slug, floor.name],
     );
 
-    // 방(ROOM) Area 4곳 — 실제로 전등이 켜지는 위치. 보드와 무관하게 층마다 한 번만 만든다.
-    const roomAreaIds = new Map<string, string>();
-    for (const room of ROOM_AREAS) {
-      const areaId = await idOf(
-        `INSERT INTO area (floor_id, slug, name, polygon, kind)
-         VALUES ($1, $2, $3, $4, 'ROOM')
-         ON CONFLICT (floor_id, slug) DO UPDATE SET
-           name = EXCLUDED.name,
-           polygon = EXCLUDED.polygon,
-           kind = EXCLUDED.kind
-         RETURNING id::text AS id`,
-        [floorId, room.slug, room.name, JSON.stringify(room.polygon)],
-      );
-      roomAreaIds.set(room.slug, areaId);
-    }
+    // 배경 이미지 — 지역(area)이 직접 가진다(2026-07-15 합의, floor_map 대신 image 라이브러리).
+    const imageId = await idOf(
+      `INSERT INTO image (name, image_url, width_px, height_px)
+       VALUES ($1, $2, 820, 580)
+       ON CONFLICT (image_url) DO UPDATE SET width_px = EXCLUDED.width_px, height_px = EXCLUDED.height_px
+       RETURNING id::text AS id`,
+      [`${floor.name} 배경`, `https://placehold.co/820x580?text=${encodeURIComponent(floor.name)}`],
+    );
+
+    // 지역(=floor)당 기본 ROOM area 1개 — 전등과 그 전등을 켜는 감시장비(보드)가 모두 이 area에
+    // 배정된다(device.area_id, 2026-07-15 합의). 사무실/복도/화장실/계단 구분은 area row가 아니라
+    // 배치 좌표로만 표현한다.
+    const defaultRoomAreaId = await idOf(
+      `INSERT INTO area (floor_id, slug, name, polygon, kind, image_id)
+       VALUES ($1, 'default', $2, '[]'::jsonb, 'ROOM', $3)
+       ON CONFLICT (floor_id, slug) DO UPDATE SET name = EXCLUDED.name, image_id = EXCLUDED.image_id
+       RETURNING id::text AS id`,
+      [floorId, floor.name, imageId],
+    );
+
+    // 예전에 보드를 담아두던 분전반(PANEL) area 잔재 정리 — 이제 보드는 defaultRoomAreaId에 있다.
+    await query(`DELETE FROM area WHERE floor_id::text = $1 AND slug IN ('panel-a', 'panel-b')`, [floorId]);
 
     const floorLightGroupId = await upsertGroup(`esp32-${floor.slug}-lights`, `${floor.name} 전등`);
 
     for (const [boardIdx, boardSlug] of BOARD_SLUGS.entries()) {
-      // 분전반(PANEL) Area — 보드가 물리적으로 위치한 곳(전등이 실제로 켜지는 방과는 별개).
-      const panelSlug = `panel-${boardSlug}`;
-      const panelAreaId = await idOf(
-        `INSERT INTO area (floor_id, slug, name, polygon, kind, pos_x, pos_y)
-         VALUES ($1, $2, $3, '[]'::jsonb, 'PANEL', $4, $5)
-         ON CONFLICT (floor_id, slug) DO UPDATE SET
-           name = EXCLUDED.name,
-           pos_x = EXCLUDED.pos_x,
-           pos_y = EXCLUDED.pos_y
-         RETURNING id::text AS id`,
-        [floorId, panelSlug, `${floor.name} 분전반 ${boardSlug.toUpperCase()}`, 780, 40 + boardIdx * 40],
-      );
-
       const boardCode = `${floor.slug}-esp32-${boardSlug}`;
       const boardTopic = buildDeviceBase({
         site: "main-site",
         building: "esp32-building",
         floor: floor.slug,
-        area: panelSlug,
+        area: "default",
         device: boardCode,
       });
       // 같은 네트워크(서브넷)에서 보드마다 고유 IP를 부여받는다고 가정.
@@ -188,7 +169,7 @@ async function seedEsp32Sample(): Promise<void> {
           boardCode,
           `${floor.name} ESP32 릴레이 보드 ${boardSlug.toUpperCase()}`,
           boardTopic,
-          panelAreaId,
+          defaultRoomAreaId,
           780,
           40 + boardIdx * 40,
           JSON.stringify({ host: boardHost, port: 1883 }),
@@ -204,14 +185,14 @@ async function seedEsp32Sample(): Promise<void> {
 
       for (let ch = 1; ch <= CHANNELS_PER_BOARD; ch++) {
         const room = roomForChannel(ch);
-        const areaId = roomAreaIds.get(room.slug)!;
+        const areaId = defaultRoomAreaId;
         const channelStr = String(ch).padStart(2, "0");
         const lightCode = `${boardCode}-light-${channelStr}`;
         const lightTopic = buildDeviceBase({
           site: "main-site",
           building: "esp32-building",
           floor: floor.slug,
-          area: room.slug,
+          area: "default",
           device: lightCode,
         });
         // 보드당 마지막 채널만 비상등(EMERGENCY), 나머지는 일반등(NORMAL) — 실제 배선 관례를 흉내.

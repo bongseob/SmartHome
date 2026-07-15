@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type Konva from "konva";
-import { Circle, Group, Image as KonvaImage, Layer, Line, Rect, Stage, Text } from "react-konva";
+import { Circle, Group, Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva";
 import type { DeviceStatus } from "@smarthome/contracts";
-import type { Area, DeviceListItem, FloorOverview } from "../lib/types";
+import type { AreaOverview, DeviceListItem } from "../lib/types";
 import { DEVICE_STATUS_COLOR } from "../lib/status";
 import { apiAssetUrl } from "../lib/api";
 import { useHtmlImage } from "../lib/useHtmlImage";
@@ -25,18 +25,6 @@ interface EquipmentSummary {
   alarm: number;
   offline: number;
   status: DeviceStatus;
-}
-
-function polygonPoints(polygon: unknown): number[] | null {
-  if (!Array.isArray(polygon)) return null;
-  const points: number[] = [];
-  for (const vertex of polygon) {
-    if (!Array.isArray(vertex) || vertex.length < 2) return null;
-    const [x, y] = vertex;
-    if (typeof x !== "number" || typeof y !== "number") return null;
-    points.push(x, y);
-  }
-  return points.length >= 6 ? points : null; // 최소 삼각형(3점)
 }
 
 function devicePosition(
@@ -79,13 +67,17 @@ function sensorLabel(device: DeviceListItem): string {
   return device.channelAddress ? `${device.channelAddress} ${device.name}` : device.name;
 }
 
+/**
+ * 관제 화면 진입 시 기본 배율(2026-07-15 요청) — 도면을 잘라내지 않고 항상 전체가 화면 안에
+ * 들어오되, 100%(원본 크기)를 넘겨 확대하지는 않는다. 뷰포트가 도면보다 작으면 축소해서 전부
+ * 보여주고(contain), 뷰포트가 도면보다 크면 100%로 중앙에 배치한다(빈 여백은 정상).
+ */
 function fitMapToViewport(
   viewport: { width: number; height: number },
   map: { width: number; height: number },
 ): { scale: number; pos: { x: number; y: number } } {
-  // cover: 도면 이미지가 뷰포트 영역을 빈틈없이 꽉 채우도록 더 큰 배율로 맞춘다(넘치는 축은 중앙 크롭).
-  const fitScale = Math.max(viewport.width / map.width, viewport.height / map.height);
-  const safeScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, fitScale));
+  const containScale = Math.min(viewport.width / map.width, viewport.height / map.height, 1);
+  const safeScale = Math.max(MIN_SCALE, containScale);
   return {
     scale: safeScale,
     pos: {
@@ -103,7 +95,7 @@ function sortContacts(sensors: DeviceListItem[]): DeviceListItem[] {
 }
 
 interface FloorMapProps {
-  overview: FloorOverview;
+  overview: AreaOverview;
   selectedDeviceId: string | null;
   onSelectDevice: (device: DeviceListItem) => void;
   /** 편집 모드: 기기 마커를 드래그로 옮길 수 있다(ui-ux-design.md §4.1-mode). 기본 false(실행 모드). */
@@ -130,9 +122,9 @@ export function FloorMap({
   onFocusHandled,
   alarmedDeviceIds,
 }: FloorMapProps): JSX.Element {
-  const width = overview.floor.floorMapWidth ?? FALLBACK_WIDTH;
-  const height = overview.floor.floorMapHeight ?? FALLBACK_HEIGHT;
-  const image = useHtmlImage(apiAssetUrl(overview.floor.floorMapUrl));
+  const width = overview.area.imageWidthPx ?? FALLBACK_WIDTH;
+  const height = overview.area.imageHeightPx ?? FALLBACK_HEIGHT;
+  const image = useHtmlImage(apiAssetUrl(overview.area.imageUrl));
   const stageContainerRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const [scale, setScale] = useState(1);
@@ -142,20 +134,20 @@ export function FloorMap({
     height: Math.min(height, 700),
   });
   const [monitoringLevel, setMonitoringLevel] = useState<MonitoringLevel>("equipment");
-  // 지역(Area) 선택 — 선택 시 해당 지역 감시장비만 보여준다(요구: 지역 선택 → 감시장비 레벨).
-  const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
   // 감시장비 호버 → 일괄 상태 툴팁. 클릭(접점별 패널)과 분리된 상호작용이다.
   const [hoveredEquipmentId, setHoveredEquipmentId] = useState<string | null>(null);
+  // 개별 센서 호버 → 상세정보 오버레이(목록 대신 마우스오버로만 노출, 2026-07-15 요청).
+  const [hoveredSensorId, setHoveredSensorId] = useState<string | null>(null);
   // 감시장비 클릭 → 접점별 상태 패널 대상.
   const [contactsEquipmentId, setContactsEquipmentId] = useState<string | null>(null);
   const [dragPreview, setDragPreview] = useState<{ id: string; x: number; y: number } | null>(null);
 
-  // 층이 바뀌면 지역/호버/접점 선택을 초기화한다(이전 층의 잔상 방지).
+  // 지역이 바뀌면 호버/접점 선택을 초기화한다(이전 지역의 잔상 방지).
   useEffect(() => {
-    setSelectedAreaId(null);
     setHoveredEquipmentId(null);
+    setHoveredSensorId(null);
     setContactsEquipmentId(null);
-  }, [overview.floor.id]);
+  }, [overview.area.id]);
 
   useEffect(() => {
     const container = stageContainerRef.current;
@@ -182,15 +174,7 @@ export function FloorMap({
     const fitted = fitMapToViewport(stageSize, { width, height });
     setScale(fitted.scale);
     setPos(fitted.pos);
-  }, [overview.floor.id, stageSize, width, height]);
-
-  const areasWithPoints = useMemo(
-    () =>
-      overview.areas
-        .map((area: Area) => ({ area, points: polygonPoints(area.polygon) }))
-        .filter((entry): entry is { area: Area; points: number[] } => entry.points !== null),
-    [overview.areas],
-  );
+  }, [overview.area.id, stageSize, width, height]);
 
   const activeDevices = useMemo(
     () => overview.devices.filter(isActiveMonitoringDevice),
@@ -207,13 +191,13 @@ export function FloorMap({
     [activeDevices],
   );
 
-  // 외부(전체 모니터링)에서 감시장비를 선택하면 그 감시장비의 지역으로 필터하고 접점별 패널을 펼친다.
-  // 층 변경 → overview 로드 완료(해당 감시장비가 equipments에 존재) 시점에 적용한다.
+  // 외부(전체 모니터링)에서 감시장비를 선택하면 접점별 패널을 펼친다. 지역 전환 자체는 호출부
+  // (App.tsx)가 이미 그 감시장비가 속한 지역으로 selectedAreaId를 옮긴 뒤 이 컴포넌트를 그 지역의
+  // overview로 렌더링하므로, 여기서는 접점 패널만 연다.
   useEffect(() => {
     if (!focusEquipmentId) return;
     const target = equipments.find((device) => device.id === focusEquipmentId);
-    if (!target) return; // 아직 해당 층 overview가 로드되지 않음 → 다음 렌더에서 재시도
-    setSelectedAreaId(target.areaId);
+    if (!target) return; // 아직 해당 지역 overview가 로드되지 않음 → 다음 렌더에서 재시도
     setMonitoringLevel("equipment");
     setHoveredEquipmentId(null);
     setContactsEquipmentId(focusEquipmentId);
@@ -231,22 +215,9 @@ export function FloorMap({
     return result;
   }, [sensors]);
 
-  // 지역 필터: 선택된 지역이 있으면 그 지역 소속 기기만 렌더한다.
-  const areaMatch = useCallback(
-    (device: DeviceListItem): boolean => selectedAreaId === null || device.areaId === selectedAreaId,
-    [selectedAreaId],
-  );
-  const visibleEquipments = useMemo(() => equipments.filter(areaMatch), [equipments, areaMatch]);
-  const visibleSensors = useMemo(() => sensors.filter(areaMatch), [sensors, areaMatch]);
-
-  const renderedDevices = monitoringLevel === "equipment" ? visibleEquipments : visibleSensors;
-
-  const hoveredEquipment = hoveredEquipmentId
-    ? equipments.find((device) => device.id === hoveredEquipmentId) ?? null
-    : null;
-  const hoveredSummary = hoveredEquipment
-    ? summarizeSensors(hoveredEquipment, sensorsByEquipment.get(hoveredEquipment.id) ?? [])
-    : null;
+  // overview.devices가 이미 지역(area) 1개로 스코프돼 있어 추가 필터가 필요 없다.
+  const visibleEquipments = equipments;
+  const visibleSensors = sensors;
 
   const contactsEquipment = contactsEquipmentId
     ? equipments.find((device) => device.id === contactsEquipmentId) ?? null
@@ -258,13 +229,24 @@ export function FloorMap({
     ? summarizeSensors(contactsEquipment, contactsSensors)
     : null;
 
-  function selectArea(areaId: string | null): void {
-    setSelectedAreaId(areaId);
-    setContactsEquipmentId(null);
-    setHoveredEquipmentId(null);
-    // 요구: 지역을 선택하면 감시장비 레벨로 본다.
-    if (areaId !== null) setMonitoringLevel("equipment");
-  }
+  // 감시장비를 드릴다운(접점 패널을 연) 상태에서는 상단 레벨과 무관하게 그 감시장비와
+  // 소속 개별 센서만 도면에 배치한다 — 지역 전체 개별 센서(visibleSensors)로 되돌아가지 않는다.
+  const renderedDevices = contactsEquipment
+    ? [contactsEquipment, ...contactsSensors]
+    : monitoringLevel === "equipment"
+      ? visibleEquipments
+      : visibleSensors;
+
+  const hoveredEquipment = hoveredEquipmentId
+    ? equipments.find((device) => device.id === hoveredEquipmentId) ?? null
+    : null;
+  const hoveredSummary = hoveredEquipment
+    ? summarizeSensors(hoveredEquipment, sensorsByEquipment.get(hoveredEquipment.id) ?? [])
+    : null;
+
+  const hoveredSensor = hoveredSensorId
+    ? sensors.find((device) => device.id === hoveredSensorId) ?? null
+    : null;
 
   function setCursor(event: Konva.KonvaEventObject<MouseEvent>, cursor: string): void {
     const container = event.target.getStage()?.container();
@@ -296,35 +278,40 @@ export function FloorMap({
     });
   }
 
-  const selectedAreaName = selectedAreaId
-    ? overview.areas.find((area) => area.id === selectedAreaId)?.name ?? null
-    : null;
-
   return (
     <div className="floor-map">
       <div className="floor-map__toolbar">
-        <label className="floor-map__area-select">
-          지역{" "}
-          <select value={selectedAreaId ?? ""} onChange={(e) => selectArea(e.target.value || null)}>
-            <option value="">전체</option>
-            {overview.areas.map((area) => (
-              <option key={area.id} value={area.id}>
-                {area.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <span className="floor-map__area-select">{overview.area.name}</span>
+        {contactsEquipment && (
+          <button
+            type="button"
+            className="floor-map__back"
+            onClick={() => setContactsEquipmentId(null)}
+            title="감시장비 목록으로 돌아갑니다."
+          >
+            ← 감시장비 목록
+          </button>
+        )}
         <div className="floor-map__level-toggle">
           <button
             type="button"
             className={monitoringLevel === "equipment" ? "active" : ""}
-            onClick={() => setMonitoringLevel("equipment")}
+            onClick={() => {
+              setMonitoringLevel("equipment");
+              setContactsEquipmentId(null);
+            }}
           >
             감시장비
           </button>
           <button
             type="button"
             className={monitoringLevel === "sensor" ? "active" : ""}
+            disabled={contactsEquipment !== null}
+            title={
+              contactsEquipment !== null
+                ? "감시장비를 선택한 상태에서는 해당 장비의 센서만 표시합니다. 지역 전체 센서를 보려면 접점 패널을 닫으세요."
+                : undefined
+            }
             onClick={() => setMonitoringLevel("sensor")}
           >
             개별 센서
@@ -342,16 +329,12 @@ export function FloorMap({
         </button>
         <span>{Math.round(scale * 100)}%</span>
         <span className="floor-map__level-summary">
-          {selectedAreaName ? `${selectedAreaName} · ` : ""}
-          {monitoringLevel === "equipment"
-            ? `감시장비 ${visibleEquipments.length}대 / 센서 ${visibleSensors.length}개`
-            : `개별 센서 ${visibleSensors.length}개`}
+          {contactsEquipment
+            ? `${contactsEquipment.name} 접점 ${contactsSensors.length}개`
+            : monitoringLevel === "equipment"
+              ? `감시장비 ${visibleEquipments.length}대 / 센서 ${visibleSensors.length}개`
+              : `개별 센서 ${visibleSensors.length}개`}
         </span>
-        {selectedAreaId && (
-          <button type="button" className="floor-map__area-clear" onClick={() => selectArea(null)}>
-            전체 보기
-          </button>
-        )}
       </div>
       <div className="floor-map__stage" ref={stageContainerRef}>
         <Stage
@@ -371,38 +354,6 @@ export function FloorMap({
         >
         <Layer listening={false}>
           {image && <KonvaImage image={image} width={width} height={height} opacity={0.9} />}
-        </Layer>
-        <Layer>
-          {areasWithPoints.map(({ area, points }) => {
-            const isSelected = area.id === selectedAreaId;
-            const dimmed = selectedAreaId !== null && !isSelected;
-            return (
-              <Line
-                key={area.id}
-                points={points}
-                closed
-                fill={isSelected ? "rgba(37, 99, 235, 0.22)" : dimmed ? "rgba(148, 163, 184, 0.08)" : "rgba(52, 152, 219, 0.12)"}
-                stroke={isSelected ? "#2563eb" : "#3498db"}
-                strokeWidth={isSelected ? 2.5 : 1.5}
-                onMouseEnter={(e) => setCursor(e, "pointer")}
-                onMouseLeave={(e) => setCursor(e, "default")}
-                onClick={() => selectArea(isSelected ? null : area.id)}
-                onTap={() => selectArea(isSelected ? null : area.id)}
-              />
-            );
-          })}
-          {areasWithPoints.map(({ area, points }) => (
-            <Text
-              key={`${area.id}-label`}
-              x={points[0]}
-              y={(points[1] ?? 0) - 18}
-              text={area.name}
-              fontSize={13}
-              fontStyle={area.id === selectedAreaId ? "bold" : "normal"}
-              fill={area.id === selectedAreaId ? "#1d4ed8" : "#2c3e50"}
-              listening={false}
-            />
-          ))}
         </Layer>
         <Layer>
           {renderedDevices.map((device, index) => {
@@ -443,10 +394,12 @@ export function FloorMap({
                 onMouseEnter={(e) => {
                   setCursor(e, "pointer");
                   if (isEquipment) setHoveredEquipmentId(device.id);
+                  else setHoveredSensorId(device.id);
                 }}
                 onMouseLeave={(e) => {
                   setCursor(e, "default");
                   if (isEquipment) setHoveredEquipmentId((current) => (current === device.id ? null : current));
+                  else setHoveredSensorId((current) => (current === device.id ? null : current));
                 }}
                 onDragMove={(e) => {
                   e.cancelBubble = true;
@@ -551,11 +504,68 @@ export function FloorMap({
               "클릭하면 접점별 상태",
             ];
             const text = lines.join("\n");
+
+            const TOOLTIP_WIDTH = 200;
+            const TOOLTIP_HEIGHT = 78;
+            // 호버된 마커의 강조 크기(半 14px) + 여유 간격 — 이보다 좁으면 마커 자체를 덮는다.
+            const MARKER_CLEARANCE = 20;
+            const CANVAS_MARGIN = 10;
+
+            // 기본은 마커 오른쪽에 띄우고, 오른쪽에 공간이 부족하면 왼쪽으로 뒤집는다.
+            // (예전엔 오른쪽 좌표를 캔버스 폭 안으로 clamp만 해서, 우측 여백이 부족하면
+            // 툴팁이 마커 쪽으로 밀려와 그대로 덮어버렸다.)
+            const fitsRight = x + MARKER_CLEARANCE + TOOLTIP_WIDTH <= width - CANVAS_MARGIN;
+            const tooltipX = fitsRight
+              ? x + MARKER_CLEARANCE
+              : Math.max(x - MARKER_CLEARANCE - TOOLTIP_WIDTH, CANVAS_MARGIN);
+            const tooltipY = Math.min(
+              Math.max(y - TOOLTIP_HEIGHT / 2, CANVAS_MARGIN),
+              height - TOOLTIP_HEIGHT - CANVAS_MARGIN,
+            );
+
             return (
-              <Group x={Math.min(x + 18, width - 210)} y={Math.max(y - 24, 10)} listening={false}>
-                <Rect width={200} height={78} cornerRadius={6} fill="#111827" opacity={0.92} shadowBlur={6} shadowColor="rgba(0,0,0,0.3)" />
-                <Rect x={0} y={0} width={200} height={4} cornerRadius={2} fill={DEVICE_STATUS_COLOR[hoveredSummary.status]} />
-                <Text x={12} y={12} width={176} text={text} fontSize={12} lineHeight={1.4} fill="#f9fafb" />
+              <Group x={tooltipX} y={tooltipY} listening={false}>
+                <Rect width={TOOLTIP_WIDTH} height={TOOLTIP_HEIGHT} cornerRadius={6} fill="#111827" opacity={0.92} shadowBlur={6} shadowColor="rgba(0,0,0,0.3)" />
+                <Rect x={0} y={0} width={TOOLTIP_WIDTH} height={4} cornerRadius={2} fill={DEVICE_STATUS_COLOR[hoveredSummary.status]} />
+                <Text x={12} y={12} width={TOOLTIP_WIDTH - 24} text={text} fontSize={12} lineHeight={1.4} fill="#f9fafb" />
+              </Group>
+            );
+          })()}
+          {/* 개별 센서 호버 툴팁 — 하단 목록 대신 마우스오버 시에만 상세정보를 보여준다. */}
+          {hoveredSensor && (() => {
+            const hoveredIndex = renderedDevices.findIndex((device) => device.id === hoveredSensor.id);
+            const { x, y } = devicePosition(
+              hoveredSensor,
+              Math.max(hoveredIndex, 0),
+              pendingPositions[hoveredSensor.id],
+            );
+            const lines = [
+              sensorLabel(hoveredSensor),
+              `상태 ${hoveredSensor.currentStatus}`,
+              `${hoveredSensor.sensorIoType ?? "I/O"} · ${hoveredSensor.deviceType ?? hoveredSensor.category}`,
+            ];
+            const text = lines.join("\n");
+
+            const TOOLTIP_WIDTH = 190;
+            const TOOLTIP_HEIGHT = 64;
+            const MARKER_CLEARANCE = 16;
+            const CANVAS_MARGIN = 10;
+
+            const fitsRight = x + MARKER_CLEARANCE + TOOLTIP_WIDTH <= width - CANVAS_MARGIN;
+            const tooltipX = fitsRight
+              ? x + MARKER_CLEARANCE
+              : Math.max(x - MARKER_CLEARANCE - TOOLTIP_WIDTH, CANVAS_MARGIN);
+            const tooltipY = Math.min(
+              Math.max(y - TOOLTIP_HEIGHT / 2, CANVAS_MARGIN),
+              height - TOOLTIP_HEIGHT - CANVAS_MARGIN,
+            );
+
+            return (
+              // 옆 센서가 어렴풋이 비치도록 감시장비 툴팁(0.92)보다 낮은 투명도(2026-07-15 요청).
+              <Group x={tooltipX} y={tooltipY} listening={false}>
+                <Rect width={TOOLTIP_WIDTH} height={TOOLTIP_HEIGHT} cornerRadius={6} fill="#111827" opacity={0.72} shadowBlur={6} shadowColor="rgba(0,0,0,0.3)" />
+                <Rect x={0} y={0} width={TOOLTIP_WIDTH} height={4} cornerRadius={2} fill={DEVICE_STATUS_COLOR[hoveredSensor.currentStatus]} />
+                <Text x={12} y={12} width={TOOLTIP_WIDTH - 24} text={text} fontSize={12} lineHeight={1.4} fill="#f9fafb" />
               </Group>
             );
           })()}
@@ -616,26 +626,6 @@ export function FloorMap({
               ))}
             </div>
           )}
-        </div>
-      )}
-
-      {monitoringLevel === "sensor" && (
-        <div className="floor-map__sensor-grid">
-          {visibleSensors.map((sensor) => (
-            <button
-              key={sensor.id}
-              type="button"
-              className={`sensor-card ${sensor.id === selectedDeviceId ? "active" : ""}`}
-              onClick={() => onSelectDevice(sensor)}
-            >
-              <span className="sensor-card__icon" aria-hidden="true">
-                <i style={{ background: DEVICE_STATUS_COLOR[sensor.currentStatus] }} />
-              </span>
-              <span className="sensor-card__state">{sensor.currentStatus}</span>
-              <strong>{sensorLabel(sensor)}</strong>
-              <small>{sensor.sensorIoType ?? "I/O"} · {sensor.deviceType ?? sensor.category}</small>
-            </button>
-          ))}
         </div>
       )}
     </div>

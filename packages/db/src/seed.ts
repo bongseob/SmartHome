@@ -3,7 +3,10 @@ import { pbkdf2Sync } from "node:crypto";
 import { closePool, query } from "./pool.js";
 
 /**
- * 개발용 시드 (idempotent). 대시보드 검증용으로 Area 2개, 기기 3대, floor_map 포함.
+ * 개발용 시드 (idempotent). 대시보드 검증용으로 지역 1개, 기기 3대, 배경 이미지 포함.
+ * area가 1차 관리 단위이고 floor는 area가 공유하는 층 태그일 뿐이라는 관례(2026-07-15 합의)에
+ * 따라, 배경 이미지는 area.image_id가 직접 가진다(image 라이브러리 row를 만들어 연결). 거실/침실
+ * 구분은 area가 아니라 배치 좌표(pos_x/pos_y)로만 표현한다.
  * thermostat-01 은 device-simulator M1/M2 와 정합.
  * fleet 정의 단일 소스화는 후속(docs/device-simulator.md §13).
  */
@@ -39,58 +42,34 @@ async function seed(): Promise<void> {
     [siteId],
   );
 
-  // floor_map (placeholder — 800x600)
-  const mapId = await idOf(
-    `INSERT INTO floor_map (image_url, width_px, height_px, scale_m_per_px)
-     VALUES ('https://placehold.co/800x600', 800, 600, 0.05)
+  const floorId = await idOf(
+    `INSERT INTO floor (building_id, slug, name) VALUES ($1, '2f', '2F')
+     ON CONFLICT (building_id, slug) DO UPDATE SET name = EXCLUDED.name
+     RETURNING id`,
+    [bldgId],
+  );
+
+  // 배경 이미지(placeholder — 800x600) — area가 직접 가진다.
+  const imageId = await idOf(
+    `INSERT INTO image (name, image_url, width_px, height_px)
+     VALUES ('2F 배경', 'https://placehold.co/800x600', 800, 600)
      ON CONFLICT (image_url) DO UPDATE SET
        width_px = EXCLUDED.width_px,
-       height_px = EXCLUDED.height_px,
-       scale_m_per_px = EXCLUDED.scale_m_per_px
+       height_px = EXCLUDED.height_px
      RETURNING id`,
     [],
   );
 
-  const floorId = await idOf(
-    `INSERT INTO floor (building_id, slug, name, floor_map_id) VALUES ($1, '2f', '2F', $2)
-     ON CONFLICT (building_id, slug)
-     DO UPDATE SET name = EXCLUDED.name, floor_map_id = EXCLUDED.floor_map_id
+  // ─── 지역 기본 area 1개 ─────────────────────────────────────────
+  const defaultAreaId = await idOf(
+    `INSERT INTO area (floor_id, slug, name, polygon, image_id)
+     VALUES ($1, 'default', '2F', '[]'::jsonb, $2)
+     ON CONFLICT (floor_id, slug) DO UPDATE SET name = EXCLUDED.name, image_id = EXCLUDED.image_id
      RETURNING id`,
-    [bldgId, mapId],
+    [floorId, imageId],
   );
-
-  // ─── Area 2개 (polygon 포함) ────────────────────────────────────
-  const livingRoomId = await idOf(
-    `INSERT INTO area (floor_id, slug, name, polygon)
-     VALUES ($1, 'living-room', '거실', $2)
-     ON CONFLICT (floor_id, slug) DO UPDATE SET name = EXCLUDED.name, polygon = EXCLUDED.polygon
-     RETURNING id`,
-    [
-      floorId,
-      JSON.stringify([
-        [100, 100],
-        [500, 100],
-        [500, 400],
-        [100, 400],
-      ]),
-    ],
-  );
-
-  const bedroomId = await idOf(
-    `INSERT INTO area (floor_id, slug, name, polygon)
-     VALUES ($1, 'bedroom', '침실', $2)
-     ON CONFLICT (floor_id, slug) DO UPDATE SET name = EXCLUDED.name, polygon = EXCLUDED.polygon
-     RETURNING id`,
-    [
-      floorId,
-      JSON.stringify([
-        [520, 100],
-        [750, 100],
-        [750, 400],
-        [520, 400],
-      ]),
-    ],
-  );
+  const livingRoomId = defaultAreaId;
+  const bedroomId = defaultAreaId;
 
   // ─── Device 3대 ────────────────────────────────────────────────
   // 1) thermostat-01 (거실, 시뮬레이터와 정합)
@@ -98,7 +77,7 @@ async function seed(): Promise<void> {
     site: "site1",
     building: "bldg-a",
     floor: "2f",
-    area: "living-room",
+    area: "default",
     device: "thermostat-01",
   });
   await query(
@@ -124,7 +103,7 @@ async function seed(): Promise<void> {
     site: "site1",
     building: "bldg-a",
     floor: "2f",
-    area: "living-room",
+    area: "default",
     device: "light-01",
   });
   await query(
@@ -150,7 +129,7 @@ async function seed(): Promise<void> {
     site: "site1",
     building: "bldg-a",
     floor: "2f",
-    area: "bedroom",
+    area: "default",
     device: "light-02",
   });
   await query(
@@ -188,7 +167,7 @@ async function seed(): Promise<void> {
   );
 
   console.log(
-    `[seed] 완료 — floor=${floorId}, areas=[living-room, bedroom], devices=3, admin=admin`,
+    `[seed] 완료 — floor=${floorId}, area=default, devices=3, admin=admin`,
   );
 }
 

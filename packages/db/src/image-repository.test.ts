@@ -14,9 +14,10 @@ class FakeImageDb implements QueryExecutor {
       this.row = {
         id: "image-1",
         name: params?.[0],
-        image_url: params?.[1],
-        width_px: params?.[2],
-        height_px: params?.[3],
+        description: params?.[1],
+        image_url: params?.[2],
+        width_px: params?.[3],
+        height_px: params?.[4],
         uploaded_at: new Date("2026-07-11T00:00:00Z"),
       };
       return { rows: [this.row as unknown as T], rowCount: 1 };
@@ -38,12 +39,14 @@ describe("image repository", () => {
     const db = new FakeImageDb();
     const created = await insertImage(db, {
       name: "분전반 배경",
+      description: "1층 로비 분전반 배경용",
       imageUrl: "/uploads/images/abc.png",
       widthPx: 800,
       heightPx: 600,
       uploadedBy: "user-1",
     });
     expect(created.id).toBe("image-1");
+    expect(created.description).toBe("1층 로비 분전반 배경용");
     expect(created.imageUrl).toBe("/uploads/images/abc.png");
     expect(created.widthPx).toBe(800);
 
@@ -55,6 +58,7 @@ describe("image repository", () => {
     const db = new FakeImageDb({
       id: "image-1",
       name: "x",
+      description: null,
       image_url: "/uploads/images/x.png",
       width_px: null,
       height_px: null,

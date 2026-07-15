@@ -1,6 +1,7 @@
 import type {
   AlarmState,
   AlarmTier,
+  AreaKind,
   DeviceCategory,
   DeviceLifecycle,
   DeviceRole,
@@ -32,6 +33,8 @@ export interface TokenPair {
   expiresIn: number;
 }
 
+/** 층 태그 — 전체 모니터링 층별 집계 + 지역 생성 시 층 선택 콤보박스용(2026-07-15 합의, floor는
+ *  area가 공유하는 메타 태그일 뿐이다). */
 export interface FloorSummary {
   id: string;
   name: string;
@@ -41,30 +44,36 @@ export interface FloorSummary {
   siteName: string;
   siteSlug: string;
   topicPrefix: string;
-  floorMapId: string | null;
-  floorMapUrl: string | null;
-  floorMapWidth: number | null;
-  floorMapHeight: number | null;
-  floorMapScale: string | null;
 }
 
 export interface ImageRecord {
   id: string;
   name: string;
+  /** 이 이미지가 어떤 용도로 쓰이는지 남기는 부연 설명(예: "1층 로비 배경"). area 배경 외에
+   *  다른 것의 배경으로도 재사용될 수 있어, 용도 파악을 돕는 자유 텍스트다. */
+  description: string | null;
   imageUrl: string;
   widthPx: number | null;
   heightPx: number | null;
   uploadedAt: string;
 }
 
-export interface Area {
+/** "지역" — 사용자 관점 1차 관리 단위(2026-07-15 합의). floor는 여러 지역이 공유하는 층
+ *  태그일 뿐이고, 배경 이미지는 지역이 직접 가진다(imageId/imageUrl). */
+export interface AreaSummary {
   id: string;
-  floorId: string;
   name: string;
   slug: string;
-  topicPrefix: string;
-  /** DB jsonb, 형태는 [[x,y], ...] 를 기대하지만 런타임에 검증한다. */
-  polygon: unknown;
+  kind: AreaKind;
+  floorId: string;
+  floorName: string;
+  buildingName: string;
+  siteName: string;
+  topicPrefix: string; // "enterprise/site1/bldg-a/2f/living-room"
+  imageId: string | null;
+  imageUrl: string | null;
+  imageWidthPx: number | null;
+  imageHeightPx: number | null;
 }
 
 export interface DeviceListItem {
@@ -172,9 +181,9 @@ export interface SetDeviceSimulatedRequest {
   simulated: boolean;
 }
 
-export interface FloorOverview {
-  floor: FloorSummary;
-  areas: Area[];
+/** 관제 화면(FloorMap)용 — 지역 1개의 배경 이미지 + 기기 목록. */
+export interface AreaOverview {
+  area: AreaSummary;
   devices: DeviceListItem[];
 }
 

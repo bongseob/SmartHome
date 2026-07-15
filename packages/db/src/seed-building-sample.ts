@@ -13,7 +13,6 @@ interface FloorDef {
 interface AreaDef {
   slug: "toilet" | "corridor" | "stairs" | "office";
   name: string;
-  polygon: number[][];
   baseX: number;
   baseY: number;
 }
@@ -43,34 +42,10 @@ const FLOORS: FloorDef[] = [
 ];
 
 const AREAS: AreaDef[] = [
-  {
-    slug: "toilet",
-    name: "화장실",
-    polygon: [[60, 70], [260, 70], [260, 230], [60, 230]],
-    baseX: 120,
-    baseY: 130,
-  },
-  {
-    slug: "corridor",
-    name: "복도",
-    polygon: [[290, 70], [760, 70], [760, 230], [290, 230]],
-    baseX: 360,
-    baseY: 130,
-  },
-  {
-    slug: "stairs",
-    name: "계단",
-    polygon: [[60, 270], [260, 270], [260, 520], [60, 520]],
-    baseX: 120,
-    baseY: 340,
-  },
-  {
-    slug: "office",
-    name: "사무실",
-    polygon: [[290, 270], [760, 270], [760, 520], [290, 520]],
-    baseX: 360,
-    baseY: 340,
-  },
+  { slug: "toilet", name: "화장실", baseX: 120, baseY: 130 },
+  { slug: "corridor", name: "복도", baseX: 360, baseY: 130 },
+  { slug: "stairs", name: "계단", baseX: 120, baseY: 340 },
+  { slug: "office", name: "사무실", baseX: 360, baseY: 340 },
 ];
 
 const DEVICES: DeviceDef[] = [
@@ -155,24 +130,21 @@ async function seedBuildingSample(): Promise<void> {
   let areaCount = 0;
 
   for (const floor of FLOORS) {
-    const floorMapId = await idOf(
-      `INSERT INTO floor_map (image_url, width_px, height_px, scale_m_per_px)
-       VALUES ($1, 820, 580, 0.05)
-       ON CONFLICT (image_url) DO UPDATE SET
-         width_px = EXCLUDED.width_px,
-         height_px = EXCLUDED.height_px,
-         scale_m_per_px = EXCLUDED.scale_m_per_px
-       RETURNING id::text AS id`,
-      [`https://placehold.co/820x580?text=${encodeURIComponent(floor.name)}`],
-    );
     const floorId = await idOf(
-      `INSERT INTO floor (building_id, slug, name, floor_map_id)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (building_id, slug) DO UPDATE SET
-         name = EXCLUDED.name,
-         floor_map_id = EXCLUDED.floor_map_id
+      `INSERT INTO floor (building_id, slug, name)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (building_id, slug) DO UPDATE SET name = EXCLUDED.name
        RETURNING id::text AS id`,
-      [buildingId, floor.slug, floor.name, floorMapId],
+      [buildingId, floor.slug, floor.name],
+    );
+
+    // 배경 이미지 — 지역(area)이 직접 가진다(2026-07-15 합의, floor_map 대신 image 라이브러리).
+    const imageId = await idOf(
+      `INSERT INTO image (name, image_url, width_px, height_px)
+       VALUES ($1, $2, 820, 580)
+       ON CONFLICT (image_url) DO UPDATE SET width_px = EXCLUDED.width_px, height_px = EXCLUDED.height_px
+       RETURNING id::text AS id`,
+      [`${floor.name} 배경`, `https://placehold.co/820x580?text=${encodeURIComponent(floor.name)}`],
     );
 
     const floorGroupId = await upsertGroup(`sample-${floor.slug}-all`, `${floor.name} 전체`);
@@ -180,26 +152,26 @@ async function seedBuildingSample(): Promise<void> {
     const floorAirconGroupId = await upsertGroup(`sample-${floor.slug}-aircon`, `${floor.name} 에어컨`);
     const floorFireGroupId = await upsertGroup(`sample-${floor.slug}-fire-detectors`, `${floor.name} 화재감지기`);
 
-    for (const [areaIndex, area] of AREAS.entries()) {
-      const areaId = await idOf(
-        `INSERT INTO area (floor_id, slug, name, polygon, kind)
-         VALUES ($1, $2, $3, $4, 'ROOM')
-         ON CONFLICT (floor_id, slug) DO UPDATE SET
-           name = EXCLUDED.name,
-           polygon = EXCLUDED.polygon,
-           kind = EXCLUDED.kind
-         RETURNING id::text AS id`,
-        [floorId, area.slug, area.name, JSON.stringify(area.polygon)],
-      );
-      areaCount += 1;
+    // 지역(=floor)당 기본 area 1개 — 기기가 실제로 배정되는 단위(device.area_id, 2026-07-15 합의).
+    // 화장실/복도/계단/사무실 같은 구역 구분은 area row가 아니라 배치 좌표 + Device Group으로만 표현한다.
+    const defaultAreaId = await idOf(
+      `INSERT INTO area (floor_id, slug, name, polygon, kind, image_id)
+       VALUES ($1, 'default', $2, '[]'::jsonb, 'ROOM', $3)
+       ON CONFLICT (floor_id, slug) DO UPDATE SET name = EXCLUDED.name, image_id = EXCLUDED.image_id
+       RETURNING id::text AS id`,
+      [floorId, floor.name, imageId],
+    );
+    areaCount += 1;
 
+    for (const [areaIndex, area] of AREAS.entries()) {
+      const areaId = defaultAreaId;
       const floorAreaGroupId = await upsertGroup(`sample-${floor.slug}-${area.slug}`, `${floor.name} ${area.name}`);
       const rmuCode = `${floor.slug}-${area.slug}-rmu`;
       const rmuTopic = buildDeviceBase({
         site: "main-site",
         building: "main-building",
         floor: floor.slug,
-        area: area.slug,
+        area: "default",
         device: rmuCode,
       });
       const rmuId = await idOf(
@@ -252,7 +224,7 @@ async function seedBuildingSample(): Promise<void> {
           site: "main-site",
           building: "main-building",
           floor: floor.slug,
-          area: area.slug,
+          area: "default",
           device: code,
         });
         const deviceId = await idOf(

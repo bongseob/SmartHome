@@ -1,6 +1,7 @@
 import type {
   AlarmRecord,
-  Area,
+  AreaOverview,
+  AreaSummary,
   AuthUser,
   BuildingRecord,
   CommandCreateResponse,
@@ -10,7 +11,6 @@ import type {
   CreateSchedulerRequest,
   DeviceHistory,
   DeviceListItem,
-  FloorOverview,
   FloorSummary,
   GroupCommandResponse,
   GroupControlSummary,
@@ -207,8 +207,37 @@ async function authedJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await response.json()) as T;
 }
 
+/** 층 태그 목록 — 전체 모니터링 층별 집계 + 지역 생성 시 층 선택 콤보박스용. */
 export function listFloors(): Promise<FloorSummary[]> {
   return authedJson<FloorSummary[]>("/api/v1/spatial/floors");
+}
+
+/** "지역" 목록 — 관제/기기관리/지역관리의 1차 탐색 단위(2026-07-15 합의). */
+export function listAreas(): Promise<AreaSummary[]> {
+  return authedJson<AreaSummary[]>("/api/v1/spatial/areas");
+}
+
+/** 지역 생성 — floorId(기존 층 태그) 또는 floorName(새 층 태그) 중 하나를 준다(ADMIN 전용). */
+export function createArea(body: { name: string; floorId?: string; floorName?: string }): Promise<AreaSummary> {
+  return authedJson<AreaSummary>("/api/v1/spatial/areas", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/** 지역 이름 변경, 배경 이미지 지정(imageId) 등. imageId를 null로 주면 배경을 해제한다. */
+export function updateArea(
+  areaId: string,
+  body: { name?: string; imageId?: string | null },
+): Promise<AreaSummary> {
+  return authedJson<AreaSummary>(`/api/v1/spatial/areas/${areaId}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function deleteArea(areaId: string): Promise<{ deleted: true }> {
+  return authedJson<{ deleted: true }>(`/api/v1/spatial/areas/${areaId}`, { method: "DELETE" });
 }
 
 /** 활성 알람(RAISED)만 조회 — 현장 상태변화 등. 확인(ack) 전까지 유지된다. */
@@ -224,8 +253,9 @@ export function acknowledgeAlarm(id: string): Promise<AlarmRecord> {
   });
 }
 
-export function getFloorOverview(floorId: string): Promise<FloorOverview> {
-  return authedJson<FloorOverview>(`/api/v1/spatial/floors/${floorId}/overview`);
+/** 관제 화면(FloorMap)용 — 지역 1개의 배경 이미지 + 기기 목록. */
+export function getAreaOverview(areaId: string): Promise<AreaOverview> {
+  return authedJson<AreaOverview>(`/api/v1/spatial/areas/${areaId}/overview`);
 }
 
 export interface LayoutPosition {
@@ -235,8 +265,8 @@ export interface LayoutPosition {
 }
 
 /** 도면 편집 모드 — 변경된 기기 좌표 일괄 저장(ADMIN 전용, 서버에서 DEVICE_RELOCATE 감사). */
-export function saveFloorLayout(floorId: string, positions: LayoutPosition[]): Promise<unknown> {
-  return authedJson(`/api/v1/spatial/floors/${floorId}/layout`, {
+export function saveAreaLayout(areaId: string, positions: LayoutPosition[]): Promise<unknown> {
+  return authedJson(`/api/v1/spatial/areas/${areaId}/layout`, {
     method: "PATCH",
     body: JSON.stringify({ positions }),
   });
@@ -402,27 +432,7 @@ export function updateBuildingName(id: string, name: string): Promise<BuildingRe
   });
 }
 
-// ─── 도면(Floor Map) 관리 (이미지 등록 후 별도 매핑) ──
-
-export function updateFloorMapScale(floorMapId: string, scaleMPerPx: number): Promise<unknown> {
-  return authedJson(`/api/v1/spatial/floor-maps/${floorMapId}`, {
-    method: "PATCH",
-    body: JSON.stringify({ scaleMPerPx }),
-  });
-}
-
-export function assignFloorMapImage(
-  floorId: string,
-  imageId: string,
-  scaleMPerPx: number,
-): Promise<FloorSummary> {
-  return authedJson<FloorSummary>(`/api/v1/spatial/floors/${floorId}/floor-map-image`, {
-    method: "PATCH",
-    body: JSON.stringify({ imageId, scaleMPerPx }),
-  });
-}
-
-// ─── 이미지 라이브러리 (이미지 기본정보 등록 후, 별도 매핑으로 사용) ──
+// ─── 이미지 라이브러리 (등록 후 지역의 배경으로 updateArea(imageId)로 매핑) ──
 
 export function listImages(): Promise<ImageRecord[]> {
   return authedJson<ImageRecord[]>("/api/v1/images");
@@ -430,11 +440,12 @@ export function listImages(): Promise<ImageRecord[]> {
 
 export function uploadImage(
   file: File,
-  meta: { name: string; widthPx: number; heightPx: number },
+  meta: { name: string; description?: string; widthPx: number; heightPx: number },
 ): Promise<ImageRecord> {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("name", meta.name);
+  if (meta.description !== undefined) formData.append("description", meta.description);
   formData.append("widthPx", String(meta.widthPx));
   formData.append("heightPx", String(meta.heightPx));
   return authedFetch("/api/v1/images", {
@@ -446,34 +457,29 @@ export function uploadImage(
   });
 }
 
+/** 이름/설명 수정 및/또는 파일 교체 — id(키)는 유지된다. file을 생략하면 파일은 그대로다.
+ *  같은 이미지를 배경으로 참조하는 area 등은 이 id를 그대로 쓰므로 다시 매핑할 필요가 없다. */
+export function updateImage(
+  id: string,
+  input: { name?: string; description?: string; file?: File; widthPx?: number; heightPx?: number },
+): Promise<ImageRecord> {
+  const formData = new FormData();
+  if (input.name !== undefined) formData.append("name", input.name);
+  if (input.description !== undefined) formData.append("description", input.description);
+  if (input.file) formData.append("file", input.file);
+  if (input.widthPx !== undefined) formData.append("widthPx", String(input.widthPx));
+  if (input.heightPx !== undefined) formData.append("heightPx", String(input.heightPx));
+  return authedFetch(`/api/v1/images/${id}`, {
+    method: "PATCH",
+    body: formData,
+  }).then(async (response) => {
+    if (!response.ok) throw new ApiError(response.status, await parseProblemDetail(response));
+    return (await response.json()) as ImageRecord;
+  });
+}
+
 export function deleteImage(id: string): Promise<{ deleted: true }> {
   return authedJson<{ deleted: true }>(`/api/v1/images/${id}`, { method: "DELETE" });
-}
-
-// ─── 지역(Area) 관리 (M16 Admin — ADMIN 전용) ────────────────────────
-
-export function createArea(
-  floorId: string,
-  body: { name: string; polygon: number[][]; slug?: string },
-): Promise<Area> {
-  return authedJson<Area>(`/api/v1/spatial/floors/${floorId}/areas`, {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-}
-
-export function updateArea(
-  areaId: string,
-  body: { name?: string; polygon?: number[][] },
-): Promise<Area> {
-  return authedJson<Area>(`/api/v1/spatial/areas/${areaId}`, {
-    method: "PATCH",
-    body: JSON.stringify(body),
-  });
-}
-
-export function deleteArea(areaId: string): Promise<{ deleted: true }> {
-  return authedJson<{ deleted: true }>(`/api/v1/spatial/areas/${areaId}`, { method: "DELETE" });
 }
 
 export function wsUrl(): string {

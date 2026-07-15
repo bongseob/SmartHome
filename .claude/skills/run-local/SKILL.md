@@ -60,7 +60,7 @@ pnpm build
 ### 3) 스키마 + 시드
 ```bash
 pnpm --filter @smarthome/db migrate:up   # 마이그레이션 14개
-pnpm --filter @smarthome/db seed          # floor·거실/침실 area·기기 3개·admin 생성
+pnpm --filter @smarthome/db seed          # floor(지역)·기본 area·기기 3개·admin 생성
 ```
 시드 계정: **`admin` / `admin1234`** (ADMIN 롤).
 
@@ -76,8 +76,8 @@ pnpm --filter @smarthome/web dev          # Vite :5173
 1. API 헬스: `curl -s http://localhost:3000/health` → `{"status":"ok","service":"api"}`
 2. Gateway 로그에 `mqtt://localhost:1883 연결 — 공유구독 시작` 있는지.
 3. Web을 브라우저로 몰아본다(Playwright): `http://localhost:5173` →
-   `admin` / `admin1234` 로그인 → 대시보드 진입 → Konva 도면에 지역 2개(거실·침실)와
-   기기 마커 3개가 렌더링되는지 **스크린샷으로 확인**. 빈 화면이면 기동 실패다.
+   `admin` / `admin1234` 로그인 → 대시보드 진입 → Konva 도면에 기기 마커 3개가
+   렌더링되는지 **스크린샷으로 확인**. 빈 화면이면 기동 실패다.
    - 도면 배경의 `800×600` 플레이스홀더는 정상(실제 도면 이미지 미업로드 시 표시).
    - `favicon.ico` 404 콘솔 에러는 무해.
 

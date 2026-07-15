@@ -1,151 +1,88 @@
-import { useEffect, useState, type ChangeEvent, type FormEvent } from "react";
-import {
-  ApiError,
-  apiAssetUrl,
-  assignFloorMapImage,
-  deleteImage,
-  listFloors,
-  listImages,
-  updateFloorMapScale,
-  uploadImage,
-} from "../lib/api";
-import type { FloorSummary, ImageRecord } from "../lib/types";
+import { useEffect, useState, type FormEvent } from "react";
+import { ApiError, apiAssetUrl, createArea, deleteArea, listAreas, listFloors, listImages, updateArea } from "../lib/api";
+import type { AreaSummary, FloorSummary, ImageRecord } from "../lib/types";
 import { useConfirm } from "./ConfirmDialog";
 
-function readImageDimensions(file: File): Promise<{ width: number; height: number }> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      resolve({ width: img.naturalWidth, height: img.naturalHeight });
-      URL.revokeObjectURL(url);
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("이미지를 읽을 수 없습니다."));
-    };
-    img.src = url;
-  });
+interface NewAreaFormProps {
+  floors: FloorSummary[];
+  onCreated: () => void;
 }
 
-interface ImageLibraryProps {
-  images: ImageRecord[];
-  onCreated: (image: ImageRecord) => void;
-  onRemoved: (id: string) => void;
-}
-
-function ImageLibrary({ images, onCreated, onRemoved }: ImageLibraryProps): JSX.Element {
-  const confirm = useConfirm();
+/** 지역 추가 — 층은 콤보박스(기존 층 선택 또는 새 이름 입력)로 받는다(2026-07-15 합의).
+ *  floor는 사용자가 직접 관리하는 대상이 아니라, 지역 생성 시 find-or-create되는 태그다. */
+function NewAreaForm({ floors, onCreated }: NewAreaFormProps): JSX.Element {
   const [name, setName] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [floorId, setFloorId] = useState("");
+  const [newFloorName, setNewFloorName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
-    setFile(e.target.files?.[0] ?? null);
-  };
-
-  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!file) {
-      setError("이미지 파일을 선택하세요.");
+    if (!name.trim()) {
+      setError("지역 이름을 입력하세요.");
       return;
     }
-    const imageName = name.trim() || file.name;
+    if (!floorId && !newFloorName.trim()) {
+      setError("층을 선택하거나 새 층 이름을 입력하세요.");
+      return;
+    }
     setSubmitting(true);
     setError(null);
-    try {
-      const { width, height } = await readImageDimensions(file);
-      const created = await uploadImage(file, { name: imageName, widthPx: width, heightPx: height });
-      onCreated(created);
-      setName("");
-      setFile(null);
-      e.currentTarget.reset();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : err instanceof Error ? err.message : "이미지 등록에 실패했습니다.");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleDelete = (image: ImageRecord) => {
-    confirm(`'${image.name}' 이미지를 삭제할까요? 이미 매핑된 배경은 별도 도면 기록으로 유지됩니다.`, { danger: true }).then(
-      (ok) => {
-        if (!ok) return;
-        deleteImage(image.id)
-          .then(() => onRemoved(image.id))
-          .catch((err: unknown) => {
-            setError(err instanceof ApiError ? err.detail : "이미지 삭제에 실패했습니다.");
-          });
-      },
-    );
+    createArea({
+      name: name.trim(),
+      ...(floorId ? { floorId } : { floorName: newFloorName.trim() }),
+    })
+      .then(() => {
+        onCreated();
+        setName("");
+        setNewFloorName("");
+      })
+      .catch((err: unknown) => setError(err instanceof ApiError ? err.detail : "지역 생성에 실패했습니다."))
+      .finally(() => setSubmitting(false));
   };
 
   return (
-    <section className="floor-map-admin__section">
-      <h3>이미지 등록</h3>
-      <p className="floor-map-admin__note">
-        이미지는 이미지 라이브러리에 기본 정보만 저장됩니다. 실제 지역 배경 적용은 아래 매핑에서 별도로 수행합니다.
-      </p>
-      <form className="floor-map-admin__upload" onSubmit={handleSubmit}>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="이미지 이름" />
-        <input type="file" accept="image/png,image/jpeg,image/webp" onChange={handleFileChange} />
-        <button type="submit" className="primary" disabled={submitting}>
-          {submitting ? "등록 중…" : "이미지 등록"}
-        </button>
-      </form>
+    <form className="floor-map-admin__upload" onSubmit={handleSubmit}>
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="새 지역 이름 (예: 1층 사무실)" />
+      <select value={floorId} onChange={(e) => setFloorId(e.target.value)}>
+        <option value="">+ 새 층 태그 입력</option>
+        {floors.map((f) => (
+          <option key={f.id} value={f.id}>
+            {f.name}
+          </option>
+        ))}
+      </select>
+      {!floorId && (
+        <input
+          value={newFloorName}
+          onChange={(e) => setNewFloorName(e.target.value)}
+          placeholder="새 층 이름 (예: 1층)"
+        />
+      )}
+      <button type="submit" className="primary" disabled={submitting}>
+        {submitting ? "생성 중…" : "+ 새 지역 추가"}
+      </button>
       {error && <p className="error-text">{error}</p>}
-
-      <table className="floor-map-admin__table">
-        <thead>
-          <tr>
-            <th>이미지</th>
-            <th>이름</th>
-            <th>크기</th>
-            <th>등록일</th>
-            <th>관리</th>
-          </tr>
-        </thead>
-        <tbody>
-          {images.map((image) => (
-            <tr key={image.id}>
-              <td>
-                <img src={apiAssetUrl(image.imageUrl) ?? ""} alt={image.name} className="floor-map-admin__thumb" />
-              </td>
-              <td>{image.name}</td>
-              <td>{image.widthPx && image.heightPx ? `${image.widthPx}×${image.heightPx}px` : "-"}</td>
-              <td>{new Date(image.uploadedAt).toLocaleString()}</td>
-              <td>
-                <button type="button" onClick={() => handleDelete(image)}>
-                  삭제
-                </button>
-              </td>
-            </tr>
-          ))}
-          {images.length === 0 && (
-            <tr>
-              <td colSpan={5} className="floor-map-admin__empty">
-                등록된 이미지가 없습니다.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </section>
+    </form>
   );
 }
 
-interface FloorRowProps {
-  floor: FloorSummary;
+interface AreaRowProps {
+  area: AreaSummary;
   images: ImageRecord[];
-  onUpdated: (floor: FloorSummary) => void;
+  onUpdated: (area: AreaSummary) => void;
+  onDeleted: (areaId: string) => void;
 }
 
-function FloorRow({ floor, images, onUpdated }: FloorRowProps): JSX.Element {
-  const [scaleInput, setScaleInput] = useState(floor.floorMapScale ?? "0.05");
+function AreaRow({ area, images, onUpdated, onDeleted }: AreaRowProps): JSX.Element {
+  const confirm = useConfirm();
   const [selectedImageId, setSelectedImageId] = useState("");
   const [mapping, setMapping] = useState(false);
-  const [savingScale, setSavingScale] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameInput, setNameInput] = useState(area.name);
+  const [savingName, setSavingName] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleMapImage = () => {
@@ -153,64 +90,89 @@ function FloorRow({ floor, images, onUpdated }: FloorRowProps): JSX.Element {
       setError("매핑할 이미지를 선택하세요.");
       return;
     }
-    const scaleMPerPx = Number(scaleInput);
-    if (!Number.isFinite(scaleMPerPx) || scaleMPerPx <= 0) {
-      setError("스케일(m/px)을 올바르게 입력하세요.");
-      return;
-    }
     setMapping(true);
     setError(null);
-    assignFloorMapImage(floor.id, selectedImageId, scaleMPerPx)
+    updateArea(area.id, { imageId: selectedImageId })
       .then(onUpdated)
-      .catch((err: unknown) => {
-        setError(err instanceof ApiError ? err.detail : "이미지 매핑에 실패했습니다.");
-      })
+      .catch((err: unknown) => setError(err instanceof ApiError ? err.detail : "이미지 매핑에 실패했습니다."))
       .finally(() => setMapping(false));
   };
 
-  const handleSaveScale = () => {
-    if (!floor.floorMapId) return;
-    const scaleMPerPx = Number(scaleInput);
-    if (!Number.isFinite(scaleMPerPx) || scaleMPerPx <= 0) {
-      setError("스케일(m/px)을 올바르게 입력하세요.");
-      return;
-    }
-    setSavingScale(true);
+  const handleClearImage = () => {
+    setMapping(true);
     setError(null);
-    updateFloorMapScale(floor.floorMapId, scaleMPerPx)
-      .then(() => onUpdated({ ...floor, floorMapScale: String(scaleMPerPx) }))
-      .catch((err: unknown) => {
-        setError(err instanceof ApiError ? err.detail : "스케일 저장에 실패했습니다.");
-      })
-      .finally(() => setSavingScale(false));
+    updateArea(area.id, { imageId: null })
+      .then(onUpdated)
+      .catch((err: unknown) => setError(err instanceof ApiError ? err.detail : "배경 해제에 실패했습니다."))
+      .finally(() => setMapping(false));
   };
 
-  const assetUrl = apiAssetUrl(floor.floorMapUrl);
+  const handleSaveName = () => {
+    if (!nameInput.trim()) return;
+    setSavingName(true);
+    setError(null);
+    updateArea(area.id, { name: nameInput.trim() })
+      .then((updated) => {
+        onUpdated(updated);
+        setEditingName(false);
+      })
+      .catch((err: unknown) => setError(err instanceof ApiError ? err.detail : "이름 저장에 실패했습니다."))
+      .finally(() => setSavingName(false));
+  };
+
+  const handleDelete = () => {
+    confirm(`'${area.name}' 지역을 삭제할까요? 배정된 기기는 지역 없음 상태가 됩니다.`, { danger: true }).then((ok) => {
+      if (!ok) return;
+      setDeleting(true);
+      setError(null);
+      deleteArea(area.id)
+        .then(() => onDeleted(area.id))
+        .catch((err: unknown) => {
+          setError(err instanceof ApiError ? err.detail : "삭제에 실패했습니다.");
+          setDeleting(false);
+        });
+    });
+  };
+
+  const assetUrl = apiAssetUrl(area.imageUrl);
 
   return (
     <tr>
       <td>
-        {floor.siteName} · {floor.buildingName} · {floor.name}
-      </td>
-      <td>
-        {assetUrl ? (
-          <img src={assetUrl} alt={floor.name} className="floor-map-admin__thumb" />
+        {editingName ? (
+          <>
+            <input value={nameInput} onChange={(e) => setNameInput(e.target.value)} />
+            <button type="button" className="primary" onClick={handleSaveName} disabled={savingName}>
+              {savingName ? "저장 중…" : "저장"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setNameInput(area.name);
+                setEditingName(false);
+              }}
+            >
+              취소
+            </button>
+          </>
         ) : (
-          <span className="floor-map-admin__empty">없음</span>
+          <>
+            {area.name}{" "}
+            <button type="button" onClick={() => setEditingName(true)}>
+              이름 수정
+            </button>
+            <button type="button" onClick={handleDelete} disabled={deleting}>
+              {deleting ? "삭제 중…" : "삭제"}
+            </button>
+          </>
         )}
       </td>
-      <td>{floor.floorMapWidth && floor.floorMapHeight ? `${floor.floorMapWidth}×${floor.floorMapHeight}px` : "-"}</td>
+      <td>{area.floorName}</td>
       <td>
-        <input
-          className="floor-map-admin__scale-input"
-          value={scaleInput}
-          onChange={(e) => setScaleInput(e.target.value)}
-          placeholder="m/px"
-        />
-        {floor.floorMapId && (
-          <button type="button" onClick={handleSaveScale} disabled={savingScale}>
-            {savingScale ? "저장 중…" : "스케일 저장"}
-          </button>
+        {assetUrl ? (
+          <img src={assetUrl} alt={area.name} className="floor-map-admin__thumb" />
+        ) : (
+          <span className="floor-map-admin__empty">없음</span>
         )}
       </td>
       <td>
@@ -225,6 +187,11 @@ function FloorRow({ floor, images, onUpdated }: FloorRowProps): JSX.Element {
         <button type="button" onClick={handleMapImage} disabled={mapping || images.length === 0}>
           {mapping ? "매핑 중…" : "배경 매핑"}
         </button>
+        {area.imageId && (
+          <button type="button" onClick={handleClearImage} disabled={mapping}>
+            배경 해제
+          </button>
+        )}
         {error && <p className="error-text">{error}</p>}
       </td>
     </tr>
@@ -233,18 +200,20 @@ function FloorRow({ floor, images, onUpdated }: FloorRowProps): JSX.Element {
 
 export function FloorMapAdmin(): JSX.Element {
   const [floors, setFloors] = useState<FloorSummary[]>([]);
+  const [areas, setAreas] = useState<AreaSummary[]>([]);
   const [images, setImages] = useState<ImageRecord[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const reload = () => {
-    Promise.all([listFloors(), listImages()])
-      .then(([floorResult, imageResult]) => {
+    Promise.all([listFloors(), listAreas(), listImages()])
+      .then(([floorResult, areaResult, imageResult]) => {
         setFloors(floorResult);
+        setAreas(areaResult);
         setImages(imageResult);
         setLoadError(null);
       })
       .catch((err: unknown) => {
-        setLoadError(err instanceof ApiError ? err.detail : "도면 관리 정보를 불러오지 못했습니다.");
+        setLoadError(err instanceof ApiError ? err.detail : "지역 관리 정보를 불러오지 못했습니다.");
       });
   };
 
@@ -252,40 +221,45 @@ export function FloorMapAdmin(): JSX.Element {
 
   return (
     <div className="floor-map-admin">
-      <h2>도면 / 이미지 관리</h2>
+      <h2>지역 관리</h2>
 
       {loadError && <p className="error-text">{loadError}</p>}
 
-      <ImageLibrary
-        images={images}
-        onCreated={(image) => setImages((prev) => [image, ...prev])}
-        onRemoved={(id) => setImages((prev) => prev.filter((image) => image.id !== id))}
-      />
-
       <section className="floor-map-admin__section">
-        <h3>지역 배경 매핑</h3>
+        <h3>지역 목록 / 배경 매핑</h3>
         <p className="floor-map-admin__note">
-          등록된 이미지를 선택해 층 배경으로 매핑합니다. 이 과정에서 관제 화면용 도면 기록이 생성되고 해당 층에 연결됩니다.
+          지역을 추가·삭제·이름수정하고, 등록된 이미지를 선택해 배경으로 매핑합니다. 배경 이미지가 구역
+          구분(화장실·복도 등)을 시각적으로 보여주므로 별도 구역 설정은 두지 않습니다. 층은 지역에 붙는
+          태그일 뿐이라 별도로 관리하지 않고, 지역을 만들 때 선택하거나 새로 입력합니다. 이미지 등록/수정은
+          "이미지 관리" 화면에서 합니다.
         </p>
+        <NewAreaForm floors={floors} onCreated={reload} />
         <table className="floor-map-admin__table">
           <thead>
             <tr>
+              <th>지역</th>
               <th>층</th>
               <th>현재 배경</th>
-              <th>크기</th>
-              <th>스케일(m/px)</th>
               <th>이미지 매핑</th>
             </tr>
           </thead>
           <tbody>
-            {floors.map((f) => (
-              <FloorRow
-                key={f.id}
-                floor={f}
+            {areas.map((a) => (
+              <AreaRow
+                key={a.id}
+                area={a}
                 images={images}
-                onUpdated={(updated) => setFloors((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))}
+                onUpdated={(updated) => setAreas((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))}
+                onDeleted={(areaId) => setAreas((prev) => prev.filter((x) => x.id !== areaId))}
               />
             ))}
+            {areas.length === 0 && (
+              <tr>
+                <td colSpan={4} className="floor-map-admin__empty">
+                  등록된 지역이 없습니다.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </section>

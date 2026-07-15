@@ -14,18 +14,16 @@ import {
   ApiError,
   createDevice,
   decommissionDevice,
-  getFloorOverview,
+  listAreas,
   listDevices,
-  listFloors,
   setDeviceMonitoring,
   setDeviceSimulated,
   updateDevice,
 } from "../lib/api";
 import type {
+  AreaSummary,
   CreateDeviceRequest,
   DeviceListItem,
-  FloorOverview,
-  FloorSummary,
 } from "../lib/types";
 import { ConnectionProtocolFields } from "./ConnectionProtocolFields";
 import { useConfirm } from "./ConfirmDialog";
@@ -42,13 +40,12 @@ ModuleRegistry.registerModules([AllCommunityModule, ValidationModule]);
 
 export function DeviceAdmin(): JSX.Element {
   const confirm = useConfirm();
-  const [floors, setFloors] = useState<FloorSummary[]>([]);
-  const [selectedFloorId, setSelectedFloorId] = useState<string | null>(null);
-  const [overview, setOverview] = useState<FloorOverview | null>(null);
+  const [areas, setAreas] = useState<AreaSummary[]>([]);
+  const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
   const [devices, setDevices] = useState<DeviceListItem[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // 생성 폼
+  // 생성 폼 — area는 상단에서 이미 선택된 지역(selectedAreaId)을 그대로 쓴다.
   const [code, setCode] = useState("");
   const [name, setName] = useState("");
   const [category, setCategory] = useState<string>("DEVICE");
@@ -57,7 +54,6 @@ export function DeviceAdmin(): JSX.Element {
   const [manufacturer, setManufacturer] = useState("");
   const [model, setModel] = useState("");
   const [firmwareVersion, setFirmwareVersion] = useState("");
-  const [areaId, setAreaId] = useState("");
   const [gatewayId, setGatewayId] = useState("");
   const [parentDeviceId, setParentDeviceId] = useState("");
   const [sensorSignalType, setSensorSignalType] = useState<SensorSignalType>("DIGITAL");
@@ -77,13 +73,13 @@ export function DeviceAdmin(): JSX.Element {
   const [connectionDeviceId, setConnectionDeviceId] = useState<string | null>(null);
 
   useEffect(() => {
-    listFloors()
+    listAreas()
       .then((result) => {
-        setFloors(result);
-        setSelectedFloorId((current) => current ?? result[0]?.id ?? null);
+        setAreas(result);
+        setSelectedAreaId((current) => current ?? result[0]?.id ?? null);
       })
       .catch((err: unknown) =>
-        setLoadError(err instanceof ApiError ? err.detail : "층 목록을 불러오지 못했습니다."),
+        setLoadError(err instanceof ApiError ? err.detail : "지역 목록을 불러오지 못했습니다."),
       );
   }, []);
 
@@ -100,29 +96,25 @@ export function DeviceAdmin(): JSX.Element {
       .catch(() => undefined);
   }, []);
 
-  const reloadOverview = useCallback((floorId: string) => {
-    Promise.all([getFloorOverview(floorId), listDevices()])
-      .then(([result, allDevices]) => {
-        const areaIds = new Set(result.areas.map((area) => area.id));
+  const reloadDevices = useCallback((areaId: string) => {
+    Promise.all([listDevices({ areaId }), listDevices()])
+      .then(([scoped, allDevices]) => {
         setMonitoringEquipments(allDevices.filter((device) => device.deviceRole === "MONITORING_EQUIPMENT"));
-        setOverview(result);
-        setDevices(allDevices.filter((device) => device.areaId !== null && areaIds.has(device.areaId)));
+        setDevices(scoped);
         setLoadError(null);
       })
       .catch((err: unknown) =>
-        setLoadError(err instanceof ApiError ? err.detail : "층 정보를 불러오지 못했습니다."),
+        setLoadError(err instanceof ApiError ? err.detail : "지역 정보를 불러오지 못했습니다."),
       );
   }, []);
 
   useEffect(() => {
-    if (selectedFloorId) reloadOverview(selectedFloorId);
-  }, [selectedFloorId, reloadOverview]);
-
-  const areas = overview?.areas ?? [];
+    if (selectedAreaId) reloadDevices(selectedAreaId);
+  }, [selectedAreaId, reloadDevices]);
 
   const handleCreate = () => {
-    if (!code.trim() || !name.trim() || !areaId) {
-      setCreateError("code, name, area는 필수입니다.");
+    if (!code.trim() || !name.trim() || !selectedAreaId) {
+      setCreateError("code, name, 지역은 필수입니다.");
       return;
     }
     setCreating(true);
@@ -137,7 +129,7 @@ export function DeviceAdmin(): JSX.Element {
       manufacturer: manufacturer.trim() || null,
       model: model.trim() || null,
       firmwareVersion: firmwareVersion.trim() || null,
-      areaId,
+      areaId: selectedAreaId,
       gatewayId: gatewayId || null,
       parentDeviceId: deviceRole === "SENSOR" ? parentDeviceId || null : null,
       sensorSignalType: deviceRole === "SENSOR" ? sensorSignalType : null,
@@ -164,7 +156,7 @@ export function DeviceAdmin(): JSX.Element {
         setLoadClass("NORMAL");
         setDescription("");
         setShowCreateModal(false);
-        if (selectedFloorId) reloadOverview(selectedFloorId);
+        if (selectedAreaId) reloadDevices(selectedAreaId);
       })
       .catch((err: unknown) =>
         setCreateError(err instanceof ApiError ? err.detail : "생성에 실패했습니다."),
@@ -181,14 +173,14 @@ export function DeviceAdmin(): JSX.Element {
         if (!ok) return;
         decommissionDevice(device.id)
           .then(() => {
-            if (selectedFloorId) reloadOverview(selectedFloorId);
+            if (selectedAreaId) reloadDevices(selectedAreaId);
           })
           .catch((err: unknown) =>
             setLoadError(err instanceof ApiError ? err.detail : "폐기에 실패했습니다."),
           );
       });
     },
-    [confirm, selectedFloorId, reloadOverview],
+    [confirm, selectedAreaId, reloadDevices],
   );
 
   const toggleMonitoring = useCallback(
@@ -196,13 +188,13 @@ export function DeviceAdmin(): JSX.Element {
       setLoadError(null);
       setDeviceMonitoring(device.id, { monitoringVisible: !device.monitoringVisible })
         .then(() => {
-          if (selectedFloorId) reloadOverview(selectedFloorId);
+          if (selectedAreaId) reloadDevices(selectedAreaId);
         })
         .catch((err: unknown) =>
           setLoadError(err instanceof ApiError ? err.detail : "모니터링 표시 변경에 실패했습니다."),
         );
     },
-    [selectedFloorId, reloadOverview],
+    [selectedAreaId, reloadDevices],
   );
 
   const toggleEnabled = useCallback(
@@ -210,13 +202,13 @@ export function DeviceAdmin(): JSX.Element {
       setLoadError(null);
       setDeviceMonitoring(device.id, { enabled: !device.enabled })
         .then(() => {
-          if (selectedFloorId) reloadOverview(selectedFloorId);
+          if (selectedAreaId) reloadDevices(selectedAreaId);
         })
         .catch((err: unknown) =>
           setLoadError(err instanceof ApiError ? err.detail : "사용 여부 변경에 실패했습니다."),
         );
     },
-    [selectedFloorId, reloadOverview],
+    [selectedAreaId, reloadDevices],
   );
 
   const toggleSimulated = useCallback(
@@ -224,13 +216,13 @@ export function DeviceAdmin(): JSX.Element {
       setLoadError(null);
       setDeviceSimulated(device.id, { simulated: !device.simulated })
         .then(() => {
-          if (selectedFloorId) reloadOverview(selectedFloorId);
+          if (selectedAreaId) reloadDevices(selectedAreaId);
         })
         .catch((err: unknown) =>
           setLoadError(err instanceof ApiError ? err.detail : "가상/실기기 전환에 실패했습니다."),
         );
     },
-    [selectedFloorId, reloadOverview],
+    [selectedAreaId, reloadDevices],
   );
 
   const defaultColDef = useMemo<ColDef<DeviceListItem>>(
@@ -392,16 +384,16 @@ export function DeviceAdmin(): JSX.Element {
 
       <div className="device-admin__header-actions" style={{ display: "flex", gap: "1rem", alignItems: "center", marginBottom: "1rem" }}>
         <label className="device-admin__floor-select" style={{ marginBottom: 0 }}>
-          층{" "}
-          <select value={selectedFloorId ?? ""} onChange={(e) => setSelectedFloorId(e.target.value)}>
-            {floors.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.siteName} · {f.buildingName} · {f.name}
+          지역{" "}
+          <select value={selectedAreaId ?? ""} onChange={(e) => setSelectedAreaId(e.target.value)}>
+            {areas.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
               </option>
             ))}
           </select>
         </label>
-        <button type="button" className="primary" onClick={() => setShowCreateModal(true)}>
+        <button type="button" className="primary" onClick={() => setShowCreateModal(true)} disabled={!selectedAreaId}>
           + 새 기기 추가
         </button>
       </div>
@@ -438,14 +430,6 @@ export function DeviceAdmin(): JSX.Element {
                 {DEVICE_ROLES.map((role) => (
                   <option key={role.value} value={role.value}>
                     {role.label}
-                  </option>
-                ))}
-              </select>
-              <select value={areaId} onChange={(e) => setAreaId(e.target.value)}>
-                <option value="">Area 선택 (필수)</option>
-                {areas.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name} ({a.slug})
                   </option>
                 ))}
               </select>
@@ -545,7 +529,7 @@ export function DeviceAdmin(): JSX.Element {
           onCancel={() => setEditingDeviceId(null)}
           onSaved={() => {
             setEditingDeviceId(null);
-            if (selectedFloorId) reloadOverview(selectedFloorId);
+            if (selectedAreaId) reloadDevices(selectedAreaId);
           }}
         />
       )}
@@ -560,7 +544,7 @@ export function DeviceAdmin(): JSX.Element {
               currentProtocol={connectionDevice.connectionProtocol}
               currentConfig={connectionDevice.connectionConfig}
               onSaved={() => {
-                if (selectedFloorId) reloadOverview(selectedFloorId);
+                if (selectedAreaId) reloadDevices(selectedAreaId);
               }}
             />
             <div className="modal-actions">

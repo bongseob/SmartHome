@@ -28,6 +28,9 @@ interface TypeSummary {
 
 interface FloorRow {
   floor: FloorSummary;
+  /** 이 층의 대표 지역(area) id — 관제 화면은 지역 단위로 조회하므로 "개별 제어로 이동"에 쓴다.
+   *  이 층 소속 기기 중 처음 만난 것의 areaId를 그대로 쓴다(지역=층 1개가 기본 관례). */
+  areaId: string | null;
   lighting: TypeSummary; // 전등 (제어 가능)
   power: TypeSummary; // 전열 (모니터 전용)
 }
@@ -73,8 +76,9 @@ function floorPrefixFromArea(topic: string | null): string | null {
 }
 
 interface FullMonitoringProps {
-  /** 전등(제어 가능) 층 클릭 → 해당 층 관제(개별 제어) 화면으로 이동. 전열은 호출하지 않는다. */
-  onOpenLightingControl?: (floor: FloorSummary) => void;
+  /** 전등(제어 가능) 층 클릭 → 그 층의 대표 지역(area) 관제(개별 제어) 화면으로 이동.
+   *  전열은 호출하지 않는다. */
+  onOpenLightingControl?: (areaId: string) => void;
 }
 
 export function FullMonitoring({ onOpenLightingControl }: FullMonitoringProps): JSX.Element {
@@ -119,7 +123,7 @@ export function FullMonitoring({ onOpenLightingControl }: FullMonitoringProps): 
       const floor = floorByPrefix.get(prefix);
       if (!floor) continue;
       const row =
-        byFloor.get(floor.id) ?? { floor, lighting: emptySummary(), power: emptySummary() };
+        byFloor.get(floor.id) ?? { floor, areaId: device.areaId, lighting: emptySummary(), power: emptySummary() };
       const target = isLighting(device) ? row.lighting : row.power;
       const bucket = bucketOf(device);
       target.total += 1;
@@ -194,7 +198,7 @@ interface SummaryTableProps {
   variant: "lighting" | "power";
   rows: FloorRow[];
   pick: (row: FloorRow) => TypeSummary;
-  onOpen?: (floor: FloorSummary) => void;
+  onOpen?: (areaId: string) => void;
 }
 
 function SummaryTable({ title, hint, variant, rows, pick, onOpen }: SummaryTableProps): JSX.Element {
@@ -218,8 +222,8 @@ function SummaryTable({ title, hint, variant, rows, pick, onOpen }: SummaryTable
         <tbody>
           {rows.map((row) => {
             const s = pick(row);
-            const clickable = onOpen !== undefined && s.total > 0;
-            const handle = clickable ? () => onOpen?.(row.floor) : undefined;
+            const clickable = onOpen !== undefined && s.total > 0 && row.areaId !== null;
+            const handle = clickable ? () => onOpen?.(row.areaId as string) : undefined;
             return (
               <tr
                 key={row.floor.id}

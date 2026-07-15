@@ -4,18 +4,18 @@ import {
   ApiError,
   AuthExpiredError,
   createCommand,
+  getAreaOverview,
   getDeviceHistory,
-  getFloorOverview,
   getSession,
-  listFloors,
+  listAreas,
   login as apiLogin,
   logout as apiLogout,
-  saveFloorLayout,
+  saveAreaLayout,
   setDeviceMonitoring,
   listActiveAlarms,
   acknowledgeAlarm,
 } from "./lib/api";
-import type { AlarmRecord, AuthUser, DeviceHistory, DeviceListItem, FloorOverview, FloorSummary } from "./lib/types";
+import type { AlarmRecord, AreaOverview, AreaSummary, AuthUser, DeviceHistory, DeviceListItem } from "./lib/types";
 import { useRealtime } from "./lib/useRealtime";
 import { LoginView } from "./components/LoginView";
 import { FloorMap } from "./components/FloorMap";
@@ -24,7 +24,7 @@ import { EventFeed, type FeedEntry } from "./components/EventFeed";
 import { SchedulerAdmin } from "./components/SchedulerAdmin";
 import { SystemInfoAdmin } from "./components/SystemInfoAdmin";
 import { FloorMapAdmin } from "./components/FloorMapAdmin";
-import { AreaAdmin } from "./components/AreaAdmin";
+import { ImageAdmin } from "./components/ImageAdmin";
 import { DeviceAdmin } from "./components/DeviceAdmin";
 import { RecommendationsAdmin } from "./components/RecommendationsAdmin";
 import { Dashboard } from "./components/Dashboard";
@@ -47,9 +47,9 @@ export function App(): JSX.Element {
   const [serverStatusOpen, setServerStatusOpen] = useState(true);
   // 미확인(RAISED) 알람 — 현장 상태변화 등. 확인(ack) 전까지 배너/하이라이트로 유지된다.
   const [alarms, setAlarms] = useState<AlarmRecord[]>([]);
-  const [floors, setFloors] = useState<FloorSummary[]>([]);
-  const [selectedFloorId, setSelectedFloorId] = useState<string | null>(null);
-  const [overview, setOverview] = useState<FloorOverview | null>(null);
+  const [areas, setAreas] = useState<AreaSummary[]>([]);
+  const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
+  const [overview, setOverview] = useState<AreaOverview | null>(null);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [history, setHistory] = useState<DeviceHistory | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
@@ -59,7 +59,7 @@ export function App(): JSX.Element {
   const feedSeq = useRef(0);
 
   // 최상위 화면 전환(M16 Admin) — ADMIN 전용 스케줄러/시스템정보 화면과 기존 Floor Map 관제 화면을 오간다.
-  const [view, setView] = useState<"dashboard" | "fullMonitoring" | "map" | "groupControl" | "schedulers" | "systemInfo" | "floorMaps" | "areas" | "devices" | "recommendations">("dashboard");
+  const [view, setView] = useState<"dashboard" | "fullMonitoring" | "map" | "groupControl" | "schedulers" | "systemInfo" | "floorMaps" | "images" | "devices" | "recommendations">("dashboard");
   // 전체 모니터링에서 감시장비 선택 → 관제 화면에서 그 감시장비의 접점별 개별 제어를 펼치기 위한 포커스.
   const [focusEquipmentId, setFocusEquipmentId] = useState<string | null>(null);
   // 스케줄러 등 다른 화면에서 특정 그룹의 개별제어 패널을 펼쳐달라는 요청.
@@ -84,8 +84,8 @@ export function App(): JSX.Element {
   const handleLogout = useCallback(() => {
     void apiLogout();
     setUser(null);
-    setFloors([]);
-    setSelectedFloorId(null);
+    setAreas([]);
+    setSelectedAreaId(null);
     setOverview(null);
     setSelectedDeviceId(null);
     setHistory(null);
@@ -135,12 +135,12 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
-    listFloors()
+    listAreas()
       .then((result) => {
         if (cancelled) return;
-        setFloors(result);
+        setAreas(result);
         setLoadError(null);
-        setSelectedFloorId((current) => current ?? result[0]?.id ?? null);
+        setSelectedAreaId((current) => current ?? result[0]?.id ?? null);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -148,7 +148,7 @@ export function App(): JSX.Element {
           handleLogout();
           return;
         }
-        setLoadError(err instanceof Error ? err.message : "층 목록을 불러오지 못했습니다.");
+        setLoadError(err instanceof Error ? err.message : "지역 목록을 불러오지 못했습니다.");
       });
     return () => {
       cancelled = true;
@@ -156,9 +156,9 @@ export function App(): JSX.Element {
   }, [user, handleLogout]);
 
   useEffect(() => {
-    if (!selectedFloorId) return;
+    if (!selectedAreaId) return;
     let cancelled = false;
-    getFloorOverview(selectedFloorId)
+    getAreaOverview(selectedAreaId)
       .then((result) => {
         if (cancelled) return;
         setOverview(result);
@@ -170,20 +170,20 @@ export function App(): JSX.Element {
           handleLogout();
           return;
         }
-        setLoadError(err instanceof Error ? err.message : "층 정보를 불러오지 못했습니다.");
+        setLoadError(err instanceof Error ? err.message : "지역 정보를 불러오지 못했습니다.");
       });
     return () => {
       cancelled = true;
     };
-  }, [selectedFloorId, handleLogout]);
+  }, [selectedAreaId, handleLogout]);
 
-  const handleOpenFloorControl = useCallback((floor: FloorSummary) => {
-    // 전등(제어 가능) 층 선택 → 관제(map) 화면으로 이동해 개별 제어(지역·감시장비 드릴다운)를 연다.
+  const handleOpenFloorControl = useCallback((areaId: string) => {
+    // 전등(제어 가능) 층 선택 → 관제(map) 화면으로 이동해 그 지역의 개별 제어(감시장비 드릴다운)를 연다.
     // 전열은 안전상 제어 대상이 아니므로 이 경로로 오지 않는다.
     if (dirtyCount > 0) setPendingPositions({});
     setLayoutError(null);
     setMode("execute");
-    setSelectedFloorId(floor.id);
+    setSelectedAreaId(areaId);
     setSelectedDeviceId(null);
     setFocusEquipmentId(null);
     setView("map");
@@ -204,22 +204,19 @@ export function App(): JSX.Element {
       });
   }, [handleLogout]);
 
-  /** 스케줄러 등에서 DEVICE 대상을 클릭 → 그 기기가 속한 층으로 전환하고 Floor Map에서 선택한다.
-   * 기기의 areaTopicPrefix(enterprise/site/building/floor/area)가 floor.topicPrefix로 시작하는지로
-   * 소속 층을 역산한다(백엔드에 별도 조회 없이 프런트에서 바로 해석 가능). */
+  /** 스케줄러 등에서 DEVICE 대상을 클릭 → 그 기기가 속한 지역으로 전환하고 Floor Map에서 선택한다.
+   * 기기의 areaTopicPrefix는 곧 그 지역(area) 자신의 topicPrefix이므로 정확히 일치하는 지역을 찾는다. */
   const handleNavigateToDevice = useCallback(
     (device: DeviceListItem) => {
-      const floor = floors.find(
-        (f) => device.areaTopicPrefix?.startsWith(`${f.topicPrefix}/`),
-      );
+      const area = areas.find((a) => a.topicPrefix === device.areaTopicPrefix);
       if (dirtyCount > 0) setPendingPositions({});
       setLayoutError(null);
       setMode("execute");
-      if (floor) setSelectedFloorId(floor.id);
+      if (area) setSelectedAreaId(area.id);
       setView("map");
       handleSelectDevice(device);
     },
-    [floors, dirtyCount, handleSelectDevice],
+    [areas, dirtyCount, handleSelectDevice],
   );
 
   /** 스케줄러 등에서 GROUP 대상을 클릭 → 그룹별 제어 화면으로 이동해 해당 그룹을 펼친다. */
@@ -229,7 +226,7 @@ export function App(): JSX.Element {
   }, []);
 
   const handleSendCommand = useCallback(
-    (command: "turn_on" | "turn_off") => {
+    (command: "turn_on" | "turn_off" | "query_state") => {
       if (!selectedDevice) return;
       createCommand(command, selectedDevice.id)
         .then((result) => {
@@ -289,7 +286,7 @@ export function App(): JSX.Element {
   }, []);
 
   const handleSaveLayout = useCallback(() => {
-    if (!selectedFloorId || dirtyCount === 0) return;
+    if (!selectedAreaId || dirtyCount === 0) return;
     setSavingLayout(true);
     setLayoutError(null);
     const positions = Object.entries(pendingPositions).map(([deviceId, p]) => ({
@@ -297,7 +294,7 @@ export function App(): JSX.Element {
       posX: p.x,
       posY: p.y,
     }));
-    saveFloorLayout(selectedFloorId, positions)
+    saveAreaLayout(selectedAreaId, positions)
       .then(() => {
         setOverview((prev) => {
           if (!prev) return prev;
@@ -318,7 +315,7 @@ export function App(): JSX.Element {
         setLayoutError(err instanceof ApiError ? err.detail : "배치 저장에 실패했습니다.");
       })
       .finally(() => setSavingLayout(false));
-  }, [selectedFloorId, dirtyCount, pendingPositions, handleLogout]);
+  }, [selectedAreaId, dirtyCount, pendingPositions, handleLogout]);
 
   const handleCancelLayout = useCallback(() => {
     setPendingPositions({});
@@ -400,30 +397,30 @@ export function App(): JSX.Element {
       <header className="app-shell__top">
         <h1>SmartHome 관제</h1>
         <label>
-          층{" "}
+          지역{" "}
           <select
-            value={selectedFloorId ?? ""}
+            value={selectedAreaId ?? ""}
             onChange={(e) => {
-              const nextFloorId = e.target.value;
+              const nextAreaId = e.target.value;
               if (dirtyCount > 0) {
-                confirm(`저장하지 않은 위치 변경 ${dirtyCount}건이 있습니다. 층을 바꾸면 버려집니다. 계속할까요?`).then(
+                confirm(`저장하지 않은 위치 변경 ${dirtyCount}건이 있습니다. 지역을 바꾸면 버려집니다. 계속할까요?`).then(
                   (discard) => {
                     if (!discard) return;
                     setPendingPositions({});
                     setLayoutError(null);
-                    setSelectedFloorId(nextFloorId);
+                    setSelectedAreaId(nextAreaId);
                     setSelectedDeviceId(null);
                   },
                 );
                 return;
               }
-              setSelectedFloorId(nextFloorId);
+              setSelectedAreaId(nextAreaId);
               setSelectedDeviceId(null);
             }}
           >
-            {floors.map((floor) => (
-              <option key={floor.id} value={floor.id}>
-                {floor.siteName} · {floor.buildingName} · {floor.name}
+            {areas.map((area) => (
+              <option key={area.id} value={area.id}>
+                {area.siteName} · {area.buildingName} · {area.floorName} · {area.name}
               </option>
             ))}
           </select>
@@ -462,10 +459,10 @@ export function App(): JSX.Element {
               시스템 정보
             </button>
             <button type="button" className={view === "floorMaps" ? "active" : ""} onClick={() => setView("floorMaps")}>
-              도면 관리
-            </button>
-            <button type="button" className={view === "areas" ? "active" : ""} onClick={() => setView("areas")}>
               지역 관리
+            </button>
+            <button type="button" className={view === "images" ? "active" : ""} onClick={() => setView("images")}>
+              이미지 관리
             </button>
             <button type="button" className={view === "devices" ? "active" : ""} onClick={() => setView("devices")}>
               기기 관리
@@ -557,9 +554,9 @@ export function App(): JSX.Element {
         <div className="app-shell__body app-shell__body--single">
           <FloorMapAdmin />
         </div>
-      ) : view === "areas" ? (
+      ) : view === "images" ? (
         <div className="app-shell__body app-shell__body--single">
-          <AreaAdmin />
+          <ImageAdmin />
         </div>
       ) : view === "devices" ? (
         <div className="app-shell__body app-shell__body--single">
@@ -585,7 +582,7 @@ export function App(): JSX.Element {
                 alarmedDeviceIds={alarmedDeviceIds}
               />
             ) : (
-              <p>층을 불러오는 중…</p>
+              <p>지역을 불러오는 중…</p>
             )}
           </main>
           <div className="app-shell__side">
