@@ -23,6 +23,7 @@ import type {
   SetDeviceMonitoringRequest,
   SetDeviceSimulatedRequest,
   SiteRecord,
+  SystemSettingRecord,
   TokenPair,
   UpdateDeviceRequest,
 } from "./types";
@@ -429,6 +430,25 @@ export function updateBuildingName(id: string, name: string): Promise<BuildingRe
   return authedJson<BuildingRecord>(`/api/v1/spatial/buildings/${id}`, {
     method: "PATCH",
     body: JSON.stringify({ name }),
+  });
+}
+
+/** 로그인 화면·브라우저 탭 제목용 — 인증 없이 조회(health와 동일 성격의 공개 엔드포인트). */
+export async function getSystemName(): Promise<string> {
+  const response = await rawFetch("/api/v1/system-settings/name", { method: "GET" });
+  if (!response.ok) throw new ApiError(response.status, await parseProblemDetail(response));
+  const body = (await response.json()) as { name: string };
+  return body.name;
+}
+
+export function listSystemSettings(): Promise<SystemSettingRecord[]> {
+  return authedJson<SystemSettingRecord[]>("/api/v1/system-settings");
+}
+
+export function updateSystemSetting(key: string, value: unknown): Promise<SystemSettingRecord> {
+  return authedJson<SystemSettingRecord>(`/api/v1/system-settings/${key}`, {
+    method: "PATCH",
+    body: JSON.stringify({ value }),
   });
 }
 

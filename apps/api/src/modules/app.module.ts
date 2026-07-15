@@ -17,6 +17,7 @@ import { ImagesController } from "../routes/images.controller.js";
 import { EventHistoryController } from "../routes/event-history.controller.js";
 import { GroupsController } from "../routes/groups.controller.js";
 import { RecommendationsController } from "../routes/recommendations.controller.js";
+import { SystemSettingController } from "../routes/system-setting.controller.js";
 import { AuthService } from "../services/auth.service.js";
 import { CommandsService } from "../services/commands.service.js";
 import { DevicesService } from "../services/devices.service.js";
@@ -30,6 +31,7 @@ import { ImagesService } from "../services/images.service.js";
 import { EventHistoryService } from "../services/event-history.service.js";
 import { GroupsService } from "../services/groups.service.js";
 import { RecommendationsService } from "../services/recommendations.service.js";
+import { SystemSettingService } from "../services/system-setting.service.js";
 
 @Module({
   controllers: [
@@ -47,6 +49,7 @@ import { RecommendationsService } from "../services/recommendations.service.js";
     EventHistoryController,
     GroupsController,
     RecommendationsController,
+    SystemSettingController,
   ],
   providers: [
     AuthService,
@@ -62,6 +65,7 @@ import { RecommendationsService } from "../services/recommendations.service.js";
     EventHistoryService,
     GroupsService,
     RecommendationsService,
+    SystemSettingService,
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: DeviceAccessGuard },

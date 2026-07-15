@@ -1,11 +1,13 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
+import { useSystemName } from "../lib/useSystemName";
 
 interface LoginViewProps {
   onLogin: (username: string, password: string) => Promise<void>;
 }
 
 export function LoginView({ onLogin }: LoginViewProps): JSX.Element {
+  const systemName = useSystemName();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +29,7 @@ export function LoginView({ onLogin }: LoginViewProps): JSX.Element {
   return (
     <div className="login-view">
       <form onSubmit={handleSubmit}>
-        <h1>SmartHome 관제</h1>
+        <h1>{systemName}</h1>
         <label>
           아이디
           <input

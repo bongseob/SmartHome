@@ -299,6 +299,13 @@ export interface BuildingRecord {
   name: string;
 }
 
+export interface SystemSettingRecord {
+  key: string;
+  value: unknown;
+  description: string | null;
+  updatedAt: string;
+}
+
 // ─── AI 추천 · HITL 승인 (SRS 3.5) ────────────────────────────────────
 
 export interface RecommendationRecord {

@@ -1,6 +1,17 @@
-import { useEffect, useState, type FormEvent } from "react";
-import { ApiError, apiAssetUrl, createArea, deleteArea, listAreas, listFloors, listImages, updateArea } from "../lib/api";
-import type { AreaSummary, FloorSummary, ImageRecord } from "../lib/types";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  ApiError,
+  apiAssetUrl,
+  createArea,
+  deleteArea,
+  listAreas,
+  listBuildings,
+  listFloors,
+  listImages,
+  listSites,
+  updateArea,
+} from "../lib/api";
+import type { AreaSummary, BuildingRecord, FloorSummary, ImageRecord, SiteRecord } from "../lib/types";
 import { useConfirm } from "./ConfirmDialog";
 
 interface NewAreaFormProps {
@@ -202,14 +213,24 @@ export function FloorMapAdmin(): JSX.Element {
   const [floors, setFloors] = useState<FloorSummary[]>([]);
   const [areas, setAreas] = useState<AreaSummary[]>([]);
   const [images, setImages] = useState<ImageRecord[]>([]);
+  const [sites, setSites] = useState<SiteRecord[]>([]);
+  const [buildings, setBuildings] = useState<BuildingRecord[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
+  // 사이트/빌딩이 여러 개일 때 지역 목록을 좁혀보기 위한 필터 — 지역 자체는 여전히 area 단위로
+  // 관리되므로(표에 사이트/빌딩 열을 넣으면 좁은 화면에서 표가 깨짐, 2026-07-15 지적) 표 상단의
+  // 별도 필터로만 노출한다.
+  const [siteFilter, setSiteFilter] = useState("");
+  const [buildingFilter, setBuildingFilter] = useState("");
+
   const reload = () => {
-    Promise.all([listFloors(), listAreas(), listImages()])
-      .then(([floorResult, areaResult, imageResult]) => {
+    Promise.all([listFloors(), listAreas(), listImages(), listSites(), listBuildings()])
+      .then(([floorResult, areaResult, imageResult, siteResult, buildingResult]) => {
         setFloors(floorResult);
         setAreas(areaResult);
         setImages(imageResult);
+        setSites(siteResult);
+        setBuildings(buildingResult);
         setLoadError(null);
       })
       .catch((err: unknown) => {
@@ -218,6 +239,18 @@ export function FloorMapAdmin(): JSX.Element {
   };
 
   useEffect(reload, []);
+
+  const buildingOptions = siteFilter
+    ? buildings.filter((b) => b.siteId === siteFilter)
+    : buildings;
+
+  const filteredAreas = useMemo(() => {
+    const siteName = siteFilter ? sites.find((s) => s.id === siteFilter)?.name : null;
+    const buildingName = buildingFilter ? buildings.find((b) => b.id === buildingFilter)?.name : null;
+    return areas.filter(
+      (a) => (!siteName || a.siteName === siteName) && (!buildingName || a.buildingName === buildingName),
+    );
+  }, [areas, sites, buildings, siteFilter, buildingFilter]);
 
   return (
     <div className="floor-map-admin">
@@ -234,6 +267,38 @@ export function FloorMapAdmin(): JSX.Element {
           "이미지 관리" 화면에서 합니다.
         </p>
         <NewAreaForm floors={floors} onCreated={reload} />
+        {sites.length > 1 && (
+          <div className="floor-map-admin__filter">
+            <label>
+              사이트{" "}
+              <select
+                value={siteFilter}
+                onChange={(e) => {
+                  setSiteFilter(e.target.value);
+                  setBuildingFilter("");
+                }}
+              >
+                <option value="">전체</option>
+                {sites.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              빌딩{" "}
+              <select value={buildingFilter} onChange={(e) => setBuildingFilter(e.target.value)}>
+                <option value="">전체</option>
+                {buildingOptions.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
         <table className="floor-map-admin__table">
           <thead>
             <tr>
@@ -244,7 +309,7 @@ export function FloorMapAdmin(): JSX.Element {
             </tr>
           </thead>
           <tbody>
-            {areas.map((a) => (
+            {filteredAreas.map((a) => (
               <AreaRow
                 key={a.id}
                 area={a}
@@ -253,10 +318,10 @@ export function FloorMapAdmin(): JSX.Element {
                 onDeleted={(areaId) => setAreas((prev) => prev.filter((x) => x.id !== areaId))}
               />
             ))}
-            {areas.length === 0 && (
+            {filteredAreas.length === 0 && (
               <tr>
                 <td colSpan={4} className="floor-map-admin__empty">
-                  등록된 지역이 없습니다.
+                  {areas.length === 0 ? "등록된 지역이 없습니다." : "선택한 사이트/빌딩에 해당하는 지역이 없습니다."}
                 </td>
               </tr>
             )}

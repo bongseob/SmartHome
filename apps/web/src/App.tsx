@@ -33,6 +33,7 @@ import { FullMonitoring } from "./components/FullMonitoring";
 import { AlarmBanner } from "./components/AlarmBanner";
 import { ServerStatusOverlay } from "./components/ServerStatusOverlay";
 import { useConfirm } from "./components/ConfirmDialog";
+import { useSystemName } from "./lib/useSystemName";
 
 const MAX_FEED_ENTRIES = 50;
 
@@ -43,6 +44,7 @@ interface PendingCommand {
 
 export function App(): JSX.Element {
   const confirm = useConfirm();
+  const systemName = useSystemName();
   const [user, setUser] = useState<AuthUser | null>(() => getSession()?.user ?? null);
   const [serverStatusOpen, setServerStatusOpen] = useState(true);
   // 미확인(RAISED) 알람 — 현장 상태변화 등. 확인(ack) 전까지 배너/하이라이트로 유지된다.
@@ -395,7 +397,7 @@ export function App(): JSX.Element {
   return (
     <div className="app-shell">
       <header className="app-shell__top">
-        <h1>SmartHome 관제</h1>
+        <h1>{systemName}</h1>
         <label>
           지역{" "}
           <select
