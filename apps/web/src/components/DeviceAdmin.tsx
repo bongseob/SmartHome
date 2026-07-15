@@ -406,88 +406,136 @@ export function DeviceAdmin(): JSX.Element {
           <div className="modal-content">
             <h3>새 기기 추가</h3>
             <div className="device-admin__form">
-              <input
-                placeholder="code (소문자-하이픈, 예: living-light-01)"
-                value={code}
-                onChange={(e) => setCode(e.target.value)}
-              />
-              <input placeholder="이름 (필수)" value={name} onChange={(e) => setName(e.target.value)} />
-              <select value={category} onChange={(e) => setCategory(e.target.value)}>
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={deviceRole}
-                onChange={(e) => {
-                  const next = e.target.value as DeviceRole;
-                  setDeviceRole(next);
-                  setCategory(next === "MONITORING_EQUIPMENT" ? "GATEWAY" : "SENSOR");
-                }}
-              >
-                {DEVICE_ROLES.map((role) => (
-                  <option key={role.value} value={role.value}>
-                    {role.label}
-                  </option>
-                ))}
-              </select>
-              <input placeholder="deviceType" value={deviceType} onChange={(e) => setDeviceType(e.target.value)} />
-              <input placeholder="manufacturer" value={manufacturer} onChange={(e) => setManufacturer(e.target.value)} />
-              <input placeholder="model" value={model} onChange={(e) => setModel(e.target.value)} />
-              <input placeholder="firmwareVersion" value={firmwareVersion} onChange={(e) => setFirmwareVersion(e.target.value)} />
-              <select value={gatewayId} onChange={(e) => setGatewayId(e.target.value)}>
-                <option value="">Gateway (선택)</option>
-                {gateways.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name} ({g.code})
-                  </option>
-                ))}
-              </select>
+              <label>
+                코드 (code)
+                <input
+                  placeholder="소문자-하이픈, 예: living-light-01"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                />
+              </label>
+              <label>
+                이름
+                <input placeholder="필수" value={name} onChange={(e) => setName(e.target.value)} />
+              </label>
+              <label>
+                카테고리
+                <select value={category} onChange={(e) => setCategory(e.target.value)}>
+                  {CATEGORIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                구분
+                <select
+                  value={deviceRole}
+                  onChange={(e) => {
+                    const next = e.target.value as DeviceRole;
+                    setDeviceRole(next);
+                    setCategory(next === "MONITORING_EQUIPMENT" ? "GATEWAY" : "SENSOR");
+                  }}
+                >
+                  {DEVICE_ROLES.map((role) => (
+                    <option key={role.value} value={role.value}>
+                      {role.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                기기 유형 (deviceType)
+                <input value={deviceType} onChange={(e) => setDeviceType(e.target.value)} />
+              </label>
+              <label>
+                제조사 (manufacturer)
+                <input value={manufacturer} onChange={(e) => setManufacturer(e.target.value)} />
+              </label>
+              <label>
+                모델 (model)
+                <input value={model} onChange={(e) => setModel(e.target.value)} />
+              </label>
+              <label>
+                펌웨어 버전 (firmwareVersion)
+                <input value={firmwareVersion} onChange={(e) => setFirmwareVersion(e.target.value)} />
+              </label>
+              <label>
+                Gateway
+                <select value={gatewayId} onChange={(e) => setGatewayId(e.target.value)}>
+                  <option value="">선택</option>
+                  {gateways.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name} ({g.code})
+                    </option>
+                  ))}
+                </select>
+              </label>
               {deviceRole === "SENSOR" && (
                 <>
-                  <select value={parentDeviceId} onChange={(e) => setParentDeviceId(e.target.value)}>
-                    <option value="">상위 감시장비 (선택)</option>
-                    {monitoringEquipments.map((equipment) => (
-                      <option key={equipment.id} value={equipment.id}>
-                        {equipment.name} ({equipment.code})
-                      </option>
-                    ))}
-                  </select>
-                  <select value={sensorSignalType} onChange={(e) => setSensorSignalType(e.target.value as SensorSignalType)}>
-                    {SENSOR_SIGNAL_TYPES.map((type) => (
-                      <option key={type} value={type}>
-                        {type === "DIGITAL" ? "디지털" : "아날로그"}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={sensorIoType}
-                    onChange={(e) => {
-                      const next = e.target.value as SensorIoType;
-                      setSensorIoType(next);
-                      setSensorSignalType(next.startsWith("D") ? "DIGITAL" : "ANALOG");
-                    }}
-                  >
-                    {SENSOR_IO_TYPES.map((type) => (
-                      <option key={type} value={type}>
-                        {type}
-                      </option>
-                    ))}
-                  </select>
-                  <input placeholder="ADDR (예: 06)" value={channelAddress} onChange={(e) => setChannelAddress(e.target.value)} />
+                  <label>
+                    상위 감시장비
+                    <select value={parentDeviceId} onChange={(e) => setParentDeviceId(e.target.value)}>
+                      <option value="">선택</option>
+                      {monitoringEquipments.map((equipment) => (
+                        <option key={equipment.id} value={equipment.id}>
+                          {equipment.name} ({equipment.code})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    신호 구분
+                    <select value={sensorSignalType} onChange={(e) => setSensorSignalType(e.target.value as SensorSignalType)}>
+                      {SENSOR_SIGNAL_TYPES.map((type) => (
+                        <option key={type} value={type}>
+                          {type === "DIGITAL" ? "디지털" : "아날로그"}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    I/O 타입
+                    <select
+                      value={sensorIoType}
+                      onChange={(e) => {
+                        const next = e.target.value as SensorIoType;
+                        setSensorIoType(next);
+                        setSensorSignalType(next.startsWith("D") ? "DIGITAL" : "ANALOG");
+                      }}
+                    >
+                      {SENSOR_IO_TYPES.map((type) => (
+                        <option key={type} value={type}>
+                          {type}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    ADDR
+                    <input placeholder="예: 06" value={channelAddress} onChange={(e) => setChannelAddress(e.target.value)} />
+                  </label>
                 </>
               )}
-              <input placeholder="분전함/단자함 (예: A-20-1)" value={terminalBlock} onChange={(e) => setTerminalBlock(e.target.value)} />
+              <label>
+                분전함/단자함
+                <input placeholder="예: A-20-1" value={terminalBlock} onChange={(e) => setTerminalBlock(e.target.value)} />
+              </label>
               {category === "DEVICE" && (
-                <select value={loadClass} onChange={(e) => setLoadClass(e.target.value as LoadClass)}>
-                  <option value="NORMAL">일반등 (NORMAL)</option>
-                  <option value="EMERGENCY">비상등 (EMERGENCY)</option>
-                  <option value="RESERVE">예비 (RESERVE)</option>
-                </select>
+                <label>
+                  부하 구분
+                  <select value={loadClass} onChange={(e) => setLoadClass(e.target.value as LoadClass)}>
+                    <option value="NORMAL">일반등 (NORMAL)</option>
+                    <option value="EMERGENCY">비상등 (EMERGENCY)</option>
+                    <option value="RESERVE">예비 (RESERVE)</option>
+                  </select>
+                </label>
               )}
-              <input placeholder="설명 (Description)" value={description} onChange={(e) => setDescription(e.target.value)} />
+              <label>
+                설명 (Description)
+                <input value={description} onChange={(e) => setDescription(e.target.value)} />
+              </label>
             </div>
             {createError && <p className="error-text">{createError}</p>}
             <div className="modal-actions">
