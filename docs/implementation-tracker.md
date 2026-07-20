@@ -1,9 +1,10 @@
 # 구현 추적 문서 — SmartHome IoT 관제 시스템
 
 - 기준 문서: [iot_smarthome_srs.md](../iot_smarthome_srs.md), [PROJECT_RULES.md](../PROJECT_RULES.md)
-- 작성일: 2026-07-09 (최근 갱신: 2026-07-14 — M12/M13 실기기·MQTT 인증 진행 + M13 TLS 설정 준비 +
-  `device.simulated`(가상/실기기 구분) + M11 AI/HITL 안전 인프라 + M14 CI 파이프라인 + M14 Testcontainers
-  통합 테스트 반영)
+- 작성일: 2026-07-09 (최근 갱신: 2026-07-20 — M17 카메라/PTZ 전 단계(Phase 0~6) + 알람 "기기로 이동"·
+  상시 카메라 열람 화면 + 외부 코드 리뷰 조치(ESLint 게이트 복구, MediaMTX publish 인증 추가) 반영.
+  이전 갱신 2026-07-14: M12/M13 실기기·MQTT 인증 진행 + M13 TLS 설정 준비 + `device.simulated`
+  (가상/실기기 구분) + M11 AI/HITL 안전 인프라 + M14 CI 파이프라인 + M14 Testcontainers 통합 테스트)
 - 상태 기준: 현재 체크아웃의 코드, 문서, `pnpm build/typecheck/test` 검증 결과
 - 목적: 완료/진행/미완료 범위를 한 곳에서 추적하고, 다음 작업자가 바로 이어서 구현할 수 있게 한다.
 
@@ -47,7 +48,7 @@
 |---|---:|---|
 | `pnpm build` | 통과 | 14개 패키지 build 성공 |
 | `pnpm typecheck` | 통과 | 21개 task 성공 |
-| `pnpm test` | 통과 | 112개 (contracts 50, db 32, auth 7, command-flow 3, notify 4, scheduler 16) |
+| `pnpm test` | 통과 | 179개 (contracts 61, db 57, auth 11, command-flow 3, notify 4, scheduler 20, gateway 11, media-gateway 12) — testcontainers 통합 6케이스는 별도(§M14, `integration.yml` CI) |
 | E2E 인제스트 | 통과 | simulator→gateway→telemetry 적재, state 반영, offline alarm (2026-07-09) |
 | **E2E 명령 전체 경로** | **통과** | login→`POST /commands`→MQTT→simulator ack→**SUCCEEDED**, 멱등성(published:false), **NO_ACK 결함→TIMED_OUT**. 두 경로 모두 audit 4행 체인(CREATED→PENDING→IN_PROGRESS→종결) DB 검증 (2026-07-09) |
 | **E2E 실시간 브리지(M7)** | **통과** | JWT 인증 WS 클라이언트 연결→`POST /commands`(turn_off)→`device.state`(OFF)·`command.status`(SUCCEEDED) 실시간 수신 확인 (2026-07-09) |
@@ -656,7 +657,9 @@ state를 발행하면 경쟁 상태 발생). ESP32처럼 실기기가 하나씩 
 
 ### M14. 테스트/검증 체계
 
-상태: 진행 중 (CI 파이프라인 완료 2026-07-14 — 나머지는 미착수)
+상태: 진행 중 (CI 파이프라인 완료 2026-07-14, **Testcontainers 통합 테스트도 이후 완료** — 아래
+"testcontainers 미도입"은 2026-07-14 착수 시점 스냅샷이다. 실제 완료 내역은 본 절 뒤쪽
+"완료된 M14 Testcontainers 통합 테스트 작업 단위" 참고. Playwright E2E만 여전히 미착수)
 
 2026-07-14 착수 전 조사에서 확인한 실제 상태(그동안 "미완료"로만 표시돼 있었지만 세부는 불명확했음):
 - **유닛 테스트는 이미 상당히 있었다** — 22개 파일 약 124케이스(`packages/contracts` 7파일,
@@ -1097,6 +1100,27 @@ M17 카메라/PTZ 현장확인 기능은 이것으로 **설계된 전체 경로(
 URL→알람 자동 연동→라이브 뷰, +알람에서 기기로 바로 이동·카메라 상시 열람) 완료 및
 실브라우저·실카메라로 최종 검증됨**. FloorMap 카메라 레이어(방향/화각 마커 표시)는
 장식적 요소라 이번 범위에서 제외했다(선택적 후속 과제).
+
+완료된 작업 단위 — 외부 코드 리뷰 조치(2026-07-20):
+1. **ESLint 게이트 복구** — `LiveCameraView.tsx`에 등록 안 된 `jsx-a11y/media-has-caption`
+   disable 주석(이 저장소는 `jsx-a11y` 플러그인 자체를 안 씀)이 남아 lint가 깨져 있던 것을
+   제거. 동시에 `useEffect` 의존성이 `camera` 객체 전체가 아니라 `cameraId`/`cameraIsPtz`
+   원시값만 보도록 리팩터링해 `react-hooks/exhaustive-deps`를 억제가 아니라 실제로 만족
+2. **MediaMTX publish 인증 추가(P1)** — Phase 4 시점엔 `authHTTPExclude`에 `publish`를 넣어
+   RTSP publish를 웹훅 자체에서 건너뛰게 했었다(위 Phase 4 절 참고). 이러면 누구든 자격증명
+   없이 `rtsp://mediamtx:8554/<임의 path>`로 publish해 카메라 스트림을 주입/덮어쓸 수 있다는
+   지적을 받아, `MEDIAMTX_PUBLISH_USERNAME`/`PASSWORD`(공유 발행 자격증명, Mosquitto의
+   `svc-backend` 공용 계정과 같은 성격) 검사를 `decideAuth`에 추가하고 `authHTTPExclude`에서
+   `publish`를 뺐다. `mock-camera`의 RTSP publish URL과 `.env`/`.env.example`도 함께 갱신.
+   **한계**: 공유 비밀이라 "이 자격증명을 아는 다른 publisher가 같은 path를 덮어쓰는 것"까지는
+   못 막는다 — 카메라별 자격증명 + path 바인딩은 후속 과제
+3. `apps/media-gateway/src/auth-webhook.test.ts`에 publish 케이스 4개 추가(총 12케이스),
+   `pnpm lint`/`pnpm --filter @smarthome/media-gateway run typecheck build test` 전부 통과
+4. 문서 정합성 복구 — 본 문서 상단 "최근 갱신" 날짜, §2 테스트 수 기준선, §M14 상태 라인의
+   testcontainers 완료 여부 스냅샷 혼선을 갱신
+5. **적용 대기 중**: 위 2번은 코드/설정 변경까지만 완료했고, 실제 `mediamtx` 컨테이너 재기동은
+   아직 안 했다 — 재기동하면 그 순간 자격증명 없이 publish 중이던 기존 세션(사용자가 직접 띄운
+   USB 웹캠 ffmpeg 등)이 끊긴다. 사용자 확인 후 재기동할 것
 
 ---
 

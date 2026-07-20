@@ -70,6 +70,10 @@ services:
   # 실카메라 없이 로컬에서 RTSP→WebRTC/HLS 파이프라인을 검증하기 위한 목 카메라
   # (device-simulator와 동일한 철학 — 테스트 패턴 영상을 rtsp://mediamtx:8554/cam-01로 루프 송출).
   # mediamtx가 아직 안 떴을 때는 실패 후 restart 정책으로 재시도한다.
+  # RTSP URL의 media-publisher:xxx는 루트 .env의 MEDIAMTX_PUBLISH_USERNAME/PASSWORD와
+  # 반드시 같은 값이어야 한다(media-gateway의 publish 인증 웹훅을 통과하기 위함, M17 사후 조치).
+  # docker-compose는 이 값을 .env에서 자동으로 읽지 않으므로(project-directory가 infra/라
+  # 루트 .env를 못 찾음) 개발용 고정값을 그대로 박아둔다 — 값을 바꾸면 여기도 같이 바꿀 것.
   mock-camera:
     image: mwader/static-ffmpeg:6.0
     container_name: smarthome-mock-camera
@@ -98,7 +102,7 @@ services:
       - aac
       - -f
       - rtsp
-      - rtsp://mediamtx:8554/cam-01
+      - rtsp://media-publisher:iRvY4bj3dDLzzjr40yme9thY@mediamtx:8554/cam-01
 
 volumes:
   mosquitto-data:

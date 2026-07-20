@@ -90,15 +90,21 @@ export function LiveCameraView({ cameras, initialCameraId, onClose }: LiveCamera
   const [ptzStatus, setPtzStatus] = useState<string | null>(null);
 
   const camera = cameras.find((c) => c.deviceId === selectedId) ?? null;
+  // effect는 "어떤 카메라를 보는가"(deviceId)에만 반응해야 한다 — cameras 배열이 매 fetch마다
+  // 새 객체 참조로 갱신돼도(같은 카메라라면) 재연결(화면 깜빡임)이 일어나면 안 되므로, camera
+  // 객체 자체가 아니라 원시값(id/isPtz)만 뽑아 effect 안에서 참조한다(exhaustive-deps를
+  // 억제가 아니라 실제로 만족시키는 구조).
+  const cameraId = camera?.deviceId ?? null;
+  const cameraIsPtz = camera?.isPtz ?? false;
 
   useEffect(() => {
-    if (!camera) return;
+    if (!cameraId) return;
     let cleanup: (() => void) | null = null;
     let cancelled = false;
     setError(null);
     setConnecting(true);
 
-    getCameraStream(camera.deviceId)
+    getCameraStream(cameraId)
       .then(({ webrtcUrl, token }) => {
         if (cancelled || !videoRef.current) return;
         return connectWhep(webrtcUrl, token, videoRef.current).then((stop) => {
@@ -118,17 +124,17 @@ export function LiveCameraView({ cameras, initialCameraId, onClose }: LiveCamera
       cancelled = true;
       cleanup?.();
     };
-  }, [camera?.deviceId]);
+  }, [cameraId]);
 
   useEffect(() => {
-    if (!camera?.isPtz) {
+    if (!cameraId || !cameraIsPtz) {
       setPresets([]);
       return;
     }
-    listCameraPresets(camera.deviceId)
+    listCameraPresets(cameraId)
       .then(setPresets)
       .catch(() => setPresets([]));
-  }, [camera?.deviceId, camera?.isPtz]);
+  }, [cameraId, cameraIsPtz]);
 
   const handlePtzMove = () => {
     if (!camera) return;
@@ -181,7 +187,6 @@ export function LiveCameraView({ cameras, initialCameraId, onClose }: LiveCamera
           <>
             {connecting && <p className="floor-map-admin__note">스트림 연결 중…</p>}
             {error && <p className="error-text">{error}</p>}
-            {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
             <video ref={videoRef} autoPlay playsInline muted style={{ width: "100%", background: "#000" }} />
 
             {camera.isPtz && (

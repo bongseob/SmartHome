@@ -2,10 +2,12 @@
 #   authMethod: internal → http, authHTTPAddress → apps/media-gateway의 /auth 웹훅.
 # 이유: 뷰어가 GET /api/v1/cameras/:id/stream(api)에서 받은 단기 서명 토큰 없이는
 # HLS/WebRTC read를 못 하게 하려고(architecture.md §5-cam "서명된 단기 스트림 URL").
-# publish(카메라/mock-camera → mediamtx)는 내부망 RTSP 수신이라 media-gateway가 무조건 허용한다
-# (apps/media-gateway/src/index.ts의 handleAuth 참고). host.docker.internal은 컨테이너에서
-# 호스트로 나가는 통로 — media-gateway는 다른 앱(api/gateway/web)과 동일하게 도커 밖 호스트에서
-# pnpm start로 뜬다(run-local 스킬 참고).
+# publish(카메라/mock-camera → mediamtx)도 웹훅을 그대로 탄다 — media-gateway가
+# MEDIAMTX_PUBLISH_USERNAME/PASSWORD(공유 발행 자격증명, Mosquitto svc-backend와 같은 성격)를
+# 검사한다(apps/media-gateway/src/index.ts, auth-webhook.ts의 decideAuth 참고). 코드 리뷰에서
+# 지적된 "누구나 RTSP publish로 스트림을 주입/덮어쓸 수 있다"는 문제를 막기 위함(M17 사후 조치).
+# host.docker.internal은 컨테이너에서 호스트로 나가는 통로 — media-gateway는 다른 앱
+# (api/gateway/web)과 동일하게 도커 밖 호스트에서 pnpm start로 뜬다(run-local 스킬 참고).
 ###############################################
 # Global settings
 
@@ -118,12 +120,9 @@ authHTTPExclude:
   - action: api
   - action: metrics
   - action: pprof
-  # publish(카메라/mock-camera → mediamtx RTSP 수신)는 신뢰된 내부망 트래픽이라 웹훅 자체를
-  # 건너뛴다. 이게 없으면 RTSP는 첫 ANNOUNCE에 무조건 401 챌린지부터 던지는데, 카메라 RTSP
-  # URL에 사용자정보(user:pass@)가 없어 ffmpeg/실카메라가 재시도할 자격이 없어 그냥 실패한다
-  # (M17 Phase 4 실측 — mock-camera로 재현·확인). media-gateway/auth-webhook.ts의 decideAuth도
-  # action!=="read"면 어차피 무조건 허용하므로, 이 줄은 그 경로 자체를 안 타게 하는 상위 방어선이다.
-  - action: publish
+  # publish는 더 이상 예외가 아니다 — RTSP URL에 rtsp://user:pass@host:8554/path 형태로
+  # MEDIAMTX_PUBLISH_USERNAME/PASSWORD를 실어 보내야 media-gateway의 decideAuth를 통과한다
+  # (docker-compose.dev.yml의 mock-camera, 실카메라/ffmpeg 설정 모두 갱신 필요).
 
 # JWT-based authentication.
 # Users have to log in through an external identity server and obtain a JWT.

@@ -12,6 +12,12 @@ function readBody(req: IncomingMessage): Promise<string> {
   });
 }
 
+function getPublishCredentials(): { username: string; password: string } | undefined {
+  const username = process.env.MEDIAMTX_PUBLISH_USERNAME;
+  const password = process.env.MEDIAMTX_PUBLISH_PASSWORD;
+  return username && password ? { username, password } : undefined;
+}
+
 async function handleAuth(req: IncomingMessage, res: ServerResponse): Promise<void> {
   let payload: MediaMtxAuthRequest;
   try {
@@ -20,7 +26,9 @@ async function handleAuth(req: IncomingMessage, res: ServerResponse): Promise<vo
     res.writeHead(400).end();
     return;
   }
-  res.writeHead(decideAuth(payload, process.env.AUTH_JWT_SECRET)).end();
+  res
+    .writeHead(decideAuth(payload, process.env.AUTH_JWT_SECRET, undefined, getPublishCredentials()))
+    .end();
 }
 
 export function main(): void {
