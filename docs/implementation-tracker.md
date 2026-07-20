@@ -34,6 +34,7 @@
 | 운영 보안 | 진행 중 | Mosquitto auth/ACL(보드별 계정 발급 + ACL, `allow_anonymous` 폐지) 완료(2026-07-13). TLS(mqtts/wss) **설정 준비** 완료(2026-07-14, `docs/tls-deployment.md`) — 실제 프로덕션 배포 검증은 미완료. 서비스간은 mTLS 대신 기존 공용 계정(`svc-backend`)을 API Key로 간주하기로 결정 |
 | Device 연결 프로토콜 | 완료(백엔드) | Device↔Gateway 구간 연결 방식(TCP_IP/SERIAL/MODBUS_TCP/MODBUS_RTU/ZIGBEE/ZWAVE) + 연결 파라미터를 `PATCH /devices/:id/connection`(ADMIN, audit)으로 설정. Gateway↔플랫폼(MQTT)은 무관·불변. 관리 UI는 M16으로 이동 |
 | Admin 관리 화면 (M16) | 완료 | 스케줄/예약, 시스템 기본정보, 도면, 지역(Area), 기기 등록/수정/연결 설정/소프트 폐기까지 실인프라·Playwright E2E 검증 완료 |
+| 카메라/PTZ (M17) | 진행 중 (Phase 0~3) | 인프라, camera-repository, 카메라 관리 API/Admin 화면, PTZ 제어 경로(gateway ONVIF 어댑터 — `onvif` 라이브러리로 실제 SOAP 연결 시도까지 실인프라 확인)까지 완료. media-gateway 스트림 서명 URL, 알람 자동 연동, 라이브 뷰 UI는 미착수. 실카메라 하드웨어 미보유로 SOAP 프로토콜 자체는 미검증 |
 | 통합/E2E/성능 테스트 | 진행 중 | CI 파이프라인(lint+typecheck+기존 유닛테스트 124케이스 자동 실행) 완료(2026-07-14, ESLint 최초 도입 포함). **통합(Testcontainers) 완료(2026-07-14)** — `packages/test-support` + `apps/gateway`/`apps/api` 통합 테스트 6케이스 + `integration.yml` CI 편입. E2E(Playwright)·성능은 미착수 |
 
 ---
@@ -875,6 +876,116 @@ enterprise/site/building/area/floor_map/device는 전부 `packages/db/src/seed.t
   도면에서 보이지 않게 됨). Area 관리(M16 다음 단계)에서 Polygon도 함께 재조정하는 것을 권장
 - **재업로드 시 이전 floor_map row/파일이 고아로 남음** — 삭제하지 않고 새 row를 추가 + floor 연결만
   교체한다(디스크 정리는 후속 필요, 다른 마일스톤의 "알려진 단순화"와 동일한 패턴)
+
+---
+
+### M17. 카메라/PTZ (현장 확인)
+
+상태: **진행 중 — Phase 0(인프라)·Phase 1(contracts/DB)·Phase 2(카메라 관리 API+Admin 화면)·
+Phase 3(PTZ 제어 경로) 완료** (2026-07-20 신설 — 사용자 요청: 알람 등 현장 상황 발생 시 카메라로
+추가 확인하는 기능의 실제 구현)
+
+배경: 설계 자체는 이전부터 `architecture.md` §5-cam, `api-spec.md` §4-cam,
+`sequence-diagrams.md` §8-cam, `ui-ux-design.md` §4.5-cam에 있었고 DB 스키마(`camera`/
+`camera_preset`/`camera_coverage`, `alarm_policy.linked_camera_id`/`auto_goto_preset_id`)와
+`apps/media-gateway` 스캐폴딩도 있었지만, MVP 범위에서 의도적으로 제외돼(§4 "MVP 범위 밖으로
+제외한 것") 실제 동작하는 코드가 하나도 없었다. 전용 마일스톤 번호가 없던 것도 이번에 M17로 신설.
+
+2026-07-20 사용자 결정:
+- RTSP→WebRTC/HLS 중계는 자체 구현하지 않고 **검증된 오픈소스 릴레이(MediaMTX, MIT 라이선스,
+  무료)를 전용 프로세스로 기동** — Mosquitto를 전용 프로세스로 쓰는 것과 같은 철학.
+  `apps/media-gateway`는 그 앞단에서 서명 URL 발급만 담당하는 얇은 레이어로 남는다.
+- 로컬 개발/테스트는 실카메라 없이 **ffmpeg 목 카메라**(device-simulator와 동일한 철학)로 진행.
+
+계획 전체(Phase 0~7)는 대화 세션에 기록된 계획 참고 — 요약:
+0. 인프라(mediamtx+mock-camera) → 1. contracts/DB repository → 2. 카메라 관리 API+Admin 화면 →
+3. PTZ 제어 경로(gateway ONVIF 어댑터) → 4. media-gateway 서명 URL 구현 → 5. 알람 자동 프리셋
+연동 → 6. 프론트 라이브 뷰+"📷현장" 버튼+FloorMap 카메라 레이어 → 7. E2E 검증.
+
+완료된 작업 단위 — Phase 0(2026-07-20):
+1. `infra/docker-compose.dev.yml`에 `mediamtx`(RTSP :8554, HLS :8888, WebRTC :8889/:8189 udp)와
+   `mock-camera`(`mwader/static-ffmpeg` 이미지로 `testsrc` 영상을 `rtsp://mediamtx:8554/cam-01`로
+   루프 송출, `restart: unless-stopped`로 mediamtx 기동 전 실패해도 자동 재시도) 서비스 추가
+2. 실제 기동해 파이프라인 검증: `docker logs mediamtx`에 `[path cam-01] stream is available and
+   online, 2 tracks (H264, MPEG-4 Audio)` 확인, HLS(`GET /cam-01/index.m3u8` → 302),
+   WebRTC WHEP(`GET /cam-01/whep` → 405, POST 전용이라 정상) 엔드포인트 응답 확인
+3. `run-local` 스킬에 카메라 인프라 기동 절차(옵션, M17 작업 시에만) + 검증 커맨드 + 함정
+   (최초 이미지 pull ~100MB) 추가
+
+완료된 작업 단위 — Phase 1(2026-07-20):
+1. `packages/contracts/src/payloads.ts`: `PtzMoveArgs`(`{pan,tilt,zoom}` 중 최소 하나 또는
+   `{stop:true}`) · `PtzGotoPresetArgs`(`{presetId}`) 신설 — 기존 `CommandPayload.args`
+   (`z.record(z.unknown())`)를 그대로 타는 `ota_update`의 `OtaUpdateArgs`와 동일한 패턴, 명령
+   흐름 자체는 재사용(하드코딩·새 토픽 없음). 테스트 3케이스 추가
+2. `packages/db/src/camera-repository.ts` 신설 — `camera`(device 1:1 확장) CRUD
+   (`insertCamera`/`getCameraByDeviceId`/`updateCamera`), `camera_preset` CRUD,
+   `camera_coverage`(N:M) add/remove/list, `listCameras(areaId?, isPtz?)`(device+camera 조인,
+   area 필터는 설치 위치가 아니라 화각 커버리지 기준), `listCamerasCoveringArea` (`GET
+   /alarms/:id/cameras`용). 테스트 5케이스, `packages/db/src/index.ts`에 re-export 추가
+3. `packages/db/src/alarm-repository.ts`: `AlarmPolicyRecord`/`CreateAlarmPolicyInput`에
+   `linkedCameraId`/`autoGotoPresetId` 추가(컬럼은 0006 마이그레이션 때부터 있었지만 repository가
+   한 번도 안 읽고 안 썼음), `updateAlarmPolicyCameraLink()` 신설(다른 부분 수정 함수들과 동일한
+   동적 SET-list 패턴). 테스트 3케이스 추가
+4. 전체 typecheck/build/test(`pnpm turbo run test`, 23/23 task) 통과 확인
+
+완료된 작업 단위 — Phase 2(2026-07-20):
+1. `apps/api/src/services/cameras.service.ts` + `routes/cameras.controller.ts` 신설
+   (`app.module.ts` 등록) — api-spec.md §4-cam 중 CRUD 범위: `GET /cameras(?areaId&isPtz)`,
+   `GET/POST/PATCH /cameras(/:id)`, `GET/POST /cameras/:id/presets`,
+   `PUT/DELETE /cameras/:id/coverage/areas/:areaId`. 카메라는 `category=CAMERA` device의 1:1
+   확장이라 `createDevice()`+`insertCamera()`를 한 transaction으로 묶어 등록(devices.service.ts의
+   `create()`는 여전히 CAMERA를 거부 — "별도 등록"이 바로 이 서비스). `deviceRole`은 GATEWAY와
+   동일하게 `MONITORING_EQUIPMENT`(개별 접점 SENSOR가 아니므로 `chk_sensor_metadata` 제약과
+   무관). 목록 조회는 devices.service.ts의 list()와 동일한 area-스코프 ACL 필터링 재사용
+   (`CameraSummary.areaTopicPrefix` 추가 — spatial-repository의 device 조인과 동일 패턴)
+2. `apps/web/src/components/CameraAdmin.tsx` 신설 — 카메라 등록 폼(code/name/지역/프로토콜/
+   streamUrl/ONVIF엔드포인트/PTZ여부), 목록 테이블, 설정 모달(스트림·PTZ·해상도·화각·설치방향
+   수정 + PTZ 프리셋 추가/목록 + 커버 지역 매핑 추가/해제). `App.tsx`에 "카메라 관리" 뷰 등록
+   (ADMIN 전용, 다른 관리 화면과 동일한 네비게이션 패턴)
+3. `apps/web/src/lib/types.ts`/`api.ts`에 `CameraSummary`/`CreateCameraRequest`/
+   `UpdateCameraRequest`/`CameraPresetRecord` 뷰 타입 + 대응 API 클라이언트 함수 추가
+4. 실인프라 E2E(2026-07-20, curl): 로그인 → 카메라 생성(`CAMERA_CREATE` audit) → 목록/단건 조회
+   → 스트림/화각 수정(`CAMERA_UPDATE` audit) → 프리셋 생성 → 커버리지 추가/해제(`CAMERA_COVERAGE_
+   ADD`/`REMOVE` audit) 전부 확인. 음성 검증: 중복 code 400, `protocol=ONVIF`인데
+   onvifEndpoint 누락 400, 기존 `POST /devices`가 여전히 CAMERA를 거부하는지 확인. 테스트 카메라는
+   `PATCH /devices/:id/decommission`(기존 범용 엔드포인트 재사용 확인)으로 정리, 목록에서 제외됨을
+   확인
+5. `pnpm turbo run typecheck build test` 45/45 task 통과
+
+완료된 작업 단위 — Phase 3(2026-07-20):
+1. `0028_camera_onvif_auth.sql` — `camera.onvif_username`/`onvif_password` 추가(게이트웨이가
+   카메라 쪽에 로그인할 자격 — `device_credential`과 반대 방향이라 재사용 불가, 원문 보관은
+   알려진 단순화로 명시). `camera-repository.ts`의 `CameraRecord`(내부 전용)에만 추가하고
+   `CameraSummary`(API 응답)에는 넣지 않아 비밀번호가 절대 노출되지 않게 분리
+2. `apps/api`: `CamerasService.ptz()`/`gotoPreset()` 신설 — 카메라 PTZ 지원 여부·args 검증만
+   하고 실제 발행은 `CommandsService.create()`(일반 기기 제어와 동일한 command-flow)를 그대로
+   호출·재사용(mqtt-command 스킬 원칙, 재구현 없음). `POST /cameras/:id/ptz`(Role=CONTROL),
+   `POST /cameras/:id/presets/:presetId/goto` 컨트롤러 라우트 추가
+3. `apps/gateway`: `camera-adapter.ts` 신설 — `category=CAMERA`·`protocol=ONVIF`·
+   `device.simulated=false`인 기기의 `ptz_move`/`ptz_goto_preset` cmd를 실제 ONVIF 호출로
+   변환(`onvif` npm 패키지, 콜백 API를 Promise로 래핑). `ptz_goto_preset`은 ONVIF 자체
+   GotoPreset이 아니라 AbsoluteMove로 변환(우리 preset은 pan/tilt/zoom 절대값 저장, ONVIF
+   프리셋 토큰이 아님). `device.simulated=true`(기본값)는 device-simulator의 MockResponder가
+   대신 처리하므로 건드리지 않음(실기기 온보딩과 동일 관례). 게이트웨이가 그동안 구독 안 하던
+   `.../cmd`를 카메라 어댑터용으로 추가 구독(`$share/gw/...cmd`). `onvif.d.ts`로 타입 없는
+   패키지에 최소 앰비언트 선언 추가. `connectOnvif`/`db`를 생성자에 주입 가능하게 해 실카메라
+   없이도 라우팅/변환 로직을 유닛 테스트(11케이스, 가짜 ONVIF 클라이언트+가짜 DB)로 검증
+4. 실인프라 E2E(2026-07-20, curl+실제 gateway 프로세스):
+   - RTSP 카메라(기본 simulated=true) PTZ 이동 → 기존처럼 device-simulator의 MockResponder가
+     자동 ack, command가 SUCCEEDED로 정상 종결됨을 확인(회귀 없음)
+   - ONVIF 카메라 생성 + `PATCH /devices/:id/simulated {simulated:false}`(기존 범용 엔드포인트
+     재사용) → PTZ 이동 시 게이트웨이 로그에 실제 `onvif` 라이브러리가 `127.0.0.1:9999`로 TCP
+     연결을 시도하다 `ECONNREFUSED`로 실패하는 것을 확인(카메라 어댑터가 진짜 호출되고 있다는
+     증거) → FAILED ack(reasonCode=128) → command가 `FAILED`로 정상 종결(TIMED_OUT 아님) 확인
+   - 테스트 카메라 2개는 decommission으로 정리
+5. `pnpm turbo run typecheck build test` 45/45 task 통과 (gateway 테스트 11건 추가로 총 증가)
+
+**알려진 한계**: 실제 ONVIF 카메라 하드웨어가 없어 SOAP 프로토콜 자체(정확한 PTZ 좌표계·인증
+방식 등)는 검증 못 함 — M12의 ESP32 실기기 미검증과 같은 성격의 제약. 코드 경로(연결 시도·
+실패 처리·ack·명령 종결)는 실제로 동작함을 확인했다.
+
+다음 단계(Phase 4): `apps/media-gateway`에 MediaMTX 앞단 서명 URL 발급 구현
+(`GET /cameras/:id/stream`).
 
 ---
 

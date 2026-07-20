@@ -91,3 +91,28 @@ export const OtaUpdateArgs = z.object({
   sig: z.string().min(1),
 });
 export type OtaUpdateArgs = z.infer<typeof OtaUpdateArgs>;
+
+/**
+ * PTZ 카메라 `ptz_move` 명령의 args (architecture.md §5-cam, api-spec.md §4-cam).
+ * 일반 명령 흐름(§4 command-flow)을 그대로 타고 target=카메라 device로 발행된다.
+ * `{pan,tilt,zoom}` 중 최소 하나로 이동하거나, `{stop:true}`로 즉시 정지한다.
+ */
+export const PtzMoveArgs = z.union([
+  z.object({ stop: z.literal(true) }),
+  z
+    .object({
+      pan: z.number().optional(),
+      tilt: z.number().optional(),
+      zoom: z.number().optional(),
+    })
+    .refine((value) => value.pan !== undefined || value.tilt !== undefined || value.zoom !== undefined, {
+      message: "pan/tilt/zoom 중 최소 하나는 필요합니다",
+    }),
+]);
+export type PtzMoveArgs = z.infer<typeof PtzMoveArgs>;
+
+/** PTZ 카메라 `ptz_goto_preset` 명령의 args — 알람의 `auto_goto_preset_id` 자동 이동도 재사용한다. */
+export const PtzGotoPresetArgs = z.object({
+  presetId: z.string().min(1),
+});
+export type PtzGotoPresetArgs = z.infer<typeof PtzGotoPresetArgs>;

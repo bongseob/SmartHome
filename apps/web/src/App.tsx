@@ -26,6 +26,7 @@ import { SystemInfoAdmin } from "./components/SystemInfoAdmin";
 import { FloorMapAdmin } from "./components/FloorMapAdmin";
 import { ImageAdmin } from "./components/ImageAdmin";
 import { DeviceAdmin } from "./components/DeviceAdmin";
+import { CameraAdmin } from "./components/CameraAdmin";
 import { RecommendationsAdmin } from "./components/RecommendationsAdmin";
 import { Dashboard } from "./components/Dashboard";
 import { GroupControl } from "./components/GroupControl";
@@ -61,7 +62,7 @@ export function App(): JSX.Element {
   const feedSeq = useRef(0);
 
   // 최상위 화면 전환(M16 Admin) — ADMIN 전용 스케줄러/시스템정보 화면과 기존 Floor Map 관제 화면을 오간다.
-  const [view, setView] = useState<"dashboard" | "fullMonitoring" | "map" | "groupControl" | "schedulers" | "systemInfo" | "floorMaps" | "images" | "devices" | "recommendations">("dashboard");
+  const [view, setView] = useState<"dashboard" | "fullMonitoring" | "map" | "groupControl" | "schedulers" | "systemInfo" | "floorMaps" | "images" | "devices" | "cameras" | "recommendations">("dashboard");
   // 전체 모니터링에서 감시장비 선택 → 관제 화면에서 그 감시장비의 접점별 개별 제어를 펼치기 위한 포커스.
   const [focusEquipmentId, setFocusEquipmentId] = useState<string | null>(null);
   // 스케줄러 등 다른 화면에서 특정 그룹의 개별제어 패널을 펼쳐달라는 요청.
@@ -469,6 +470,9 @@ export function App(): JSX.Element {
             <button type="button" className={view === "devices" ? "active" : ""} onClick={() => setView("devices")}>
               기기 관리
             </button>
+            <button type="button" className={view === "cameras" ? "active" : ""} onClick={() => setView("cameras")}>
+              카메라 관리
+            </button>
             <button
               type="button"
               className={view === "recommendations" ? "active" : ""}
@@ -563,6 +567,10 @@ export function App(): JSX.Element {
       ) : view === "devices" ? (
         <div className="app-shell__body app-shell__body--single">
           <DeviceAdmin />
+        </div>
+      ) : view === "cameras" ? (
+        <div className="app-shell__body app-shell__body--single">
+          <CameraAdmin />
         </div>
       ) : view === "recommendations" ? (
         <div className="app-shell__body app-shell__body--single">

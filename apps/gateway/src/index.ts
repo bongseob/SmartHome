@@ -42,6 +42,7 @@ import {
   publishRealtimeEvent,
   type RealtimePublisher,
 } from "@smarthome/realtime";
+import { CameraAdapter } from "./camera-adapter.js";
 
 // node-redis(v4)는 소켓이 예기치 않게 끊기면(Redis 재기동 등) 내부적으로 'error'를
 // 재전파하지 못하고 uncaughtException으로 새는 경우가 있다 — client.on("error", ...)를
@@ -515,12 +516,16 @@ async function main(): Promise<void> {
     clientId: "svc:gateway-1",
     will: serviceWill("gateway"),
   });
+  const cameraAdapter = new CameraAdapter(client);
 
   client.on("connect", () => {
     const subs = [
       "$share/gw/enterprise/+/+/+/+/+/telemetry",
       "$share/gw/enterprise/+/+/+/+/+/state",
       "$share/gw/enterprise/+/+/+/+/+/cmd/ack",
+      // ONVIF 카메라 PTZ 어댑터용(§camera-adapter). 다른 기기의 cmd는 device-simulator/실기기가
+      // 직접 구독해 응답하므로, 게이트웨이는 지금까지 cmd 자체를 구독하지 않았다 — 카메라만 예외.
+      "$share/gw/enterprise/+/+/+/+/+/cmd",
     ];
     for (const s of subs) {
       client.subscribe(s, { qos: s.endsWith("telemetry") ? 0 : 1 });
@@ -530,6 +535,7 @@ async function main(): Promise<void> {
   });
   client.on("message", (topic: string, payload: Buffer) => {
     void onMessage(redis, events, topic, payload);
+    void cameraAdapter.handleMessage(topic, payload);
   });
   client.on("error", (err: Error) => console.error(`[gateway] mqtt error: ${err.message}`));
 

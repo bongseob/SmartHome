@@ -4,8 +4,12 @@ import type {
   AreaSummary,
   AuthUser,
   BuildingRecord,
+  CameraPresetRecord,
+  CameraSummary,
   CommandCreateResponse,
   CommandRecord,
+  CreateCameraPresetRequest,
+  CreateCameraRequest,
   CreateDeviceRequest,
   CreateRecommendationRequest,
   CreateSchedulerRequest,
@@ -23,8 +27,10 @@ import type {
   SetDeviceMonitoringRequest,
   SetDeviceSimulatedRequest,
   SiteRecord,
+  PtzMoveRequest,
   SystemSettingRecord,
   TokenPair,
+  UpdateCameraRequest,
   UpdateDeviceRequest,
 } from "./types";
 
@@ -543,5 +549,73 @@ export function decideRecommendation(
   return authedJson<RecommendationRecord>(`/api/v1/recommendations/${id}/decision`, {
     method: "POST",
     body: JSON.stringify(body),
+  });
+}
+
+// ─── 카메라/PTZ (M17, 옵션 — api-spec.md §4-cam) ────────────────────────────
+
+export function listCameras(filter?: { areaId?: string; isPtz?: boolean }): Promise<CameraSummary[]> {
+  const params = new URLSearchParams();
+  if (filter?.areaId) params.set("areaId", filter.areaId);
+  if (filter?.isPtz !== undefined) params.set("isPtz", String(filter.isPtz));
+  const qs = params.toString();
+  return authedJson<CameraSummary[]>(`/api/v1/cameras${qs ? `?${qs}` : ""}`);
+}
+
+export function getCamera(id: string): Promise<CameraSummary> {
+  return authedJson<CameraSummary>(`/api/v1/cameras/${id}`);
+}
+
+export function createCamera(body: CreateCameraRequest): Promise<CameraSummary> {
+  return authedJson<CameraSummary>("/api/v1/cameras", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function updateCamera(id: string, body: UpdateCameraRequest): Promise<CameraSummary> {
+  return authedJson<CameraSummary>(`/api/v1/cameras/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+}
+
+export function listCameraPresets(cameraId: string): Promise<CameraPresetRecord[]> {
+  return authedJson<CameraPresetRecord[]>(`/api/v1/cameras/${cameraId}/presets`);
+}
+
+export function createCameraPreset(
+  cameraId: string,
+  body: CreateCameraPresetRequest,
+): Promise<CameraPresetRecord> {
+  return authedJson<CameraPresetRecord>(`/api/v1/cameras/${cameraId}/presets`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function addCameraCoverage(cameraId: string, areaId: string): Promise<{ mapped: true }> {
+  return authedJson<{ mapped: true }>(`/api/v1/cameras/${cameraId}/coverage/areas/${areaId}`, {
+    method: "PUT",
+  });
+}
+
+export function removeCameraCoverage(cameraId: string, areaId: string): Promise<{ removed: true }> {
+  return authedJson<{ removed: true }>(`/api/v1/cameras/${cameraId}/coverage/areas/${areaId}`, {
+    method: "DELETE",
+  });
+}
+
+/** PTZ 이동 — 일반 명령 흐름을 그대로 태운다(commandId 반환, ack는 비동기). */
+export function ptzMove(cameraId: string, body: PtzMoveRequest): Promise<CommandCreateResponse> {
+  return authedJson<CommandCreateResponse>(`/api/v1/cameras/${cameraId}/ptz`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export function ptzGotoPreset(cameraId: string, presetId: string): Promise<CommandCreateResponse> {
+  return authedJson<CommandCreateResponse>(`/api/v1/cameras/${cameraId}/presets/${presetId}/goto`, {
+    method: "POST",
   });
 }

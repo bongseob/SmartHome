@@ -17,7 +17,8 @@
     "@smarthome/db": "workspace:*",
     "@smarthome/mqtt": "workspace:*",
     "@smarthome/notify": "workspace:*",
-    "@smarthome/realtime": "workspace:*"
+    "@smarthome/realtime": "workspace:*",
+    "onvif": "0.8.1"
   },
   "devDependencies": {
     "@smarthome/test-support": "workspace:*",

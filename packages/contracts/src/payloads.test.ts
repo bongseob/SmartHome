@@ -4,6 +4,8 @@ import {
   CommandPayload,
   LwtPayload,
   OtaUpdateArgs,
+  PtzGotoPresetArgs,
+  PtzMoveArgs,
   TelemetryPayload,
 } from "./payloads.js";
 
@@ -100,5 +102,27 @@ describe("OtaUpdateArgs", () => {
     expect(
       OtaUpdateArgs.safeParse({ version: "1.3.0", url: "not-a-url" }).success,
     ).toBe(false);
+  });
+});
+
+describe("PtzMoveArgs", () => {
+  it("pan/tilt/zoom 중 하나만 있어도 통과", () => {
+    expect(PtzMoveArgs.safeParse({ pan: 10 }).success).toBe(true);
+    expect(PtzMoveArgs.safeParse({ tilt: -5, zoom: 2 }).success).toBe(true);
+  });
+
+  it("stop:true 단독으로도 통과", () => {
+    expect(PtzMoveArgs.safeParse({ stop: true }).success).toBe(true);
+  });
+
+  it("pan/tilt/zoom/stop이 전부 없으면 거부", () => {
+    expect(PtzMoveArgs.safeParse({}).success).toBe(false);
+  });
+});
+
+describe("PtzGotoPresetArgs", () => {
+  it("presetId가 있으면 통과, 없으면 거부", () => {
+    expect(PtzGotoPresetArgs.safeParse({ presetId: "preset-1" }).success).toBe(true);
+    expect(PtzGotoPresetArgs.safeParse({}).success).toBe(false);
   });
 });

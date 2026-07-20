@@ -2,6 +2,7 @@ import type {
   AlarmState,
   AlarmTier,
   AreaKind,
+  CameraProtocol,
   DeviceCategory,
   DeviceLifecycle,
   DeviceRole,
@@ -183,6 +184,72 @@ export interface SetDeviceMonitoringRequest {
 
 export interface SetDeviceSimulatedRequest {
   simulated: boolean;
+}
+
+// ─── 카메라/PTZ (M17, 옵션 — architecture.md §5-cam) ────────────────────────
+
+export interface CameraSummary {
+  deviceId: string;
+  code: string;
+  name: string;
+  currentStatus: DeviceStatus;
+  areaId: string | null;
+  protocol: CameraProtocol;
+  streamUrl: string;
+  onvifEndpoint: string | null;
+  isPtz: boolean;
+  resolution: string | null;
+  fovDeg: number | null;
+  headingDeg: number | null;
+}
+
+export interface CreateCameraRequest {
+  code: string;
+  name: string;
+  areaId: string;
+  protocol: CameraProtocol;
+  streamUrl: string;
+  onvifEndpoint?: string | null;
+  isPtz?: boolean;
+  resolution?: string | null;
+  fovDeg?: number | null;
+  headingDeg?: number | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  /** ONVIF 로그인 자격 — 쓰기 전용, CameraSummary(조회 응답)에는 절대 포함되지 않는다. */
+  onvifUsername?: string | null;
+  onvifPassword?: string | null;
+}
+
+export interface UpdateCameraRequest {
+  streamUrl?: string;
+  onvifEndpoint?: string | null;
+  isPtz?: boolean;
+  resolution?: string | null;
+  fovDeg?: number | null;
+  headingDeg?: number | null;
+  onvifUsername?: string | null;
+  onvifPassword?: string | null;
+}
+
+/** POST /cameras/:id/ptz — {pan,tilt,zoom} 중 최소 하나 또는 {stop:true}. */
+export type PtzMoveRequest = { pan?: number; tilt?: number; zoom?: number } | { stop: true };
+
+export interface CameraPresetRecord {
+  id: string;
+  cameraId: string;
+  name: string;
+  pan: number | null;
+  tilt: number | null;
+  zoom: number | null;
+  createdBy: string | null;
+}
+
+export interface CreateCameraPresetRequest {
+  name: string;
+  pan?: number | null;
+  tilt?: number | null;
+  zoom?: number | null;
 }
 
 /** 관제 화면(FloorMap)용 — 지역 1개의 배경 이미지 + 기기 목록. */

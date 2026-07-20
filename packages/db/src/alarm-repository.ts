@@ -16,6 +16,10 @@ export interface AlarmPolicyRecord {
   durationSec: number | null;
   severity: Severity;
   enabled: boolean;
+  /** 알람 발생 시 자동으로 이 카메라를 현장으로 띄운다(architecture.md §5-cam). 없으면 카메라 연동 없음. */
+  linkedCameraId: string | null;
+  /** linkedCameraId가 있을 때, 자동으로 이동할 PTZ 프리셋(§5-cam). */
+  autoGotoPresetId: string | null;
 }
 
 interface AlarmPolicyRow extends QueryResultRow {
@@ -30,6 +34,8 @@ interface AlarmPolicyRow extends QueryResultRow {
   duration_sec: number | null;
   severity: Severity;
   enabled: boolean;
+  linked_camera_id: string | null;
+  auto_goto_preset_id: string | null;
 }
 
 function toAlarmPolicy(row: AlarmPolicyRow): AlarmPolicyRecord {
@@ -45,6 +51,8 @@ function toAlarmPolicy(row: AlarmPolicyRow): AlarmPolicyRecord {
     durationSec: row.duration_sec,
     severity: row.severity,
     enabled: row.enabled,
+    linkedCameraId: row.linked_camera_id,
+    autoGotoPresetId: row.auto_goto_preset_id,
   };
 }
 
@@ -64,7 +72,8 @@ export function compareThreshold(operator: string, value: number, threshold: num
 
 const ALARM_POLICY_COLUMNS = `
   id::text, name, tier, target_type, target_id::text, metric, operator,
-  threshold_value::text, duration_sec, severity, enabled
+  threshold_value::text, duration_sec, severity, enabled,
+  linked_camera_id::text, auto_goto_preset_id::text
 `;
 
 export interface CreateAlarmPolicyInput {
@@ -78,6 +87,8 @@ export interface CreateAlarmPolicyInput {
   durationSec?: number | null;
   severity: Severity;
   createdBy?: string | null;
+  linkedCameraId?: string | null;
+  autoGotoPresetId?: string | null;
 }
 
 export async function createAlarmPolicy(
@@ -87,9 +98,9 @@ export async function createAlarmPolicy(
   const r = await db.query<AlarmPolicyRow>(
     `INSERT INTO alarm_policy (
        name, tier, target_type, target_id, metric, operator, threshold_value,
-       duration_sec, severity, created_by
+       duration_sec, severity, created_by, linked_camera_id, auto_goto_preset_id
      )
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
      RETURNING ${ALARM_POLICY_COLUMNS}`,
     [
       input.name,
@@ -102,6 +113,8 @@ export async function createAlarmPolicy(
       input.durationSec ?? null,
       input.severity,
       input.createdBy ?? null,
+      input.linkedCameraId ?? null,
+      input.autoGotoPresetId ?? null,
     ],
   );
   const row = r.rows[0];
@@ -156,6 +169,32 @@ export async function setAlarmPolicyEnabled(
   const r = await db.query<AlarmPolicyRow>(
     `UPDATE alarm_policy SET enabled = $2 WHERE id::text = $1 RETURNING ${ALARM_POLICY_COLUMNS}`,
     [id, enabled],
+  );
+  const row = r.rows[0];
+  return row ? toAlarmPolicy(row) : null;
+}
+
+/** 카메라 연동 설정/해제(§5-cam). null을 주면 해당 필드를 해제한다. */
+export async function updateAlarmPolicyCameraLink(
+  db: QueryExecutor,
+  id: string,
+  input: { linkedCameraId?: string | null; autoGotoPresetId?: string | null },
+): Promise<AlarmPolicyRecord | null> {
+  const sets: string[] = [];
+  const params: unknown[] = [id];
+  if (input.linkedCameraId !== undefined) {
+    params.push(input.linkedCameraId);
+    sets.push(`linked_camera_id = $${params.length}`);
+  }
+  if (input.autoGotoPresetId !== undefined) {
+    params.push(input.autoGotoPresetId);
+    sets.push(`auto_goto_preset_id = $${params.length}`);
+  }
+  if (sets.length === 0) return getAlarmPolicyById(db, id);
+
+  const r = await db.query<AlarmPolicyRow>(
+    `UPDATE alarm_policy SET ${sets.join(", ")} WHERE id::text = $1 RETURNING ${ALARM_POLICY_COLUMNS}`,
+    params,
   );
   const row = r.rows[0];
   return row ? toAlarmPolicy(row) : null;

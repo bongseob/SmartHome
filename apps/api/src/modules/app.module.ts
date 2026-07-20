@@ -14,6 +14,7 @@ import { SchedulersController } from "../routes/schedulers.controller.js";
 import { HolidaysController } from "../routes/holidays.controller.js";
 import { TimeProgramsController } from "../routes/time-programs.controller.js";
 import { ImagesController } from "../routes/images.controller.js";
+import { CamerasController } from "../routes/cameras.controller.js";
 import { EventHistoryController } from "../routes/event-history.controller.js";
 import { GroupsController } from "../routes/groups.controller.js";
 import { RecommendationsController } from "../routes/recommendations.controller.js";
@@ -28,6 +29,7 @@ import { SchedulersService } from "../services/schedulers.service.js";
 import { HolidaysService } from "../services/holidays.service.js";
 import { TimeProgramsService } from "../services/time-programs.service.js";
 import { ImagesService } from "../services/images.service.js";
+import { CamerasService } from "../services/cameras.service.js";
 import { EventHistoryService } from "../services/event-history.service.js";
 import { GroupsService } from "../services/groups.service.js";
 import { RecommendationsService } from "../services/recommendations.service.js";
@@ -46,6 +48,7 @@ import { SystemSettingService } from "../services/system-setting.service.js";
     HolidaysController,
     TimeProgramsController,
     ImagesController,
+    CamerasController,
     EventHistoryController,
     GroupsController,
     RecommendationsController,
@@ -62,6 +65,7 @@ import { SystemSettingService } from "../services/system-setting.service.js";
     HolidaysService,
     TimeProgramsService,
     ImagesService,
+    CamerasService,
     EventHistoryService,
     GroupsService,
     RecommendationsService,

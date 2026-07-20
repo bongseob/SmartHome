@@ -17,6 +17,7 @@ export * from "./scheduler-repository.js";
 export * from "./holiday-repository.js";
 export * from "./time-program-repository.js";
 export * from "./image-repository.js";
+export * from "./camera-repository.js";
 export * from "./event-history-repository.js";
 export * from "./system-setting-repository.js";
 export * from "./group-repository.js";

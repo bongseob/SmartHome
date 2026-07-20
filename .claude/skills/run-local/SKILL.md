@@ -16,6 +16,9 @@ description: Launch and drive the SmartHome monorepo locally — bring up infra 
 - 인프라: PostgreSQL(:5432, DB `smarthome`) · Mosquitto(:1883, WS :9001) · Redis(:6379)
 - 앱: `@smarthome/api` NestJS(:3000, WS `/ws/realtime`) · `@smarthome/gateway`(MQTT 공유구독) · `@smarthome/web` Vite/React+Konva(:5173)
 - 접속정보는 루트 `.env` (`DATABASE_URL` / `MQTT_URL` / `REDIS_URL`)에서 읽음. 앱은 모두 `dotenv -e ../../.env`로 로드.
+- 카메라/PTZ(M17, 옵션, architecture.md §5-cam): MediaMTX(:8554 RTSP, :8888 HLS, :8889 WebRTC) +
+  실카메라 없이 검증하기 위한 mock-camera(ffmpeg 테스트패턴을 `rtsp://mediamtx:8554/cam-01`로 루프
+  송출). `apps/media-gateway`는 아직 스캐폴딩 단계라 기동 대상에 없음(§M17 진행 시 추가).
 
 ## 절차
 
@@ -52,6 +55,15 @@ Postgres 준비 대기:
 for i in $(seq 1 30); do docker exec smarthome-postgres pg_isready -U stock_user -d smarthome && break; sleep 1; done
 ```
 
+카메라/PTZ 작업(M17)을 만질 때만 mediamtx·mock-camera도 같이 올린다(그 외엔 불필요 — 매번
+기동할 필요 없음):
+```bash
+docker compose -f infra/docker-compose.dev.yml up -d mediamtx mock-camera
+```
+mock-camera는 mediamtx가 아직 안 떴으면 실패하고 `restart: unless-stopped` 정책으로 재시도한다 —
+`docker logs smarthome-mock-camera`에 ffmpeg 인코딩 로그가 보이고 `docker logs mediamtx`에
+`[path cam-01] stream is available and online`이 찍히면 정상.
+
 ### 2) 빌드 (contracts 먼저 → 나머지, turbo가 순서 보장)
 ```bash
 pnpm build
@@ -80,6 +92,9 @@ pnpm --filter @smarthome/web dev          # Vite :5173
    렌더링되는지 **스크린샷으로 확인**. 빈 화면이면 기동 실패다.
    - 도면 배경의 `800×600` 플레이스홀더는 정상(실제 도면 이미지 미업로드 시 표시).
    - `favicon.ico` 404 콘솔 에러는 무해.
+4. (M17 작업 시) 카메라 파이프라인: `curl -s -o /dev/null -w '%{http_code}' http://localhost:8888/cam-01/index.m3u8`
+   → `302`면 HLS 재생 가능. `curl -s -o /dev/null -w '%{http_code}' http://localhost:8889/cam-01/whep`
+   → `405`(GET 응답, WHEP는 POST 전용이라 정상)면 WebRTC 엔드포인트도 살아있는 것.
 
 ## 정리(종료)
 ```bash
@@ -94,3 +109,5 @@ docker rm -f smarthome-postgres            # 이 스킬이 띄운 경우만
 - `.env`에 `MQTT_USERNAME`/`MQTT_PASSWORD`가 없으면 모든 백엔드 프로세스가 mosquitto에
   `not authorised`로 거부된다 — `provision:mqtt-auth`를 먼저 돌렸는지 확인할 것.
 - 스크린샷·`.playwright-mcp` 등 QA 아티팩트가 리포지토리 루트에 생기면 커밋 전에 지울 것.
+- `mediamtx`/`mock-camera` 이미지는 최초 pull 시 합쳐서 ~100MB라 시간이 좀 걸린다 — 카메라 작업이
+  아니면 애초에 안 올리는 게 낫다(위 "카메라/PTZ 작업(M17)을 만질 때만" 참고).
