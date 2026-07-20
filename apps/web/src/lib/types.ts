@@ -108,6 +108,9 @@ export interface DeviceListItem {
   gatewayId: string | null;
   connectionProtocol: string | null;
   connectionConfig: unknown;
+  /** 사용자 지정 이미지(image 라이브러리 참조) — area의 imageId/imageUrl과 동일 패턴. */
+  imageId: string | null;
+  imageUrl: string | null;
   updatedAt: string;
 }
 
@@ -164,6 +167,7 @@ export interface UpdateDeviceRequest {
   terminalBlock?: string | null;
   loadClass?: LoadClass | null;
   description?: string | null;
+  imageId?: string | null;
 }
 
 export interface SetDeviceConnectionRequest {

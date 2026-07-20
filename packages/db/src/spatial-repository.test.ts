@@ -48,6 +48,8 @@ class FakeSpatialDb implements QueryExecutor {
             area_topic_prefix: "enterprise/site1/bldg-a/2f/living-room",
             pos_x: "350",
             pos_y: "250",
+            image_id: null,
+            image_url: null,
             updated_at: new Date("2026-07-09T00:00:00.000Z"),
           } as unknown as T,
         ],

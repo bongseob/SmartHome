@@ -444,6 +444,7 @@ export async function getAreaOverview(db: QueryExecutor, areaId: string): Promis
      LEFT JOIN floor f     ON f.id = a.floor_id
      LEFT JOIN building b  ON b.id = f.building_id
      LEFT JOIN site s      ON s.id = b.site_id
+     LEFT JOIN image dimg  ON dimg.id = d.image_id
      WHERE d.area_id::text = $1
        AND d.monitoring_visible = true
        AND d.enabled = true
@@ -485,6 +486,9 @@ export interface DeviceListItem {
   posY: string | null;
   connectionProtocol: DeviceConnectionProtocol | null;
   connectionConfig: unknown;
+  /** 사용자 지정 이미지(image 라이브러리 참조) — area.imageId/imageUrl과 동일 패턴. */
+  imageId: string | null;
+  imageUrl: string | null;
   updatedAt: Date;
 }
 
@@ -516,6 +520,8 @@ interface DeviceListRow extends QueryResultRow {
   pos_y: string | null;
   connection_protocol: DeviceConnectionProtocol | null;
   connection_config: unknown;
+  image_id: string | null;
+  image_url: string | null;
   updated_at: Date;
 }
 
@@ -548,6 +554,8 @@ function toDeviceListItem(row: DeviceListRow): DeviceListItem {
     posY: row.pos_y,
     connectionProtocol: row.connection_protocol,
     connectionConfig: row.connection_config,
+    imageId: row.image_id,
+    imageUrl: row.image_url,
     updatedAt: row.updated_at,
   };
 }
@@ -558,6 +566,7 @@ const DEVICE_SELECT_COLUMNS = `
   d.monitoring_visible, d.enabled, d.simulated, d.parent_device_id::text, d.sensor_signal_type, d.sensor_io_type,
   d.channel_address, d.terminal_block, d.load_class, d.area_id::text, d.pos_x::text, d.pos_y::text,
   d.connection_protocol, d.connection_config,
+  d.image_id::text, dimg.image_url,
   d.updated_at,
   CASE
     WHEN a.id IS NOT NULL THEN
@@ -610,6 +619,7 @@ export async function listDevices(
      LEFT JOIN floor f     ON f.id = a.floor_id
      LEFT JOIN building b  ON b.id = f.building_id
      LEFT JOIN site s      ON s.id = b.site_id
+     LEFT JOIN image dimg  ON dimg.id = d.image_id
      ${where}
      ORDER BY d.name`,
     params,

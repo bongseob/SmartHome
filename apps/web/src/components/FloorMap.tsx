@@ -88,9 +88,202 @@ function fitMapToViewport(
 }
 
 /** 접점(자식 센서)을 접점주소 기준으로 안정 정렬한다. */
+function setCursor(event: Konva.KonvaEventObject<MouseEvent>, cursor: string): void {
+  const container = event.target.getStage()?.container();
+  if (container) container.style.cursor = cursor;
+}
+
 function sortContacts(sensors: DeviceListItem[]): DeviceListItem[] {
   return [...sensors].sort((a, b) =>
     (a.channelAddress ?? a.name).localeCompare(b.channelAddress ?? b.name, undefined, { numeric: true }),
+  );
+}
+
+interface DeviceMarkerProps {
+  device: DeviceListItem;
+  x: number;
+  y: number;
+  isEquipment: boolean;
+  selected: boolean;
+  hovered: boolean;
+  emphasized: boolean;
+  markerColor: string;
+  summaryTotal: number | null;
+  isAlarmed: boolean;
+  editMode: boolean;
+  pos: { x: number; y: number };
+  scale: number;
+  width: number;
+  height: number;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+  onDragMove: (x: number, y: number) => void;
+  onDragEnd: (x: number, y: number) => void;
+  onSelectSensor: () => void;
+  onToggleEquipment: () => void;
+}
+
+/**
+ * 기기 마커 1개 — 사용자 지정 이미지(device.imageUrl)가 있으면 실제 사진을 클리핑해 보여주고,
+ * 상태(ON/OFF/알람 등)는 이미지에 가려 안 보이지 않도록 테두리 링 색 + 우하단 상태 점으로 이중
+ * 표시한다(사진만으로는 상태 변화를 알 수 없다는 요구사항 반영). 이미지가 없으면 기존처럼 단색
+ * 마커 그대로 — 회귀 없음. useHtmlImage는 훅이라 .map() 안에서 직접 호출할 수 없어 별도
+ * 컴포넌트로 분리했다.
+ */
+function DeviceMarker({
+  device,
+  x,
+  y,
+  isEquipment,
+  selected,
+  hovered,
+  emphasized,
+  markerColor,
+  summaryTotal,
+  isAlarmed,
+  editMode,
+  pos,
+  scale,
+  width,
+  height,
+  onMouseEnter,
+  onMouseLeave,
+  onDragMove,
+  onDragEnd,
+  onSelectSensor,
+  onToggleEquipment,
+}: DeviceMarkerProps): JSX.Element {
+  const image = useHtmlImage(apiAssetUrl(device.imageUrl));
+  const half = emphasized ? 14 : 12;
+  const size = half * 2;
+  const radius = selected ? 11 : 9;
+
+  return (
+    <Group
+      x={x}
+      y={y}
+      draggable={editMode}
+      dragBoundFunc={(absolutePos) => {
+        const localX = (absolutePos.x - pos.x) / scale;
+        const localY = (absolutePos.y - pos.y) / scale;
+        const clampedX = Math.min(Math.max(localX, MARKER_EDGE_MARGIN), width - MARKER_EDGE_MARGIN);
+        const clampedY = Math.min(Math.max(localY, MARKER_EDGE_MARGIN), height - MARKER_EDGE_MARGIN);
+        return { x: clampedX * scale + pos.x, y: clampedY * scale + pos.y };
+      }}
+      onMouseEnter={(e) => {
+        setCursor(e, "pointer");
+        onMouseEnter();
+      }}
+      onMouseLeave={(e) => {
+        setCursor(e, "default");
+        onMouseLeave();
+      }}
+      onDragMove={(e) => {
+        e.cancelBubble = true;
+        onDragMove(e.target.x(), e.target.y());
+      }}
+      onDragEnd={(e) => {
+        e.cancelBubble = true;
+        onDragEnd(e.target.x(), e.target.y());
+        e.target.getStage()?.batchDraw();
+      }}
+    >
+      {isAlarmed && (
+        <Circle
+          radius={isEquipment ? 22 : 17}
+          stroke="#e11d48"
+          strokeWidth={3}
+          dash={[4, 3]}
+          shadowColor="#e11d48"
+          shadowBlur={12}
+          listening={false}
+        />
+      )}
+      {/* 가상 기기(device-simulator가 대신 응답 중) — 실기기와 한눈에 구분되도록 보라
+          점선 테두리를 덧그린다. 알람 링(빨강)보다 안쪽이라 동시에 표시돼도 겹치지 않는다. */}
+      {device.simulated && (
+        <Circle radius={isEquipment ? 16 : 13} stroke="#7c3aed" strokeWidth={1.5} dash={[2, 2]} listening={false} />
+      )}
+      {isEquipment ? (
+        <>
+          {image && (
+            <Group
+              listening={false}
+              clipFunc={(ctx) => {
+                const r = 5;
+                ctx.beginPath();
+                ctx.moveTo(-half + r, -half);
+                ctx.arcTo(half, -half, half, half, r);
+                ctx.arcTo(half, half, -half, half, r);
+                ctx.arcTo(-half, half, -half, -half, r);
+                ctx.arcTo(-half, -half, half, -half, r);
+                ctx.closePath();
+              }}
+            >
+              <KonvaImage image={image} x={-half} y={-half} width={size} height={size} />
+            </Group>
+          )}
+          <Rect
+            x={-half}
+            y={-half}
+            width={size}
+            height={size}
+            cornerRadius={5}
+            fill={image ? undefined : markerColor}
+            stroke={selected ? "#111827" : hovered ? "#2563eb" : image ? markerColor : "#ffffff"}
+            strokeWidth={image ? (emphasized ? 3 : 2.5) : emphasized ? 2.5 : 1.5}
+            shadowColor="rgba(15, 23, 42, 0.35)"
+            shadowBlur={emphasized ? 9 : 6}
+            onClick={() => !editMode && onToggleEquipment()}
+            onTap={() => !editMode && onToggleEquipment()}
+          />
+          {image && (
+            <>
+              <Circle radius={5} x={half - 3} y={half - 3} fill={markerColor} stroke="#ffffff" strokeWidth={1.5} listening={false} />
+              <Rect x={-14} y={-8} width={28} height={16} cornerRadius={8} fill="rgba(17, 24, 39, 0.55)" listening={false} />
+            </>
+          )}
+          <Text
+            x={-22}
+            y={-5}
+            width={44}
+            align="center"
+            text={`${summaryTotal ?? 0}`}
+            fontSize={11}
+            fontStyle="bold"
+            fill="#ffffff"
+            listening={false}
+          />
+        </>
+      ) : (
+        <>
+          {image && (
+            <Group
+              listening={false}
+              clipFunc={(ctx) => {
+                ctx.beginPath();
+                ctx.arc(0, 0, radius, 0, Math.PI * 2, false);
+                ctx.closePath();
+              }}
+            >
+              <KonvaImage image={image} x={-radius} y={-radius} width={radius * 2} height={radius * 2} />
+            </Group>
+          )}
+          <Circle
+            radius={radius}
+            fill={image ? undefined : markerColor}
+            stroke={image ? markerColor : selected ? "#2c3e50" : "#ffffff"}
+            strokeWidth={image ? (selected ? 3 : 2.5) : selected ? 2.5 : 1}
+            onClick={onSelectSensor}
+            onTap={onSelectSensor}
+          />
+          {image && (
+            <Circle radius={4} x={radius - 2} y={radius - 2} fill={markerColor} stroke="#ffffff" strokeWidth={1} listening={false} />
+          )}
+        </>
+      )}
+      <Text x={-30} y={12} width={60} align="center" text={device.name} fontSize={11} fill="#2c3e50" listening={false} />
+    </Group>
   );
 }
 
@@ -248,11 +441,6 @@ export function FloorMap({
     ? sensors.find((device) => device.id === hoveredSensorId) ?? null
     : null;
 
-  function setCursor(event: Konva.KonvaEventObject<MouseEvent>, cursor: string): void {
-    const container = event.target.getStage()?.container();
-    if (container) container.style.cursor = cursor;
-  }
-
   function handleWheel(event: Konva.KonvaEventObject<WheelEvent>): void {
     event.evt.preventDefault();
     const stage = stageRef.current;
@@ -379,110 +567,37 @@ export function FloorMap({
                 : alarmedDeviceIds.has(device.id)
               : false;
             return (
-              <Group
+              <DeviceMarker
                 key={device.id}
+                device={device}
                 x={x}
                 y={y}
-                draggable={editMode}
-                dragBoundFunc={(absolutePos) => {
-                  const localX = (absolutePos.x - pos.x) / scale;
-                  const localY = (absolutePos.y - pos.y) / scale;
-                  const clampedX = Math.min(Math.max(localX, MARKER_EDGE_MARGIN), width - MARKER_EDGE_MARGIN);
-                  const clampedY = Math.min(Math.max(localY, MARKER_EDGE_MARGIN), height - MARKER_EDGE_MARGIN);
-                  return { x: clampedX * scale + pos.x, y: clampedY * scale + pos.y };
-                }}
-                onMouseEnter={(e) => {
-                  setCursor(e, "pointer");
-                  if (isEquipment) setHoveredEquipmentId(device.id);
-                  else setHoveredSensorId(device.id);
-                }}
-                onMouseLeave={(e) => {
-                  setCursor(e, "default");
-                  if (isEquipment) setHoveredEquipmentId((current) => (current === device.id ? null : current));
-                  else setHoveredSensorId((current) => (current === device.id ? null : current));
-                }}
-                onDragMove={(e) => {
-                  e.cancelBubble = true;
-                  setDragPreview({ id: device.id, x: e.target.x(), y: e.target.y() });
-                }}
-                onDragEnd={(e) => {
-                  e.cancelBubble = true;
+                isEquipment={isEquipment}
+                selected={selected}
+                hovered={hovered}
+                emphasized={emphasized}
+                markerColor={markerColor}
+                summaryTotal={summary?.total ?? null}
+                isAlarmed={isAlarmed}
+                editMode={editMode}
+                pos={pos}
+                scale={scale}
+                width={width}
+                height={height}
+                onMouseEnter={() => (isEquipment ? setHoveredEquipmentId(device.id) : setHoveredSensorId(device.id))}
+                onMouseLeave={() =>
+                  isEquipment
+                    ? setHoveredEquipmentId((current) => (current === device.id ? null : current))
+                    : setHoveredSensorId((current) => (current === device.id ? null : current))
+                }
+                onDragMove={(nx, ny) => setDragPreview({ id: device.id, x: nx, y: ny })}
+                onDragEnd={(nx, ny) => {
                   setDragPreview(null);
-                  onDeviceDragEnd?.(device.id, e.target.x(), e.target.y());
-                  e.target.getStage()?.batchDraw();
+                  onDeviceDragEnd?.(device.id, nx, ny);
                 }}
-              >
-                {isAlarmed && (
-                  <Circle
-                    radius={isEquipment ? 22 : 17}
-                    stroke="#e11d48"
-                    strokeWidth={3}
-                    dash={[4, 3]}
-                    shadowColor="#e11d48"
-                    shadowBlur={12}
-                    listening={false}
-                  />
-                )}
-                {/* 가상 기기(device-simulator가 대신 응답 중) — 실기기와 한눈에 구분되도록 보라
-                    점선 테두리를 덧그린다. 알람 링(빨강)보다 안쪽이라 동시에 표시돼도 겹치지 않는다. */}
-                {device.simulated && (
-                  <Circle
-                    radius={isEquipment ? 16 : 13}
-                    stroke="#7c3aed"
-                    strokeWidth={1.5}
-                    dash={[2, 2]}
-                    listening={false}
-                  />
-                )}
-                {isEquipment ? (
-                  <>
-                    <Rect
-                      x={emphasized ? -14 : -12}
-                      y={emphasized ? -14 : -12}
-                      width={emphasized ? 28 : 24}
-                      height={emphasized ? 28 : 24}
-                      cornerRadius={5}
-                      fill={markerColor}
-                      stroke={selected ? "#111827" : hovered ? "#2563eb" : "#ffffff"}
-                      strokeWidth={emphasized ? 2.5 : 1.5}
-                      shadowColor="rgba(15, 23, 42, 0.35)"
-                      shadowBlur={emphasized ? 9 : 6}
-                      onClick={() => !editMode && setContactsEquipmentId((cur) => (cur === device.id ? null : device.id))}
-                      onTap={() => !editMode && setContactsEquipmentId((cur) => (cur === device.id ? null : device.id))}
-                    />
-                    <Text
-                      x={-22}
-                      y={-5}
-                      width={44}
-                      align="center"
-                      text={`${summary?.total ?? 0}`}
-                      fontSize={11}
-                      fontStyle="bold"
-                      fill="#ffffff"
-                      listening={false}
-                    />
-                  </>
-                ) : (
-                  <Circle
-                    radius={selected ? 11 : 9}
-                    fill={markerColor}
-                    stroke={selected ? "#2c3e50" : "#ffffff"}
-                    strokeWidth={selected ? 2.5 : 1}
-                    onClick={() => onSelectDevice(device)}
-                    onTap={() => onSelectDevice(device)}
-                  />
-                )}
-                <Text
-                  x={-30}
-                  y={12}
-                  width={60}
-                  align="center"
-                  text={device.name}
-                  fontSize={11}
-                  fill="#2c3e50"
-                  listening={false}
-                />
-              </Group>
+                onSelectSensor={() => onSelectDevice(device)}
+                onToggleEquipment={() => setContactsEquipmentId((cur) => (cur === device.id ? null : device.id))}
+              />
             );
           })}
           {/* 호버 툴팁 — 감시장비의 일괄 상태(집계)만 간결하게 보여준다. */}

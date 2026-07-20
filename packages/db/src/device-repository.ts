@@ -48,6 +48,8 @@ export interface DeviceStateRecord {
   /** Device↔Gateway 연결 프로토콜(선택). Gateway↔플랫폼 구간은 항상 MQTT — 이 값과 무관하다. */
   connectionProtocol: DeviceConnectionProtocol | null;
   connectionConfig: unknown;
+  /** 사용자 지정 이미지(image 라이브러리 참조). 관제 마커·기기 정보에 실제 사진을 보여줄 때 쓴다. */
+  imageId: string | null;
   updatedAt: Date;
 }
 
@@ -123,6 +125,7 @@ interface DeviceStateRow extends QueryResultRow {
   gateway_id: string | null;
   connection_protocol: DeviceConnectionProtocol | null;
   connection_config: unknown;
+  image_id: string | null;
   updated_at: Date;
 }
 
@@ -163,7 +166,8 @@ const DEVICE_COLUMNS = `
   id::text, code, name, category, device_role, device_type, manufacturer, model, firmware_version,
   mqtt_topic, current_status, lifecycle_status, area_id::text, pos_x::text, pos_y::text,
   monitoring_visible, enabled, simulated, parent_device_id::text, sensor_signal_type, sensor_io_type,
-  channel_address, terminal_block, load_class, description, gateway_id::text, connection_protocol, connection_config, updated_at
+  channel_address, terminal_block, load_class, description, gateway_id::text, connection_protocol, connection_config,
+  image_id::text, updated_at
 `;
 
 function toDeviceState(row: DeviceStateRow): DeviceStateRecord {
@@ -196,6 +200,7 @@ function toDeviceState(row: DeviceStateRow): DeviceStateRecord {
     gatewayId: row.gateway_id,
     connectionProtocol: row.connection_protocol,
     connectionConfig: row.connection_config,
+    imageId: row.image_id,
     updatedAt: row.updated_at,
   };
 }
@@ -522,6 +527,7 @@ export interface UpdateDeviceInput {
   terminalBlock?: string | null | undefined;
   loadClass?: LoadClass | null | undefined;
   description?: string | null | undefined;
+  imageId?: string | null | undefined;
 }
 
 /**
@@ -586,6 +592,10 @@ export async function updateDevice(
   if (input.description !== undefined) {
     params.push(input.description);
     sets.push(`description = $${params.length}`);
+  }
+  if (input.imageId !== undefined) {
+    params.push(input.imageId);
+    sets.push(`image_id = $${params.length}`);
   }
   if (sets.length === 0) return getDeviceState(db, id);
 

@@ -76,6 +76,7 @@ export interface UpdateDeviceRequest {
   terminalBlock?: string | null;
   loadClass?: LoadClass | null;
   description?: string | null;
+  imageId?: string | null;
 }
 
 const DEVICE_ROLES: DeviceRole[] = ["MONITORING_EQUIPMENT", "SENSOR"];
@@ -429,9 +430,15 @@ export class DevicesService {
       if (body.terminalBlock !== undefined) updateInput.terminalBlock = body.terminalBlock;
       if (body.loadClass !== undefined) updateInput.loadClass = body.loadClass;
       if (body.description !== undefined) updateInput.description = body.description;
+      if (body.imageId !== undefined) updateInput.imageId = body.imageId;
       if (before.deviceRole === "SENSOR") {
         if (body.parentDeviceId !== undefined) updateInput.parentDeviceId = body.parentDeviceId;
-        if (sensorSignalType !== undefined) updateInput.sensorSignalType = sensorSignalType;
+        // signalTypeForIo()는 sensorIoType이 없으면 undefined가 아니라 null을 돌려주므로,
+        // 호출부가 sensorSignalType/sensorIoType 둘 다 안 보냈을 때도 sensorSignalType이 null로
+        // 잡혀 기존 값을 지워버리지 않도록 "둘 중 하나라도 보냈을 때만" 반영한다.
+        if (body.sensorSignalType !== undefined || body.sensorIoType !== undefined) {
+          updateInput.sensorSignalType = sensorSignalType;
+        }
         if (body.sensorIoType !== undefined) updateInput.sensorIoType = body.sensorIoType;
         if (body.channelAddress !== undefined) updateInput.channelAddress = body.channelAddress;
       }
@@ -466,6 +473,9 @@ export class DevicesService {
       }
       if (body.description !== undefined && body.description !== before.description) {
         changes.push(`description '${before.description ?? "null"}' → '${body.description ?? "null"}'`);
+      }
+      if (body.imageId !== undefined && body.imageId !== before.imageId) {
+        changes.push(`imageId '${before.imageId ?? "null"}' → '${body.imageId ?? "null"}'`);
       }
 
       await insertAuditLog(client, {

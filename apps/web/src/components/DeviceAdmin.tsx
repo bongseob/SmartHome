@@ -12,10 +12,12 @@ import "ag-grid-community/styles/ag-theme-quartz.css";
 import type { DeviceRole, LoadClass, SensorIoType, SensorSignalType } from "@smarthome/contracts";
 import {
   ApiError,
+  apiAssetUrl,
   createDevice,
   decommissionDevice,
   listAreas,
   listDevices,
+  listImages,
   setDeviceMonitoring,
   setDeviceSimulated,
   updateDevice,
@@ -24,6 +26,7 @@ import type {
   AreaSummary,
   CreateDeviceRequest,
   DeviceListItem,
+  ImageRecord,
 } from "../lib/types";
 import { ConnectionProtocolFields } from "./ConnectionProtocolFields";
 import { useConfirm } from "./ConfirmDialog";
@@ -64,6 +67,7 @@ export function DeviceAdmin(): JSX.Element {
   const [description, setDescription] = useState("");
   const [gateways, setGateways] = useState<DeviceListItem[]>([]);
   const [monitoringEquipments, setMonitoringEquipments] = useState<DeviceListItem[]>([]);
+  const [images, setImages] = useState<ImageRecord[]>([]);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -93,6 +97,13 @@ export function DeviceAdmin(): JSX.Element {
   useEffect(() => {
     listDevices()
       .then((result) => setMonitoringEquipments(result.filter((device) => device.deviceRole === "MONITORING_EQUIPMENT")))
+      .catch(() => undefined);
+  }, []);
+
+  // 기기 정보 수정 모달의 "사용자 지정 이미지" 선택지 — 이미지 관리 화면에 등록된 라이브러리 재사용.
+  useEffect(() => {
+    listImages()
+      .then(setImages)
       .catch(() => undefined);
   }, []);
 
@@ -574,6 +585,7 @@ export function DeviceAdmin(): JSX.Element {
         <DeviceEditModal
           device={editingDevice}
           monitoringEquipments={monitoringEquipments}
+          images={images}
           onCancel={() => setEditingDeviceId(null)}
           onSaved={() => {
             setEditingDeviceId(null);
@@ -610,11 +622,12 @@ export function DeviceAdmin(): JSX.Element {
 interface DeviceEditModalProps {
   device: DeviceListItem;
   monitoringEquipments: DeviceListItem[];
+  images: ImageRecord[];
   onCancel: () => void;
   onSaved: () => void;
 }
 
-function DeviceEditModal({ device, monitoringEquipments, onCancel, onSaved }: DeviceEditModalProps): JSX.Element {
+function DeviceEditModal({ device, monitoringEquipments, images, onCancel, onSaved }: DeviceEditModalProps): JSX.Element {
   const [name, setName] = useState(device.name);
   const [parentDeviceId, setParentDeviceId] = useState(device.parentDeviceId ?? "");
   const [sensorSignalType, setSensorSignalType] = useState<SensorSignalType>(device.sensorSignalType ?? "DIGITAL");
@@ -623,6 +636,7 @@ function DeviceEditModal({ device, monitoringEquipments, onCancel, onSaved }: De
   const [terminalBlock, setTerminalBlock] = useState(device.terminalBlock ?? "");
   const [loadClass, setLoadClass] = useState<LoadClass | null>(device.loadClass);
   const [description, setDescription] = useState(device.description ?? "");
+  const [imageId, setImageId] = useState(device.imageId ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -642,6 +656,7 @@ function DeviceEditModal({ device, monitoringEquipments, onCancel, onSaved }: De
       terminalBlock: terminalBlock.trim() || null,
       loadClass: device.category === "DEVICE" ? loadClass : undefined,
       description: description.trim() || null,
+      imageId: imageId || null,
     })
       .then(() => onSaved())
       .catch((err: unknown) =>
@@ -723,6 +738,24 @@ function DeviceEditModal({ device, monitoringEquipments, onCancel, onSaved }: De
             설명 (Description)
             <input value={description} onChange={(e) => setDescription(e.target.value)} />
           </label>
+          <label>
+            사용자 지정 이미지
+            <select value={imageId} onChange={(e) => setImageId(e.target.value)}>
+              <option value="">미지정 (기본 마커)</option>
+              {images.map((image) => (
+                <option key={image.id} value={image.id}>
+                  {image.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {imageId && (
+            <img
+              src={apiAssetUrl(images.find((image) => image.id === imageId)?.imageUrl ?? null) ?? ""}
+              alt=""
+              className="floor-map-admin__thumb"
+            />
+          )}
         </div>
         {error && <p className="error-text">{error}</p>}
         <div className="modal-actions">
