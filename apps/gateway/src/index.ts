@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import {
   AckPayload,
   IllegalCommandTransitionError,
+  parseDeviceBase,
   parseTopic,
   StatePayload,
   TelemetryPayload,
@@ -15,6 +17,7 @@ import {
   completeCommandFromAck,
   findRecentIntentionalStateCommand,
   getDeviceIdByCode,
+  getDeviceState,
   getNotificationChannelById,
   insertTelemetryBatch,
   listAlarmPolicies,
@@ -34,6 +37,7 @@ import {
   createRedisCommandClient,
   dueCommandIds,
   getCorrelation,
+  publishDeviceCommand,
   updateCorrelationStatus,
   type RedisCommandClient,
 } from "@smarthome/command-flow";
@@ -156,7 +160,51 @@ async function notifyPolicyChannels(policyId: string, alarmId: string, alarm: {
   );
 }
 
+/**
+ * 알람 자동 현장 확인(architecture.md §5-cam, sequence-diagrams.md §8-cam) — policy에
+ * linked_camera_id/auto_goto_preset_id가 모두 설정돼 있으면, 일반 PTZ 제어와 완전히 같은
+ * 명령 흐름(§4 command-flow)으로 ptz_goto_preset을 발행한다. 카메라가 ONVIF+실카메라
+ * (simulated=false)면 camera-adapter.ts가 이 명령을 받아 실제로 이동시킨다.
+ */
+async function triggerAutoPtzPreset(
+  mqtt: MqttClient,
+  redis: RedisCommandClient,
+  policy: AlarmPolicyRecord,
+  alarmId: string,
+): Promise<void> {
+  if (!policy.linkedCameraId || !policy.autoGotoPresetId) return;
+  try {
+    const camera = await getDeviceState(dbExecutor, policy.linkedCameraId);
+    if (!camera) {
+      console.warn(`[gateway] 알람 자동 프리셋 이동 실패 — 카메라 없음: ${policy.linkedCameraId}`);
+      return;
+    }
+    const identity = parseDeviceBase(camera.mqttTopic);
+    if (!identity) {
+      console.warn(`[gateway] 알람 자동 프리셋 이동 실패 — 잘못된 mqtt_topic: ${camera.code}`);
+      return;
+    }
+    const commandId = `CMD-${Date.now()}-${randomUUID().slice(0, 8)}`;
+    await publishDeviceCommand(mqtt, redis, {
+      commandId,
+      sessionId: `ALARM-${alarmId}`,
+      actorType: "SYSTEM",
+      actorId: null,
+      role: null,
+      targetId: camera.id,
+      target: identity,
+      command: "ptz_goto_preset",
+      args: { presetId: policy.autoGotoPresetId },
+    });
+    console.log(`[gateway] 알람 ${alarmId} → 카메라 ${camera.code} 자동 프리셋 이동(${commandId})`);
+  } catch (err) {
+    console.error(`[gateway] 알람 자동 프리셋 이동 오류 policy=${policy.id}:`, err);
+  }
+}
+
 async function evaluateAlarmPolicies(
+  mqtt: MqttClient,
+  redis: RedisCommandClient,
   events: RealtimePublisher,
   deviceId: string,
   metric: string,
@@ -201,6 +249,7 @@ async function evaluateAlarmPolicies(
           message: result.alarm.message,
           deviceId,
         });
+        await triggerAutoPtzPreset(mqtt, redis, policy, result.alarm.id);
       }
     } catch (err) {
       console.error(`[gateway] alarm policy 평가 오류 policy=${policy.id} device=${deviceId}:`, err);
@@ -361,6 +410,7 @@ async function cascadeBoardOfflineToChildren(
 }
 
 async function onMessage(
+  mqtt: MqttClient,
   redis: RedisCommandClient,
   events: RealtimePublisher,
   topic: string,
@@ -390,7 +440,7 @@ async function onMessage(
         valueText: typeof value === "string" ? value : null,
       });
       if (typeof value === "number") {
-        await evaluateAlarmPolicies(events, id, metric, value);
+        await evaluateAlarmPolicies(mqtt, redis, events, id, metric, value);
       }
     }
     return;
@@ -534,7 +584,7 @@ async function main(): Promise<void> {
     console.log(`[gateway] ${url} 연결 — 공유구독 시작`);
   });
   client.on("message", (topic: string, payload: Buffer) => {
-    void onMessage(redis, events, topic, payload);
+    void onMessage(client, redis, events, topic, payload);
     void cameraAdapter.handleMessage(topic, payload);
   });
   client.on("error", (err: Error) => console.error(`[gateway] mqtt error: ${err.message}`));

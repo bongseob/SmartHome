@@ -4,6 +4,7 @@ import { CurrentAuth, Roles } from "../auth/auth.decorators.js";
 import {
   AlarmPoliciesService,
   type CreateAlarmPolicyRequest,
+  type SetAlarmPolicyCameraLinkRequest,
 } from "../services/alarm-policies.service.js";
 
 /** SRS 2.1.5 — 알람 정책 관리는 ADMIN 전용. */
@@ -31,5 +32,16 @@ export class AlarmPoliciesController {
     @CurrentAuth() auth: AuthContext,
   ): Promise<unknown> {
     return this.policies.setEnabled(id, body.enabled, auth);
+  }
+
+  /** 카메라 연동 설정/해제(§5-cam) — 알람 발생 시 자동 프리셋 이동에 쓰인다. */
+  @Roles("ADMIN")
+  @Patch(":id/camera")
+  setCameraLink(
+    @Param("id") id: string,
+    @Body() body: SetAlarmPolicyCameraLinkRequest,
+    @CurrentAuth() auth: AuthContext,
+  ): Promise<unknown> {
+    return this.policies.setCameraLink(id, body, auth);
   }
 }

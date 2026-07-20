@@ -34,7 +34,7 @@
 | 운영 보안 | 진행 중 | Mosquitto auth/ACL(보드별 계정 발급 + ACL, `allow_anonymous` 폐지) 완료(2026-07-13). TLS(mqtts/wss) **설정 준비** 완료(2026-07-14, `docs/tls-deployment.md`) — 실제 프로덕션 배포 검증은 미완료. 서비스간은 mTLS 대신 기존 공용 계정(`svc-backend`)을 API Key로 간주하기로 결정 |
 | Device 연결 프로토콜 | 완료(백엔드) | Device↔Gateway 구간 연결 방식(TCP_IP/SERIAL/MODBUS_TCP/MODBUS_RTU/ZIGBEE/ZWAVE) + 연결 파라미터를 `PATCH /devices/:id/connection`(ADMIN, audit)으로 설정. Gateway↔플랫폼(MQTT)은 무관·불변. 관리 UI는 M16으로 이동 |
 | Admin 관리 화면 (M16) | 완료 | 스케줄/예약, 시스템 기본정보, 도면, 지역(Area), 기기 등록/수정/연결 설정/소프트 폐기까지 실인프라·Playwright E2E 검증 완료 |
-| 카메라/PTZ (M17) | 진행 중 (Phase 0~4) | 인프라, camera-repository, 카메라 관리 API/Admin 화면, PTZ 제어 경로(gateway ONVIF 어댑터), media-gateway 서명 스트림 URL(MediaMTX authHTTPAddress 웹훅, 토큰 유/무 401·200 실측)까지 완료. 알람 자동 연동, 라이브 뷰 UI는 미착수. 실카메라 하드웨어 미보유로 ONVIF SOAP 프로토콜 자체는 미검증 |
+| 카메라/PTZ (M17) | 완료(MVP, Phase 0~5) | 인프라, camera-repository, 카메라 관리 API/Admin 화면, PTZ 제어 경로(gateway ONVIF 어댑터), media-gateway 서명 스트림 URL, 알람 자동 연동(실제 telemetry 임계 위반 → 자동 ptz_goto_preset → SUCCEEDED까지 실인프라 확인)까지 전부 완료. 남은 건 Phase 6(웹 라이브 뷰 UI)뿐. 실카메라 하드웨어 미보유로 ONVIF SOAP 프로토콜 자체는 미검증 |
 | 통합/E2E/성능 테스트 | 진행 중 | CI 파이프라인(lint+typecheck+기존 유닛테스트 124케이스 자동 실행) 완료(2026-07-14, ESLint 최초 도입 포함). **통합(Testcontainers) 완료(2026-07-14)** — `packages/test-support` + `apps/gateway`/`apps/api` 통합 테스트 6케이스 + `integration.yml` CI 편입. E2E(Playwright)·성능은 미착수 |
 
 ---
@@ -881,9 +881,8 @@ enterprise/site/building/area/floor_map/device는 전부 `packages/db/src/seed.t
 
 ### M17. 카메라/PTZ (현장 확인)
 
-상태: **진행 중 — Phase 0(인프라)·Phase 1(contracts/DB)·Phase 2(카메라 관리 API+Admin 화면)·
-Phase 3(PTZ 제어 경로)·Phase 4(media-gateway 서명 스트림 URL) 완료** (2026-07-20 신설 — 사용자
-요청: 알람 등 현장 상황 발생 시 카메라로 추가 확인하는 기능의 실제 구현)
+상태: **완료(MVP) — Phase 0~5 전부 완료** (2026-07-20 신설 — 사용자 요청: 알람 등 현장 상황
+발생 시 카메라로 추가 확인하는 기능의 실제 구현). 남은 건 Phase 6(라이브 뷰 UI, 옵션)뿐.
 
 배경: 설계 자체는 이전부터 `architecture.md` §5-cam, `api-spec.md` §4-cam,
 `sequence-diagrams.md` §8-cam, `ui-ux-design.md` §4.5-cam에 있었고 DB 스키마(`camera`/
@@ -1013,8 +1012,39 @@ Phase 3(PTZ 제어 경로)·Phase 4(media-gateway 서명 스트림 URL) 완료**
    - 테스트 카메라는 decommission으로 정리
 6. `pnpm turbo run typecheck build test` 45/45 task 통과(FULL TURBO 캐시 히트 포함)
 
-다음 단계(Phase 5): 알람 RAISED 시 `alarm_policy.linked_camera_id`가 있으면 자동으로
-`ptz_goto_preset` 발행(§8-cam 시퀀스), `GET /alarms/:id/cameras`(현장 확인용 커버 카메라 목록).
+완료된 작업 단위 — Phase 5(2026-07-20):
+1. `packages/db`: `AlarmWithAreaRow`에 `areaId` 추가(`listAlarms`/`getAlarmWithAreaScope` SQL에
+   `a.id::text AS area_id` 추가) — `GET /alarms/:id/cameras`가 발생원 Area의 camera_coverage를
+   조회하는 데 필요
+2. `apps/api`: `AlarmsService.getCameras()` 신설 — ①발생원 Area를 커버하는 카메라
+   (`listCamerasCoveringArea`) ②정책에 명시적으로 연결된 카메라(`alarm_policy.linked_camera_id`)
+   둘을 합쳐(중복 제거) 반환. `GET /alarms/:id/cameras` 라우트 추가(기존 area 스코프 ACL 재사용)
+3. **빠뜨렸던 부분을 검증 중 발견·보강**: Phase 1에서 DB 레이어(`createAlarmPolicy`,
+   `updateAlarmPolicyCameraLink`)까지는 만들어놨는데 API 레이어(`CreateAlarmPolicyRequest`,
+   `AlarmPoliciesController`)에 `linkedCameraId`/`autoGotoPresetId`를 한 번도 노출한 적이
+   없어서, 실제로는 알람 정책에 카메라를 연결할 방법이 API에 아예 없었다. `POST
+   /alarm-policies`에 두 필드 추가 + `PATCH /alarm-policies/:id/camera` 신설로 보강
+4. `apps/gateway`: `evaluateAlarmPolicies()`에 `mqtt`/`redis` 파라미터를 추가로 흘려보내고,
+   알람이 실제로 새로 발생(`result.raised`)했을 때 `policy.linkedCameraId`/`autoGotoPresetId`가
+   모두 있으면 `triggerAutoPtzPreset()`이 일반 PTZ 제어와 완전히 동일한 명령 흐름
+   (`publishDeviceCommand`, scheduler의 SYSTEM 액터 발행 패턴 재사용)으로 `ptz_goto_preset`을
+   발행한다. `onMessage()`에 `mqtt` 클라이언트를 추가로 전달하도록 시그니처 확장
+5. 실인프라 E2E(2026-07-20) — 가장 완결적인 검증:
+   - 카메라+프리셋 생성 → 알람 정책 생성(온도 임계) → `PATCH .../camera`로 카메라 연동 설정
+   - `thermostat-01`에 실제 MQTT telemetry(`temperature=35`, 임계 `>30`)를 `mosquitto_pub`으로
+     발행(`svc-backend` 계정, ACL 확인하며 자격 문제 실측·해결) → 게이트웨이가 알람을 올리고
+     **자동으로 `ptz_goto_preset` 명령을 발행 → `SUCCEEDED`로 정상 종결**되는 것을 `command`
+     테이블에서 직접 확인(`session_id LIKE 'ALARM-<id>%'`)
+   - `GET /alarms/:id/cameras`가 연동된 카메라를 정확히 반환하는 것 확인
+   - 검증 중간에 api 프로세스가 최신 빌드 전 상태로 떠 있어 재확인·재시작을 두 차례 거침(사용자가
+     api/gateway를 터미널에서 직접 관리하기로 해 Claude가 재시작하지 않고 매번 요청)
+   - 테스트 알람은 ack+resolve, 정책은 disabled, 카메라는 decommission으로 정리
+6. `pnpm turbo run typecheck build test` 45/45 task 통과
+
+M17 카메라/PTZ 현장확인 기능은 이것으로 **핵심 경로(등록→PTZ 제어→스트림 서명 URL→알람 자동
+연동) 전부 실인프라로 검증 완료**. 남은 건 Phase 6(웹 라이브 뷰 UI — hls.js/WebRTC 재생 컴포넌트,
+"📷현장" 버튼, FloorMap 카메라 레이어)뿐이며 이건 순수 프론트엔드 작업이라 백엔드 설계 변경
+없이 언제든 이어서 할 수 있다.
 
 ---
 

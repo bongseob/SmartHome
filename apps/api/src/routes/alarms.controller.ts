@@ -37,6 +37,13 @@ export class AlarmsController {
     return this.alarms.get(id, auth);
   }
 
+  /** 알람 발생원을 커버하는 카메라 목록(현장 확인용, §5-cam). */
+  @Roles("USER", "MONITOR", "HITL_APPROVER")
+  @Get(":id/cameras")
+  getCameras(@Param("id") id: string, @CurrentAuth() auth: AuthContext): Promise<unknown> {
+    return this.alarms.getCameras(id, auth);
+  }
+
   @Roles("USER", "MONITOR", "HITL_APPROVER")
   @Post(":id/ack")
   ack(

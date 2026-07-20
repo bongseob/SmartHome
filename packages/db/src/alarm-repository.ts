@@ -445,6 +445,8 @@ export interface AlarmListFilter {
 /** 기기의 area 소속을 함께 내려줘 API 레이어에서 area 스코프 필터링에 쓴다. */
 export interface AlarmWithAreaRow extends AlarmRecord {
   areaTopicPrefix: string | null;
+  /** GET /alarms/:id/cameras — 발생원을 커버하는 카메라(camera_coverage) 조회에 쓴다(§5-cam). */
+  areaId: string | null;
 }
 
 export async function listAlarms(
@@ -473,12 +475,13 @@ export async function listAlarms(
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   params.push(limit);
 
-  const r = await db.query<AlarmRow & { area_topic_prefix: string | null }>(
+  const r = await db.query<AlarmRow & { area_topic_prefix: string | null; area_id: string | null }>(
     `SELECT al.id::text, al.policy_id::text, al.device_id::text, al.tier, al.severity, al.message,
             al.state, al.raised_at, al.snoozed_until, al.resolved_at, al.escalated_level,
             CASE WHEN a.id IS NOT NULL THEN
               CONCAT('enterprise/', s.slug, '/', b.slug, '/', f.slug, '/', a.slug)
-            ELSE NULL END AS area_topic_prefix
+            ELSE NULL END AS area_topic_prefix,
+            a.id::text AS area_id
      FROM alarm_log al
      LEFT JOIN device d     ON d.id = al.device_id
      LEFT JOIN area a       ON a.id = d.area_id
@@ -490,19 +493,20 @@ export async function listAlarms(
      LIMIT $${params.length}`,
     params,
   );
-  return r.rows.map((row) => ({ ...toAlarmRecord(row), areaTopicPrefix: row.area_topic_prefix }));
+  return r.rows.map((row) => ({ ...toAlarmRecord(row), areaTopicPrefix: row.area_topic_prefix, areaId: row.area_id }));
 }
 
 export async function getAlarmWithAreaScope(
   db: QueryExecutor,
   id: string,
 ): Promise<AlarmWithAreaRow | null> {
-  const r = await db.query<AlarmRow & { area_topic_prefix: string | null }>(
+  const r = await db.query<AlarmRow & { area_topic_prefix: string | null; area_id: string | null }>(
     `SELECT al.id::text, al.policy_id::text, al.device_id::text, al.tier, al.severity, al.message,
             al.state, al.raised_at, al.snoozed_until, al.resolved_at, al.escalated_level,
             CASE WHEN a.id IS NOT NULL THEN
               CONCAT('enterprise/', s.slug, '/', b.slug, '/', f.slug, '/', a.slug)
-            ELSE NULL END AS area_topic_prefix
+            ELSE NULL END AS area_topic_prefix,
+            a.id::text AS area_id
      FROM alarm_log al
      LEFT JOIN device d     ON d.id = al.device_id
      LEFT JOIN area a       ON a.id = d.area_id
@@ -513,7 +517,7 @@ export async function getAlarmWithAreaScope(
     [id],
   );
   const row = r.rows[0];
-  return row ? { ...toAlarmRecord(row), areaTopicPrefix: row.area_topic_prefix } : null;
+  return row ? { ...toAlarmRecord(row), areaTopicPrefix: row.area_topic_prefix, areaId: row.area_id } : null;
 }
 
 export interface UpdateAlarmStatePatch {

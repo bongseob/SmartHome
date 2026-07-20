@@ -11,11 +11,15 @@ import { IllegalAlarmTransitionError } from "@smarthome/contracts";
 import { hasAreaAccess, isAdmin, type AuthContext } from "@smarthome/auth";
 import {
   AlarmNotFoundError,
+  getAlarmPolicyById,
   getAlarmWithAreaScope,
+  getCameraSummaryByDeviceId,
   listAlarms,
+  listCamerasCoveringArea,
   query,
   recordAlarmAction,
   type AlarmWithAreaRow,
+  type CameraSummary,
 } from "@smarthome/db";
 import { createRealtimePublisher, publishRealtimeEvent, type RealtimePublisher } from "@smarthome/realtime";
 
@@ -136,5 +140,32 @@ export class AlarmsService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException("note is required");
     }
     return this.performAction(id, auth, "NOTE", body.note);
+  }
+
+  /**
+   * 알람 발생원을 커버하는 카메라 목록(현장 확인용, api-spec.md §4-cam `GET /alarms/:id/cameras`).
+   * 두 출처를 합쳐서(중복 제거) 돌려준다:
+   *   1) 발생원 Area를 화각으로 커버하는 카메라(camera_coverage)
+   *   2) 정책에 명시적으로 연결된 카메라(alarm_policy.linked_camera_id) — 커버리지 매핑이
+   *      안 돼 있어도 관리자가 지정한 카메라이므로 항상 포함한다.
+   */
+  async getCameras(id: string, auth: AuthContext): Promise<CameraSummary[]> {
+    const alarm = await this.ensureVisibleAndFetch(id, auth);
+    const byDeviceId = new Map<string, CameraSummary>();
+
+    if (alarm.areaId) {
+      const covering = await listCamerasCoveringArea(alarmExecutor, alarm.areaId);
+      for (const camera of covering) byDeviceId.set(camera.deviceId, camera);
+    }
+
+    if (alarm.policyId) {
+      const policy = await getAlarmPolicyById(alarmExecutor, alarm.policyId);
+      if (policy?.linkedCameraId) {
+        const linked = await getCameraSummaryByDeviceId(alarmExecutor, policy.linkedCameraId);
+        if (linked) byDeviceId.set(linked.deviceId, linked);
+      }
+    }
+
+    return [...byDeviceId.values()];
   }
 }
