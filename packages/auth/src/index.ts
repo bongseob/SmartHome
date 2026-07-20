@@ -171,6 +171,84 @@ export function verifyJwt(
   };
 }
 
+export interface StreamTokenClaims {
+  cameraId: string;
+  /** MediaMTX 경로(카메라 stream_url의 pathname) — 어댑터가 이 카메라 토큰으로 다른 경로를
+   *  재생하지 못하도록 인증 웹훅에서 요청 path와 대조한다. */
+  path: string;
+}
+
+interface StreamTokenPayload extends Record<string, unknown>, StreamTokenClaims {
+  iat: number;
+  exp: number;
+  typ: "stream";
+}
+
+/**
+ * 카메라 스트림 단기 서명 토큰(architecture.md §5-cam "서명된 단기 스트림 URL").
+ * access/refresh 토큰과 클레임 모양이 아예 달라(로그인 사용자 정보 없음, 카메라·경로만)
+ * issueJwt/verifyJwt를 억지로 재사용하지 않고 같은 HS256 서명 방식만 공유한다.
+ * media-gateway가 MediaMTX의 authHTTPAddress 웹훅에서 verifyStreamToken으로 검증한다.
+ */
+export function issueStreamToken(
+  claims: StreamTokenClaims,
+  secret: string,
+  expiresInSeconds: number,
+  nowSeconds = Math.floor(Date.now() / 1000),
+): string {
+  assertSecret(secret);
+  const header: JwtHeader = { alg: "HS256", typ: "JWT" };
+  const payload: StreamTokenPayload = {
+    cameraId: claims.cameraId,
+    path: claims.path,
+    iat: nowSeconds,
+    exp: nowSeconds + expiresInSeconds,
+    typ: "stream",
+  };
+  const encoded = `${base64Url(JSON.stringify(header))}.${base64Url(JSON.stringify(payload))}`;
+  return `${encoded}.${sign(encoded, secret)}`;
+}
+
+export function verifyStreamToken(
+  token: string,
+  secret: string,
+  nowSeconds = Math.floor(Date.now() / 1000),
+): StreamTokenClaims {
+  assertSecret(secret);
+  const parts = token.split(".");
+  if (parts.length !== 3) {
+    throw new Error("invalid jwt format");
+  }
+  const [encodedHeader, encodedPayload, signature] = parts;
+  if (!encodedHeader || !encodedPayload || !signature) {
+    throw new Error("invalid jwt format");
+  }
+  const expectedSignature = sign(`${encodedHeader}.${encodedPayload}`, secret);
+  const signatureBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expectedSignature);
+  if (
+    signatureBuffer.length !== expectedBuffer.length ||
+    !timingSafeEqual(signatureBuffer, expectedBuffer)
+  ) {
+    throw new Error("invalid jwt signature");
+  }
+
+  const header = parseBase64UrlJson<JwtHeader>(encodedHeader);
+  if (header.alg !== "HS256" || header.typ !== "JWT") {
+    throw new Error("unsupported jwt header");
+  }
+
+  const payload = parseBase64UrlJson<StreamTokenPayload>(encodedPayload);
+  if (payload.typ !== "stream") {
+    throw new Error("unexpected jwt type");
+  }
+  if (payload.exp <= nowSeconds) {
+    throw new Error("jwt expired");
+  }
+
+  return { cameraId: payload.cameraId, path: payload.path };
+}
+
 export function hashPassword(password: string, salt = randomBytes(16).toString("base64url")): string {
   const iterations = 120000;
   const digest = pbkdf2Sync(password, salt, iterations, 32, "sha256").toString("base64url");

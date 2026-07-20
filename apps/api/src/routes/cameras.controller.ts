@@ -33,6 +33,14 @@ export class CamerasController {
     return this.cameras.get(id);
   }
 
+  /** 서명된 단기 스트림 URL 발급(§5-cam) — 영상은 여기(api)를 거치지 않고 media-gateway/MediaMTX가 직접 서빙. */
+  @Roles("USER", "MONITOR", "HITL_APPROVER")
+  @RequireDeviceAccess("VIEW", "routeParam", "id")
+  @Get(":id/stream")
+  getStream(@Param("id") id: string): Promise<unknown> {
+    return this.cameras.getStreamUrl(id);
+  }
+
   /** 카메라 등록 — ADMIN 전용. device+camera row를 함께 만든다(devices.service.ts의 create()는
    *  category=CAMERA를 거부하고 여기로 위임하도록 설계돼 있다). */
   @Roles("ADMIN")

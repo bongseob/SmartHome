@@ -5,6 +5,7 @@ import type {
   AuthUser,
   BuildingRecord,
   CameraPresetRecord,
+  CameraStreamResponse,
   CameraSummary,
   CommandCreateResponse,
   CommandRecord,
@@ -618,4 +619,10 @@ export function ptzGotoPreset(cameraId: string, presetId: string): Promise<Comma
   return authedJson<CommandCreateResponse>(`/api/v1/cameras/${cameraId}/presets/${presetId}/goto`, {
     method: "POST",
   });
+}
+
+/** 서명된 단기 스트림 URL 발급(§5-cam) — 라이브 뷰(M17 Phase 6)가 이 token을 Authorization
+ *  헤더로 실어 hlsUrl/webrtcUrl에 직접 접속한다(이 api 서버를 거치지 않음). */
+export function getCameraStream(cameraId: string): Promise<CameraStreamResponse> {
+  return authedJson<CameraStreamResponse>(`/api/v1/cameras/${cameraId}/stream`);
 }

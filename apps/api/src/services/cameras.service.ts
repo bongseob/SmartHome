@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import type { AuthContext } from "@smarthome/auth";
-import { isAdmin } from "@smarthome/auth";
+import { isAdmin, issueStreamToken } from "@smarthome/auth";
 import {
   InvalidTopicSegmentError,
   PtzGotoPresetArgs,
@@ -65,6 +65,25 @@ export interface CreateCameraPresetRequest {
   zoom?: number | null;
 }
 
+export interface CameraStreamResponse {
+  hlsUrl: string;
+  webrtcUrl: string;
+  /** MediaMTX authHTTPAddress 웹훅(media-gateway)이 검증할 단기 서명 토큰. 재생 클라이언트가
+   *  `Authorization: Bearer <token>` 헤더로 실어 보낸다(mediamtx.org 문서 권장 방식). */
+  token: string;
+  expiresAt: string;
+}
+
+/** camera.stream_url(예: rtsp://mediamtx:8554/cam-01)에서 MediaMTX 경로(cam-01)만 뽑아낸다.
+ *  HLS/WebRTC 재생 URL도 같은 경로를 쓴다(포트만 다름) — RTSP ingest와 재생이 같은 path다. */
+function extractMediaMtxPath(streamUrl: string): string {
+  try {
+    return new URL(streamUrl).pathname.replace(/^\//, "");
+  } catch {
+    throw new BadRequestException(`streamUrl is not a valid URL: ${streamUrl}`);
+  }
+}
+
 /**
  * 카메라 관리(architecture.md §5-cam, api-spec.md §4-cam) — ADMIN 전용, 변경은 감사 대상.
  * 카메라는 category=CAMERA device의 1:1 확장이라, 일반 device 생성(POST /devices)과 별개로
@@ -87,6 +106,30 @@ export class CamerasService {
     const camera = await getCameraSummaryByDeviceId(cameraExecutor, id);
     if (!camera) throw new NotFoundException(`camera not found: ${id}`);
     return camera;
+  }
+
+  /**
+   * 서명된 단기 스트림 URL 발급(architecture.md §5-cam). 영상 자체는 MQTT를 거치지 않고
+   * MediaMTX가 직접 서빙 — 여기서는 재생 권한이 있는 사용자에게만 짧게 유효한 토큰을 준다.
+   * 실제 재생 시 MediaMTX가 매 요청마다 media-gateway의 /auth 웹훅으로 이 토큰을 검증한다.
+   */
+  async getStreamUrl(id: string): Promise<CameraStreamResponse> {
+    const camera = await this.get(id);
+    const secret = process.env.AUTH_JWT_SECRET;
+    if (!secret) throw new Error("AUTH_JWT_SECRET is not configured");
+
+    const path = extractMediaMtxPath(camera.streamUrl);
+    const ttlSeconds = Number(process.env.STREAM_TOKEN_TTL_SECONDS ?? "300");
+    const token = issueStreamToken({ cameraId: camera.deviceId, path }, secret, ttlSeconds);
+    const hlsBase = process.env.MEDIAMTX_HLS_BASE ?? "http://localhost:8888";
+    const webrtcBase = process.env.MEDIAMTX_WEBRTC_BASE ?? "http://localhost:8889";
+
+    return {
+      hlsUrl: `${hlsBase}/${path}/index.m3u8`,
+      webrtcUrl: `${webrtcBase}/${path}/whep`,
+      token,
+      expiresAt: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
+    };
   }
 
   /** 기기 생성 규칙은 devices.service.ts의 create()와 동일 — mqtt_topic은 서버가 생성한다. */

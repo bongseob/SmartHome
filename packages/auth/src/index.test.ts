@@ -1,5 +1,14 @@
 ﻿import { describe, expect, it } from "vitest";
-import { hashPassword, hasAreaAccess, issueJwt, verifyJwt, verifyPassword, type AuthContext } from "./index.js";
+import {
+  hashPassword,
+  hasAreaAccess,
+  issueJwt,
+  issueStreamToken,
+  verifyJwt,
+  verifyPassword,
+  verifyStreamToken,
+  type AuthContext,
+} from "./index.js";
 
 const secret = "0123456789abcdef0123456789abcdef";
 const context: AuthContext = {
@@ -31,6 +40,33 @@ describe("jwt auth", () => {
     expect(() => verifyJwt(`${h}.${p}.short`, secret, "access", 1001)).toThrow(
       "invalid jwt signature",
     );
+  });
+});
+
+describe("camera stream token(§5-cam)", () => {
+  it("issues and verifies a stream token", () => {
+    const token = issueStreamToken({ cameraId: "cam-1", path: "cam-01" }, secret, 60, 1000);
+
+    const claims = verifyStreamToken(token, secret, 1001);
+
+    expect(claims).toEqual({ cameraId: "cam-1", path: "cam-01" });
+  });
+
+  it("rejects expired stream tokens", () => {
+    const token = issueStreamToken({ cameraId: "cam-1", path: "cam-01" }, secret, 60, 1000);
+
+    expect(() => verifyStreamToken(token, secret, 1061)).toThrow("jwt expired");
+  });
+
+  it("rejects tampered signatures", () => {
+    const token = issueStreamToken({ cameraId: "cam-1", path: "cam-01" }, secret, 60, 1000);
+    const [h, p] = token.split(".");
+    expect(() => verifyStreamToken(`${h}.${p}.short`, secret, 1001)).toThrow("invalid jwt signature");
+  });
+
+  it("access 토큰을 stream 토큰으로 검증하면 거부된다(클레임 모양이 달라 typ가 안 맞음)", () => {
+    const accessToken = issueJwt(context, secret, 60, "access", 1000);
+    expect(() => verifyStreamToken(accessToken, secret, 1001)).toThrow("unexpected jwt type");
   });
 });
 

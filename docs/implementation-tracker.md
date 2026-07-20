@@ -34,7 +34,7 @@
 | 운영 보안 | 진행 중 | Mosquitto auth/ACL(보드별 계정 발급 + ACL, `allow_anonymous` 폐지) 완료(2026-07-13). TLS(mqtts/wss) **설정 준비** 완료(2026-07-14, `docs/tls-deployment.md`) — 실제 프로덕션 배포 검증은 미완료. 서비스간은 mTLS 대신 기존 공용 계정(`svc-backend`)을 API Key로 간주하기로 결정 |
 | Device 연결 프로토콜 | 완료(백엔드) | Device↔Gateway 구간 연결 방식(TCP_IP/SERIAL/MODBUS_TCP/MODBUS_RTU/ZIGBEE/ZWAVE) + 연결 파라미터를 `PATCH /devices/:id/connection`(ADMIN, audit)으로 설정. Gateway↔플랫폼(MQTT)은 무관·불변. 관리 UI는 M16으로 이동 |
 | Admin 관리 화면 (M16) | 완료 | 스케줄/예약, 시스템 기본정보, 도면, 지역(Area), 기기 등록/수정/연결 설정/소프트 폐기까지 실인프라·Playwright E2E 검증 완료 |
-| 카메라/PTZ (M17) | 진행 중 (Phase 0~3) | 인프라, camera-repository, 카메라 관리 API/Admin 화면, PTZ 제어 경로(gateway ONVIF 어댑터 — `onvif` 라이브러리로 실제 SOAP 연결 시도까지 실인프라 확인)까지 완료. media-gateway 스트림 서명 URL, 알람 자동 연동, 라이브 뷰 UI는 미착수. 실카메라 하드웨어 미보유로 SOAP 프로토콜 자체는 미검증 |
+| 카메라/PTZ (M17) | 진행 중 (Phase 0~4) | 인프라, camera-repository, 카메라 관리 API/Admin 화면, PTZ 제어 경로(gateway ONVIF 어댑터), media-gateway 서명 스트림 URL(MediaMTX authHTTPAddress 웹훅, 토큰 유/무 401·200 실측)까지 완료. 알람 자동 연동, 라이브 뷰 UI는 미착수. 실카메라 하드웨어 미보유로 ONVIF SOAP 프로토콜 자체는 미검증 |
 | 통합/E2E/성능 테스트 | 진행 중 | CI 파이프라인(lint+typecheck+기존 유닛테스트 124케이스 자동 실행) 완료(2026-07-14, ESLint 최초 도입 포함). **통합(Testcontainers) 완료(2026-07-14)** — `packages/test-support` + `apps/gateway`/`apps/api` 통합 테스트 6케이스 + `integration.yml` CI 편입. E2E(Playwright)·성능은 미착수 |
 
 ---
@@ -882,8 +882,8 @@ enterprise/site/building/area/floor_map/device는 전부 `packages/db/src/seed.t
 ### M17. 카메라/PTZ (현장 확인)
 
 상태: **진행 중 — Phase 0(인프라)·Phase 1(contracts/DB)·Phase 2(카메라 관리 API+Admin 화면)·
-Phase 3(PTZ 제어 경로) 완료** (2026-07-20 신설 — 사용자 요청: 알람 등 현장 상황 발생 시 카메라로
-추가 확인하는 기능의 실제 구현)
+Phase 3(PTZ 제어 경로)·Phase 4(media-gateway 서명 스트림 URL) 완료** (2026-07-20 신설 — 사용자
+요청: 알람 등 현장 상황 발생 시 카메라로 추가 확인하는 기능의 실제 구현)
 
 배경: 설계 자체는 이전부터 `architecture.md` §5-cam, `api-spec.md` §4-cam,
 `sequence-diagrams.md` §8-cam, `ui-ux-design.md` §4.5-cam에 있었고 DB 스키마(`camera`/
@@ -984,8 +984,37 @@ Phase 3(PTZ 제어 경로) 완료** (2026-07-20 신설 — 사용자 요청: 알
 방식 등)는 검증 못 함 — M12의 ESP32 실기기 미검증과 같은 성격의 제약. 코드 경로(연결 시도·
 실패 처리·ack·명령 종결)는 실제로 동작함을 확인했다.
 
-다음 단계(Phase 4): `apps/media-gateway`에 MediaMTX 앞단 서명 URL 발급 구현
-(`GET /cameras/:id/stream`).
+완료된 작업 단위 — Phase 4(2026-07-20):
+1. `packages/auth`: `issueStreamToken`/`verifyStreamToken` 신설 — access/refresh 토큰과
+   클레임 모양이 아예 달라(로그인 사용자 정보 없음, `{cameraId, path}`만) `issueJwt`를 억지로
+   재사용하지 않고 같은 HS256 서명 방식만 공유하는 별도 함수로 분리(로그인 핵심 경로 불변).
+   테스트 4케이스 추가
+2. `apps/media-gateway`를 스캐폴딩(콘솔 로그 1줄)에서 실제 HTTP 서버로 교체 — MediaMTX
+   `authHTTPAddress` 웹훅(`POST /auth`) 구현. 판정 로직(`decideAuth`)을 HTTP I/O와 분리한
+   순수 함수로 빼서 실서버 없이 유닛 테스트 8케이스로 검증. `read` 액션만 스트림 토큰을
+   검사하고(`Authorization: Bearer` 또는 토큰=비밀번호 두 방식 다 지원), `path` 클레임이
+   요청 path와 다르면 거부. `publish`(카메라 RTSP 수신)는 신뢰된 내부망 트래픽이라 통과
+3. `infra/mediamtx/mediamtx.yml` 신설 — mediamtx.org 공식 기본 설정에 `authMethod: http` +
+   `authHTTPAddress`(host.docker.internal:8190) 두 줄, `authHTTPExclude`에 `publish` 추가.
+   `docker-compose.dev.yml`의 `mediamtx` 서비스에 이 파일 마운트 + `host.docker.internal`
+   `extra_hosts`(Linux 도커 엔진 호환) 추가
+4. `apps/api`: `CamerasService.getStreamUrl()` — `camera.stream_url`에서 MediaMTX 경로를
+   뽑아 HLS/WebRTC(WHEP) URL과 단기 서명 토큰(TTL 기본 300초, `STREAM_TOKEN_TTL_SECONDS`)을
+   함께 반환. `GET /cameras/:id/stream`(Role=VIEW) 라우트 추가. 웹 쪽 타입/클라이언트
+   함수(`getCameraStream`)도 추가(실제 라이브 뷰 UI는 Phase 6)
+5. 실인프라 E2E(2026-07-20) — 가장 값진 검증:
+   - mediamtx.yml 최초 배포 시 mock-camera의 RTSP publish가 401로 전부 실패하는 걸 실측 →
+     원인 규명(RTSP는 첫 ANNOUNCE에 무조건 401 챌린지를 던지는데 카메라 URL에 자격증명이
+     없어 재시도를 못 함) → `authHTTPExclude`에 `publish` 추가로 해결, 재현 확인
+   - `GET /cameras/:id/stream`으로 서명 토큰 발급 → HLS URL을 토큰 없이 요청하면 최종
+     `401`, 유효한 토큰으로 요청하면 `200`, 조작된 토큰으로 요청하면 `401` — 3가지 케이스
+     전부 실제 MediaMTX+media-gateway 조합으로 확인(HLS의 첫 302는 mediamtx 자체 쿠키
+     리다이렉트라 무관 — `curl -L`로 실제 인증 관문까지 따라가 확인)
+   - 테스트 카메라는 decommission으로 정리
+6. `pnpm turbo run typecheck build test` 45/45 task 통과(FULL TURBO 캐시 히트 포함)
+
+다음 단계(Phase 5): 알람 RAISED 시 `alarm_policy.linked_camera_id`가 있으면 자동으로
+`ptz_goto_preset` 발행(§8-cam 시퀀스), `GET /alarms/:id/cameras`(현장 확인용 커버 카메라 목록).
 
 ---
 

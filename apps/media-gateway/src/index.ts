@@ -1,14 +1,52 @@
-import { CameraProtocol } from "@smarthome/contracts";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { decideAuth, type MediaMtxAuthRequest } from "./auth-webhook.js";
 
-/**
- * @smarthome/media-gateway — PTZ 카메라 영상 중계 (옵션, docs/architecture.md §5-cam).
- * RTSP 수신 → WebRTC/HLS 중계 + 단기 서명 URL. 영상은 MQTT 경유 금지.
- * TODO: RTSP 인제스트, WebRTC 시그널링, 서명 URL 발급.
- */
+const PORT = Number(process.env.MEDIA_GATEWAY_PORT ?? "8190");
+
+function readBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    req.on("data", (chunk: Buffer) => (data += chunk.toString()));
+    req.on("end", () => resolve(data));
+    req.on("error", reject);
+  });
+}
+
+async function handleAuth(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  let payload: MediaMtxAuthRequest;
+  try {
+    payload = JSON.parse(await readBody(req)) as MediaMtxAuthRequest;
+  } catch {
+    res.writeHead(400).end();
+    return;
+  }
+  res.writeHead(decideAuth(payload, process.env.AUTH_JWT_SECRET)).end();
+}
+
 export function main(): void {
-  console.log(
-    `[media-gateway] 스캐폴딩 OK — 지원 프로토콜=${CameraProtocol.options.join(", ")}. 구현 예정.`,
-  );
+  const server = createServer((req, res) => {
+    if (req.method === "POST" && req.url === "/auth") {
+      void handleAuth(req, res);
+      return;
+    }
+    if (req.method === "GET" && req.url === "/health") {
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ status: "ok" }));
+      return;
+    }
+    res.writeHead(404).end();
+  });
+
+  server.listen(PORT, () => {
+    console.log(
+      `[media-gateway] 인증 웹훅 시작 http://0.0.0.0:${PORT}/auth (MediaMTX authHTTPAddress 대상, architecture.md §5-cam)`,
+    );
+  });
+
+  const shutdown = (): void => {
+    server.close(() => process.exit(0));
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }
 
 main();

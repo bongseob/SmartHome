@@ -235,6 +235,14 @@ export interface UpdateCameraRequest {
 /** POST /cameras/:id/ptz — {pan,tilt,zoom} 중 최소 하나 또는 {stop:true}. */
 export type PtzMoveRequest = { pan?: number; tilt?: number; zoom?: number } | { stop: true };
 
+/** GET /cameras/:id/stream 응답 — token은 재생 클라이언트가 Authorization: Bearer로 보낸다. */
+export interface CameraStreamResponse {
+  hlsUrl: string;
+  webrtcUrl: string;
+  token: string;
+  expiresAt: string;
+}
+
 export interface CameraPresetRecord {
   id: string;
   cameraId: string;

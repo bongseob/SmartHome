@@ -58,6 +58,14 @@ services:
       - "8888:8888"      # HLS 재생
       - "8889:8889"      # WebRTC(WHEP) 재생 HTTP
       - "8189:8189/udp"  # WebRTC ICE
+    volumes:
+      # authHTTPAddress가 host의 media-gateway(:8190/auth)를 가리키도록 두 줄만 바꾼 공식
+      # 기본 설정(M17 Phase 4, mediamtx.yml 파일 상단 주석 참고).
+      - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
+    extra_hosts:
+      # Linux 도커 엔진은 host.docker.internal을 자동 해석 못 한다(Windows/Mac Desktop만 기본
+      # 지원) — 어디서 돌려도 mediamtx.yml의 host.docker.internal이 host-gateway로 풀리게 한다.
+      - "host.docker.internal:host-gateway"
 
   # 실카메라 없이 로컬에서 RTSP→WebRTC/HLS 파이프라인을 검증하기 위한 목 카메라
   # (device-simulator와 동일한 철학 — 테스트 패턴 영상을 rtsp://mediamtx:8554/cam-01로 루프 송출).
