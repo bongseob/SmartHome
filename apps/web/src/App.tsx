@@ -4,6 +4,7 @@ import {
   ApiError,
   AuthExpiredError,
   createCommand,
+  getAlarmCameras,
   getAreaOverview,
   getDeviceHistory,
   getSession,
@@ -15,7 +16,15 @@ import {
   listActiveAlarms,
   acknowledgeAlarm,
 } from "./lib/api";
-import type { AlarmRecord, AreaOverview, AreaSummary, AuthUser, DeviceHistory, DeviceListItem } from "./lib/types";
+import type {
+  AlarmRecord,
+  AreaOverview,
+  AreaSummary,
+  AuthUser,
+  CameraSummary,
+  DeviceHistory,
+  DeviceListItem,
+} from "./lib/types";
 import { useRealtime } from "./lib/useRealtime";
 import { LoginView } from "./components/LoginView";
 import { FloorMap } from "./components/FloorMap";
@@ -32,6 +41,7 @@ import { Dashboard } from "./components/Dashboard";
 import { GroupControl } from "./components/GroupControl";
 import { FullMonitoring } from "./components/FullMonitoring";
 import { AlarmBanner } from "./components/AlarmBanner";
+import { LiveCameraView } from "./components/LiveCameraView";
 import { ServerStatusOverlay } from "./components/ServerStatusOverlay";
 import { useConfirm } from "./components/ConfirmDialog";
 import { useSystemName } from "./lib/useSystemName";
@@ -50,6 +60,8 @@ export function App(): JSX.Element {
   const [serverStatusOpen, setServerStatusOpen] = useState(true);
   // 미확인(RAISED) 알람 — 현장 상태변화 등. 확인(ack) 전까지 배너/하이라이트로 유지된다.
   const [alarms, setAlarms] = useState<AlarmRecord[]>([]);
+  // "📷현장" 클릭 시 그 알람을 커버하는 카메라 후보(§5-cam) — null이면 라이브 뷰 모달 닫힘.
+  const [liveViewCameras, setLiveViewCameras] = useState<CameraSummary[] | null>(null);
   const [areas, setAreas] = useState<AreaSummary[]>([]);
   const [selectedAreaId, setSelectedAreaId] = useState<string | null>(null);
   const [overview, setOverview] = useState<AreaOverview | null>(null);
@@ -134,6 +146,14 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (user) refreshAlarms();
   }, [user, refreshAlarms]);
+
+  // "📷현장" — 그 알람을 커버하는 카메라 목록을 가져와 라이브 뷰를 연다(빈 배열이면 모달이
+  // "커버하는 카메라가 없습니다"를 보여준다).
+  const handleOpenCameras = useCallback((alarmId: string) => {
+    getAlarmCameras(alarmId)
+      .then(setLiveViewCameras)
+      .catch(() => setLiveViewCameras([]));
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -511,7 +531,15 @@ export function App(): JSX.Element {
         </button>
       </header>
 
-      <AlarmBanner alarms={alarms} onAck={handleAckAlarm} resolveDeviceName={resolveDeviceName} />
+      <AlarmBanner
+        alarms={alarms}
+        onAck={handleAckAlarm}
+        resolveDeviceName={resolveDeviceName}
+        onOpenCameras={handleOpenCameras}
+      />
+      {liveViewCameras && (
+        <LiveCameraView cameras={liveViewCameras} onClose={() => setLiveViewCameras(null)} />
+      )}
       {isAdmin && (
         <ServerStatusOverlay open={serverStatusOpen} onClose={() => setServerStatusOpen(false)} />
       )}

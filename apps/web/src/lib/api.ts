@@ -261,6 +261,11 @@ export function acknowledgeAlarm(id: string): Promise<AlarmRecord> {
   });
 }
 
+/** 알람 발생원을 커버하는 카메라 목록(현장 확인용, §5-cam). */
+export function getAlarmCameras(id: string): Promise<CameraSummary[]> {
+  return authedJson<CameraSummary[]>(`/api/v1/alarms/${id}/cameras`);
+}
+
 /** 관제 화면(FloorMap)용 — 지역 1개의 배경 이미지 + 기기 목록. */
 export function getAreaOverview(areaId: string): Promise<AreaOverview> {
   return authedJson<AreaOverview>(`/api/v1/spatial/areas/${areaId}/overview`);

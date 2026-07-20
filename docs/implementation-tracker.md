@@ -34,7 +34,7 @@
 | 운영 보안 | 진행 중 | Mosquitto auth/ACL(보드별 계정 발급 + ACL, `allow_anonymous` 폐지) 완료(2026-07-13). TLS(mqtts/wss) **설정 준비** 완료(2026-07-14, `docs/tls-deployment.md`) — 실제 프로덕션 배포 검증은 미완료. 서비스간은 mTLS 대신 기존 공용 계정(`svc-backend`)을 API Key로 간주하기로 결정 |
 | Device 연결 프로토콜 | 완료(백엔드) | Device↔Gateway 구간 연결 방식(TCP_IP/SERIAL/MODBUS_TCP/MODBUS_RTU/ZIGBEE/ZWAVE) + 연결 파라미터를 `PATCH /devices/:id/connection`(ADMIN, audit)으로 설정. Gateway↔플랫폼(MQTT)은 무관·불변. 관리 UI는 M16으로 이동 |
 | Admin 관리 화면 (M16) | 완료 | 스케줄/예약, 시스템 기본정보, 도면, 지역(Area), 기기 등록/수정/연결 설정/소프트 폐기까지 실인프라·Playwright E2E 검증 완료 |
-| 카메라/PTZ (M17) | 완료(MVP, Phase 0~5) | 인프라, camera-repository, 카메라 관리 API/Admin 화면, PTZ 제어 경로(gateway ONVIF 어댑터), media-gateway 서명 스트림 URL, 알람 자동 연동(실제 telemetry 임계 위반 → 자동 ptz_goto_preset → SUCCEEDED까지 실인프라 확인)까지 전부 완료. 남은 건 Phase 6(웹 라이브 뷰 UI)뿐. 실카메라 하드웨어 미보유로 ONVIF SOAP 프로토콜 자체는 미검증 |
+| 카메라/PTZ (M17) | 완료(MVP, Phase 0~6) | 인프라, camera-repository, 카메라 관리 API/Admin 화면, PTZ 제어 경로, media-gateway 서명 스트림 URL, 알람 자동 연동, 웹 라이브 뷰(WHEP, "📷현장" 버튼)까지 전부 완료. 실카메라 하드웨어 미보유로 ONVIF SOAP은 미검증, 브라우저 자동화 도구 없어 WHEP 실제 화면 재생도 미검증(HTTP 인증 게이팅까지는 실측 확인) |
 | 통합/E2E/성능 테스트 | 진행 중 | CI 파이프라인(lint+typecheck+기존 유닛테스트 124케이스 자동 실행) 완료(2026-07-14, ESLint 최초 도입 포함). **통합(Testcontainers) 완료(2026-07-14)** — `packages/test-support` + `apps/gateway`/`apps/api` 통합 테스트 6케이스 + `integration.yml` CI 편입. E2E(Playwright)·성능은 미착수 |
 
 ---
@@ -881,8 +881,8 @@ enterprise/site/building/area/floor_map/device는 전부 `packages/db/src/seed.t
 
 ### M17. 카메라/PTZ (현장 확인)
 
-상태: **완료(MVP) — Phase 0~5 전부 완료** (2026-07-20 신설 — 사용자 요청: 알람 등 현장 상황
-발생 시 카메라로 추가 확인하는 기능의 실제 구현). 남은 건 Phase 6(라이브 뷰 UI, 옵션)뿐.
+상태: **완료(MVP) — Phase 0~6 전부 완료** (2026-07-20 신설 — 사용자 요청: 알람 등 현장 상황
+발생 시 카메라로 추가 확인하는 기능의 실제 구현)
 
 배경: 설계 자체는 이전부터 `architecture.md` §5-cam, `api-spec.md` §4-cam,
 `sequence-diagrams.md` §8-cam, `ui-ux-design.md` §4.5-cam에 있었고 DB 스키마(`camera`/
@@ -1041,10 +1041,37 @@ enterprise/site/building/area/floor_map/device는 전부 `packages/db/src/seed.t
    - 테스트 알람은 ack+resolve, 정책은 disabled, 카메라는 decommission으로 정리
 6. `pnpm turbo run typecheck build test` 45/45 task 통과
 
-M17 카메라/PTZ 현장확인 기능은 이것으로 **핵심 경로(등록→PTZ 제어→스트림 서명 URL→알람 자동
-연동) 전부 실인프라로 검증 완료**. 남은 건 Phase 6(웹 라이브 뷰 UI — hls.js/WebRTC 재생 컴포넌트,
-"📷현장" 버튼, FloorMap 카메라 레이어)뿐이며 이건 순수 프론트엔드 작업이라 백엔드 설계 변경
-없이 언제든 이어서 할 수 있다.
+완료된 작업 단위 — Phase 6(2026-07-20):
+1. `apps/web/src/components/LiveCameraView.tsx` 신설 — WHEP(WebRTC-HTTP Egress Protocol)로
+   MediaMTX에 직접 붙어 라이브 영상을 재생(architecture.md §5-cam "영상은 api를 거치지
+   않는다"). `RTCPeerConnection` 생성 → `createOffer`/`setLocalDescription` → ICE 수집 완료
+   대기(trickle 없이 단순화) → 전체 SDP를 `Authorization: Bearer <token>` 헤더와 함께 POST →
+   응답 SDP를 `setRemoteDescription`. 언마운트 시 PeerConnection 종료 + WHEP 리소스
+   DELETE. hls.js 등 새 의존성 없이 브라우저 네이티브 API만 사용(HLS `<video src>`와 달리
+   WHEP는 POST 요청이라 커스텀 헤더를 붙일 수 있어 우리 토큰 방식과 잘 맞음).
+   `isPtz`면 PTZ 이동/정지/프리셋 버튼도 같은 모달에 포함(기존 ptzMove/ptzGotoPreset 재사용)
+2. `GET /alarms/:id/cameras` 클라이언트 함수(`getAlarmCameras`) 추가, `AlarmBanner`에
+   "📷현장" 버튼 추가(알람 행마다) → `App.tsx`가 카메라 목록을 가져와 `LiveCameraView` 오픈
+3. 실인프라 검증(2026-07-20) — 브라우저 자동화 도구가 없어 **실제 화면 재생(픽셀)은
+   확인하지 못했지만**, WHEP 엔드포인트의 인증 게이팅을 HTTP 레벨에서 확인:
+   - 토큰 없이 WHEP POST → `401`(mediamtx 로그: `authentication failed: server replied
+     with code 401`)
+   - 유효한 토큰 + 가짜 SDP → `400`(mediamtx 로그: `failed to unmarshal SDP: EOF` — 인증은
+     통과했고 SDP 파싱에서만 실패, HLS 때와 동일한 인증 계층이 WebRTC에도 동일하게 적용됨을
+     확인)
+   - 중간에 media-gateway가 안 떠 있어 `connection refused`로 전부 401 처리되는 것도
+     실측(사용자가 media-gateway를 아직 안 띄운 상태였음 — fail-closed로 안전하게 거부되는
+     것 자체는 의도한 동작)
+4. `pnpm turbo run typecheck build test` 45/45 task 통과
+
+**알려진 한계**: WHEP 클라이언트 코드는 스펙대로 작성했고 서버 쪽 인증 프로토콜은 실측
+확인했지만, 실제 브라우저에서 `RTCPeerConnection`이 정상적으로 협상되고 영상이 화면에
+뜨는지는 이 세션에서 검증하지 못했다(브라우저 자동화 도구 없음). 다음에 실제 브라우저로
+"📷현장" 버튼을 눌러 영상이 뜨는지 한 번 확인하는 것을 권장.
+
+M17 카메라/PTZ 현장확인 기능은 이것으로 **설계된 전체 경로(등록→PTZ 제어→스트림 서명
+URL→알람 자동 연동→라이브 뷰) 완료**. FloorMap 카메라 레이어(방향/화각 마커 표시)는
+장식적 요소라 이번 범위에서 제외했다(선택적 후속 과제).
 
 ---
 
