@@ -16,6 +16,7 @@ import type {
   CreateSchedulerRequest,
   DeviceHistory,
   DeviceListItem,
+  DeviceStateSummary,
   FloorSummary,
   GroupCommandResponse,
   GroupControlSummary,
@@ -300,6 +301,11 @@ export function listDevices(filter?: {
 
 export function getDeviceHistory(deviceId: string, limit = 20): Promise<DeviceHistory> {
   return authedJson<DeviceHistory>(`/api/v1/devices/${deviceId}/history?limit=${limit}`);
+}
+
+/** 알람 "기기로 이동" — deviceId만 아는 상태에서 소속 지역(areaId)을 알아내는 데 쓴다. */
+export function getDeviceState(deviceId: string): Promise<DeviceStateSummary> {
+  return authedJson<DeviceStateSummary>(`/api/v1/devices/${deviceId}/state`);
 }
 
 // ─── 기기 등록/설정 (M16 Admin — ADMIN 전용) ──────────────────────────

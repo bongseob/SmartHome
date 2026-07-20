@@ -9,6 +9,8 @@ interface AlarmBannerProps {
   resolveDeviceName?: (deviceId: string | null) => string | null;
   /** "📷현장" 버튼 — 지정하면 알람 행마다 노출(§5-cam 현장 확인). */
   onOpenCameras?: (alarmId: string) => void;
+  /** "기기로 이동" 버튼 — 지정하면 알람 행마다 노출, 관제 화면에서 해당 기기를 바로 선택한다. */
+  onNavigateToDevice?: (deviceId: string) => void;
 }
 
 /** 짧은 경보음(Web Audio). 자동재생 제한이 있으면 조용히 무시된다. */
@@ -36,7 +38,13 @@ function beep(): void {
  * 미확인 알람 배너 — 현장 상태변화 등으로 발생한 RAISED 알람을 지속적으로 표시(펄스+경보음)한다.
  * 담당자/관리자가 '확인'을 눌러야만 해당 알람이 멈춘다(자동 해제 없음).
  */
-export function AlarmBanner({ alarms, onAck, resolveDeviceName, onOpenCameras }: AlarmBannerProps): JSX.Element | null {
+export function AlarmBanner({
+  alarms,
+  onAck,
+  resolveDeviceName,
+  onOpenCameras,
+  onNavigateToDevice,
+}: AlarmBannerProps): JSX.Element | null {
   const prevCount = useRef(0);
 
   useEffect(() => {
@@ -80,6 +88,15 @@ export function AlarmBanner({ alarms, onAck, resolveDeviceName, onOpenCameras }:
               <time className="alarm-banner__time">
                 {new Date(alarm.raisedAt).toLocaleTimeString()}
               </time>
+              {onNavigateToDevice && alarm.deviceId && (
+                <button
+                  type="button"
+                  className="alarm-banner__ack"
+                  onClick={() => onNavigateToDevice(alarm.deviceId as string)}
+                >
+                  🎯기기로 이동
+                </button>
+              )}
               {onOpenCameras && (
                 <button type="button" className="alarm-banner__ack" onClick={() => onOpenCameras(alarm.id)}>
                   📷현장

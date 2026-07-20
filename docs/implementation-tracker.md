@@ -34,7 +34,7 @@
 | 운영 보안 | 진행 중 | Mosquitto auth/ACL(보드별 계정 발급 + ACL, `allow_anonymous` 폐지) 완료(2026-07-13). TLS(mqtts/wss) **설정 준비** 완료(2026-07-14, `docs/tls-deployment.md`) — 실제 프로덕션 배포 검증은 미완료. 서비스간은 mTLS 대신 기존 공용 계정(`svc-backend`)을 API Key로 간주하기로 결정 |
 | Device 연결 프로토콜 | 완료(백엔드) | Device↔Gateway 구간 연결 방식(TCP_IP/SERIAL/MODBUS_TCP/MODBUS_RTU/ZIGBEE/ZWAVE) + 연결 파라미터를 `PATCH /devices/:id/connection`(ADMIN, audit)으로 설정. Gateway↔플랫폼(MQTT)은 무관·불변. 관리 UI는 M16으로 이동 |
 | Admin 관리 화면 (M16) | 완료 | 스케줄/예약, 시스템 기본정보, 도면, 지역(Area), 기기 등록/수정/연결 설정/소프트 폐기까지 실인프라·Playwright E2E 검증 완료 |
-| 카메라/PTZ (M17) | 완료(MVP, Phase 0~6) | 인프라, camera-repository, 카메라 관리 API/Admin 화면, PTZ 제어 경로, media-gateway 서명 스트림 URL, 알람 자동 연동, 웹 라이브 뷰(WHEP, "📷현장" 버튼)까지 전부 완료. 실카메라 하드웨어 미보유로 ONVIF SOAP은 미검증, 브라우저 자동화 도구 없어 WHEP 실제 화면 재생도 미검증(HTTP 인증 게이팅까지는 실측 확인) |
+| 카메라/PTZ (M17) | 완료(MVP, Phase 0~6+) | 인프라, camera-repository, 카메라 관리 API/Admin 화면, PTZ 제어 경로, media-gateway 서명 스트림 URL, 알람 자동 연동, 웹 라이브 뷰(WHEP)까지 완료 — **실제 USB 웹캠+실브라우저로 최종 재생 검증됨**. 알람 "기기로 이동" 버튼, 알람 무관 "카메라" 상시 열람 화면 추가. 실카메라 하드웨어 미보유로 ONVIF SOAP만 미검증 |
 | 통합/E2E/성능 테스트 | 진행 중 | CI 파이프라인(lint+typecheck+기존 유닛테스트 124케이스 자동 실행) 완료(2026-07-14, ESLint 최초 도입 포함). **통합(Testcontainers) 완료(2026-07-14)** — `packages/test-support` + `apps/gateway`/`apps/api` 통합 테스트 6케이스 + `integration.yml` CI 편입. E2E(Playwright)·성능은 미착수 |
 
 ---
@@ -1064,13 +1064,38 @@ enterprise/site/building/area/floor_map/device는 전부 `packages/db/src/seed.t
      것 자체는 의도한 동작)
 4. `pnpm turbo run typecheck build test` 45/45 task 통과
 
-**알려진 한계**: WHEP 클라이언트 코드는 스펙대로 작성했고 서버 쪽 인증 프로토콜은 실측
-확인했지만, 실제 브라우저에서 `RTCPeerConnection`이 정상적으로 협상되고 영상이 화면에
-뜨는지는 이 세션에서 검증하지 못했다(브라우저 자동화 도구 없음). 다음에 실제 브라우저로
-"📷현장" 버튼을 눌러 영상이 뜨는지 한 번 확인하는 것을 권장.
+**2026-07-20 사용자가 실제 브라우저 + 실물 USB 웹캠으로 최종 검증** — 위 "알려진 한계"는
+해소됐다:
+1. Claude가 Windows 호스트에서 `ffmpeg -f dshow -i video="USB Video Device" ...`로 실제 USB
+   캠을 캡처해 `rtsp://localhost:8554/cam-usb-test`로 mediamtx에 발행 → `POST /cameras`로
+   등록 → 웹 "카메라" 화면에서 "보기" 클릭 → **사용자가 실제 영상이 뜨는 것을 육안으로 확인**.
+   mediamtx 로그에도 `[WebRTC] peer connection established` + `is reading from path
+   'cam-usb-test'`로 실제 재생 세션이 찍힘 — WHEP 클라이언트 코드가 진짜 브라우저에서
+   정상 동작함이 최종 확인됨
+2. **실전에서 발견한 함정**: 호스트(Windows)에서 ffmpeg로 RTSP publish할 때 `-rtsp_transport`
+   지정 없이(기본 UDP) 발행하면 Docker Desktop의 포트포워딩 구간에서 RTP/RTCP가 불안정해져
+   mediamtx가 발행 시작 정확히 10초 뒤 `session timed out`으로 끊는 문제를 실측 재현했다.
+   `-rtsp_transport tcp`로 강제하니 안정적으로 유지됨 — 호스트발 RTSP publish(예: 실카메라
+   테스트, 다른 mock 소스 추가)를 다룰 때 참고할 것(mock-camera 컨테이너는 도커 내부망
+   container-to-container라 이 문제가 없어 지금까지 안 드러났었다)
+
+완료된 작업 단위 — Phase 6 후속(2026-07-20, 사용자 요청):
+1. `AlarmBanner`에 **"🎯기기로 이동"** 버튼 추가 — `GET /devices/:id/state`로 알람의
+   `deviceId`가 속한 지역(areaId)을 알아낸 뒤, 스케줄러 화면이 이미 쓰던
+   `handleNavigateToDevice`와 동일한 절차(관제 화면 전환 + 지역 선택 + 기기 선택)로
+   이동한다. `App.tsx`의 `handleSelectDevice`를 `selectDeviceById` 공통 헬퍼로 리팩터링해
+   재사용
+2. **"카메라" 뷰어 신설**(`CameraViewer.tsx`) — 알람과 무관하게 등록된 모든 카메라를 목록으로
+   보여주고 "보기"로 바로 라이브 뷰(`LiveCameraView`)를 연다. ADMIN 전용인 기존 "카메라
+   관리"(CRUD)와 달리 `GET /cameras`가 원래 VIEW 권한이면 되는 엔드포인트라 로그인한 모든
+   사용자에게 노출(상단 공통 네비게이션, admin 게이트 없음)
+3. `pnpm turbo run typecheck build test` 45/45 통과. 위 실브라우저 검증으로 두 기능 모두
+   실제 동작까지 확인(기기로 이동은 기존에 검증된 로직 재사용이라 신뢰도 높음, 카메라
+   뷰어는 라이브 뷰 자체가 방금 실물로 검증됨)
 
 M17 카메라/PTZ 현장확인 기능은 이것으로 **설계된 전체 경로(등록→PTZ 제어→스트림 서명
-URL→알람 자동 연동→라이브 뷰) 완료**. FloorMap 카메라 레이어(방향/화각 마커 표시)는
+URL→알람 자동 연동→라이브 뷰, +알람에서 기기로 바로 이동·카메라 상시 열람) 완료 및
+실브라우저·실카메라로 최종 검증됨**. FloorMap 카메라 레이어(방향/화각 마커 표시)는
 장식적 요소라 이번 범위에서 제외했다(선택적 후속 과제).
 
 ---

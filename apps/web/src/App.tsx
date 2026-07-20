@@ -7,6 +7,7 @@ import {
   getAlarmCameras,
   getAreaOverview,
   getDeviceHistory,
+  getDeviceState,
   getSession,
   listAreas,
   login as apiLogin,
@@ -42,6 +43,7 @@ import { GroupControl } from "./components/GroupControl";
 import { FullMonitoring } from "./components/FullMonitoring";
 import { AlarmBanner } from "./components/AlarmBanner";
 import { LiveCameraView } from "./components/LiveCameraView";
+import { CameraViewer } from "./components/CameraViewer";
 import { ServerStatusOverlay } from "./components/ServerStatusOverlay";
 import { useConfirm } from "./components/ConfirmDialog";
 import { useSystemName } from "./lib/useSystemName";
@@ -74,7 +76,7 @@ export function App(): JSX.Element {
   const feedSeq = useRef(0);
 
   // 최상위 화면 전환(M16 Admin) — ADMIN 전용 스케줄러/시스템정보 화면과 기존 Floor Map 관제 화면을 오간다.
-  const [view, setView] = useState<"dashboard" | "fullMonitoring" | "map" | "groupControl" | "schedulers" | "systemInfo" | "floorMaps" | "images" | "devices" | "cameras" | "recommendations">("dashboard");
+  const [view, setView] = useState<"dashboard" | "fullMonitoring" | "map" | "groupControl" | "schedulers" | "systemInfo" | "floorMaps" | "images" | "devices" | "cameras" | "cameraViewer" | "recommendations">("dashboard");
   // 전체 모니터링에서 감시장비 선택 → 관제 화면에서 그 감시장비의 접점별 개별 제어를 펼치기 위한 포커스.
   const [focusEquipmentId, setFocusEquipmentId] = useState<string | null>(null);
   // 스케줄러 등 다른 화면에서 특정 그룹의 개별제어 패널을 펼쳐달라는 요청.
@@ -212,20 +214,28 @@ export function App(): JSX.Element {
     setView("map");
   }, [dirtyCount]);
 
-  const handleSelectDevice = useCallback((device: DeviceListItem) => {
-    setSelectedDeviceId(device.id);
-    setHistory(null);
-    setHistoryError(null);
-    getDeviceHistory(device.id)
-      .then(setHistory)
-      .catch((err: unknown) => {
-        if (err instanceof AuthExpiredError) {
-          handleLogout();
-          return;
-        }
-        setHistoryError(err instanceof Error ? err.message : "이력을 불러오지 못했습니다.");
-      });
-  }, [handleLogout]);
+  const selectDeviceById = useCallback(
+    (deviceId: string) => {
+      setSelectedDeviceId(deviceId);
+      setHistory(null);
+      setHistoryError(null);
+      getDeviceHistory(deviceId)
+        .then(setHistory)
+        .catch((err: unknown) => {
+          if (err instanceof AuthExpiredError) {
+            handleLogout();
+            return;
+          }
+          setHistoryError(err instanceof Error ? err.message : "이력을 불러오지 못했습니다.");
+        });
+    },
+    [handleLogout],
+  );
+
+  const handleSelectDevice = useCallback(
+    (device: DeviceListItem) => selectDeviceById(device.id),
+    [selectDeviceById],
+  );
 
   /** 스케줄러 등에서 DEVICE 대상을 클릭 → 그 기기가 속한 지역으로 전환하고 Floor Map에서 선택한다.
    * 기기의 areaTopicPrefix는 곧 그 지역(area) 자신의 topicPrefix이므로 정확히 일치하는 지역을 찾는다. */
@@ -240,6 +250,27 @@ export function App(): JSX.Element {
       handleSelectDevice(device);
     },
     [areas, dirtyCount, handleSelectDevice],
+  );
+
+  /** 알람 배너 "기기로 이동" — deviceId만 알고 있으므로 GET /devices/:id/state로 소속 지역을
+   *  알아낸 뒤 handleNavigateToDevice와 동일한 절차(지역 전환 + Floor Map 선택)를 수행한다. */
+  const handleNavigateToDeviceById = useCallback(
+    (deviceId: string) => {
+      getDeviceState(deviceId)
+        .then((device) => {
+          const area = areas.find((a) => a.id === device.areaId);
+          if (dirtyCount > 0) setPendingPositions({});
+          setLayoutError(null);
+          setMode("execute");
+          if (area) setSelectedAreaId(area.id);
+          setView("map");
+          selectDeviceById(device.id);
+        })
+        .catch((err: unknown) => {
+          if (err instanceof AuthExpiredError) handleLogout();
+        });
+    },
+    [areas, dirtyCount, handleLogout, selectDeviceById],
   );
 
   /** 스케줄러 등에서 GROUP 대상을 클릭 → 그룹별 제어 화면으로 이동해 해당 그룹을 펼친다. */
@@ -472,6 +503,9 @@ export function App(): JSX.Element {
           <button type="button" className={view === "groupControl" ? "active" : ""} onClick={() => setView("groupControl")}>
             그룹 제어
           </button>
+          <button type="button" className={view === "cameraViewer" ? "active" : ""} onClick={() => setView("cameraViewer")}>
+            카메라
+          </button>
         </div>
         {isAdmin && (
           <div className="mode-toggle">
@@ -536,6 +570,7 @@ export function App(): JSX.Element {
         onAck={handleAckAlarm}
         resolveDeviceName={resolveDeviceName}
         onOpenCameras={handleOpenCameras}
+        onNavigateToDevice={handleNavigateToDeviceById}
       />
       {liveViewCameras && (
         <LiveCameraView cameras={liveViewCameras} onClose={() => setLiveViewCameras(null)} />
@@ -599,6 +634,10 @@ export function App(): JSX.Element {
       ) : view === "cameras" ? (
         <div className="app-shell__body app-shell__body--single">
           <CameraAdmin />
+        </div>
+      ) : view === "cameraViewer" ? (
+        <div className="app-shell__body app-shell__body--single">
+          <CameraViewer />
         </div>
       ) : view === "recommendations" ? (
         <div className="app-shell__body app-shell__body--single">

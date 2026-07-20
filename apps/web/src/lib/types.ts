@@ -77,6 +77,14 @@ export interface AreaSummary {
   imageHeightPx: number | null;
 }
 
+/** GET /devices/:id/state 응답 중 알람 "기기로 이동"에 필요한 최소 필드만 뽑아 쓴다. */
+export interface DeviceStateSummary {
+  id: string;
+  code: string;
+  name: string;
+  areaId: string | null;
+}
+
 export interface DeviceListItem {
   id: string;
   code: string;
