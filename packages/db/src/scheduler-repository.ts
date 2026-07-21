@@ -269,6 +269,30 @@ export async function updateScheduleRunCommandId(
   await db.query(`UPDATE schedule_run SET command_id = $2 WHERE id::text = $1`, [id, commandId]);
 }
 
+/**
+ * claim(schedule_run FIRED row 선기록)과 실제 발행(command_id 채움) 사이에 프로세스가
+ * 죽으면, FIRED + command_id=null 행이 영구히 남아 computeDueState가 "이미 처리됨"으로
+ * 오판해 그 일정이 다시는 발화하지 않는다(코드 리뷰 P1 #8). schedule_run에는 device_id가
+ * 없어(GROUP 대상은 claim마다 다른 기기) 자동 재발행은 할 수 없지만, 최소한 FAILED로 명시
+ * 전이시켜 "조용한 유실"을 "감사 가능한 실패"로 바꾼다 — 기존 per-claim 발행 실패와 동일하게
+ * 취급된다(자동 재시도 없음, alreadyHandled는 그대로 유지). staleBeforeMs는 정상적인 발행
+ * 소요 시간보다 넉넉히 길게 잡아 진행 중인 발행을 잘못 회수하지 않게 한다.
+ */
+export async function reapStaleFiredRuns(
+  db: QueryExecutor,
+  staleBeforeMs: number,
+): Promise<ScheduleRunRecord[]> {
+  const cutoff = new Date(Date.now() - staleBeforeMs);
+  const r = await db.query<ScheduleRunRow>(
+    `UPDATE schedule_run
+     SET status = 'FAILED'
+     WHERE status = 'FIRED' AND command_id IS NULL AND fired_at < $1
+     RETURNING ${SCHEDULE_RUN_COLUMNS}`,
+    [cutoff],
+  );
+  return r.rows.map(toScheduleRun);
+}
+
 /** 해당 scheduler의 가장 최근 schedule_run(성공/실패/스킵 무관) — due 판정에 사용. */
 export async function getLastRunForScheduler(
   db: QueryExecutor,

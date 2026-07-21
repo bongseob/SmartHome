@@ -10,6 +10,7 @@ import {
   listSchedulers,
   lockSchedulerById,
   query,
+  reapStaleFiredRuns,
   updateScheduleRunCommandId,
   updateScheduleRunStatus,
   withTransaction,
@@ -41,6 +42,10 @@ process.on("unhandledRejection", (reason) => {
 
 const dbExecutor = { query };
 const POLL_INTERVAL_MS = 15_000;
+// claimIfDue가 커밋한 FIRED 행이 dispatchClaims 전/중에 프로세스가 죽어 command_id=null로
+// 영원히 남는 것을 막는 회수 유예(코드 리뷰 P1 #8) — 정상적인 발행(같은 poll 내 병렬 처리,
+// 보통 수 초)보다 넉넉히 길게 잡아 진행 중인 발행을 잘못 회수하지 않게 한다.
+const STALE_FIRED_RUN_MS = 120_000;
 
 interface Claim {
   deviceId: string;
@@ -145,6 +150,17 @@ async function dispatchClaims(
 }
 
 async function pollOnce(mqtt: MqttClient, redis: RedisCommandClient): Promise<void> {
+  try {
+    const reaped = await reapStaleFiredRuns(dbExecutor, STALE_FIRED_RUN_MS);
+    for (const run of reaped) {
+      console.error(
+        `[scheduler] schedule_run ${run.id}(scheduler=${run.schedulerId})가 발행 완료 없이 멈춰 있었음 → FAILED로 회수`,
+      );
+    }
+  } catch (err) {
+    console.error("[scheduler] stale schedule_run 회수 실패:", err);
+  }
+
   let schedules: SchedulerRecord[];
   try {
     schedules = await listSchedulers(dbExecutor, { enabled: true });

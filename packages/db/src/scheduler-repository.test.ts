@@ -8,6 +8,7 @@ import {
   listGroupDeviceIds,
   listSchedulers,
   lockSchedulerById,
+  reapStaleFiredRuns,
 } from "./scheduler-repository.js";
 
 class FakeSchedulerDb implements QueryExecutor {
@@ -121,5 +122,42 @@ describe("scheduler repository", () => {
     const last = await getLastRunForScheduler(db, "sched-1");
     expect(last?.commandId).toBe("CMD-1");
     expect(last?.status).toBe("FIRED");
+  });
+
+  it("reapStaleFiredRuns는 FIRED+command_id=null+오래된 행을 FAILED로 회수한다(코드 리뷰 P1 #8)", async () => {
+    class RecoverableRunDb implements QueryExecutor {
+      statements: string[] = [];
+      params: unknown[] = [];
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+        queryParams?: unknown[],
+      ): Promise<{ rows: T[]; rowCount: number | null }> {
+        this.statements.push(text);
+        this.params = queryParams ?? [];
+        if (text.includes("UPDATE schedule_run") && text.includes("SET status = 'FAILED'")) {
+          return {
+            rows: [
+              {
+                id: "run-stuck",
+                scheduler_id: "sched-1",
+                fired_at: new Date("2026-07-10T09:59:00Z"),
+                command_id: null,
+                status: "FAILED",
+              } as unknown as T,
+            ],
+            rowCount: 1,
+          };
+        }
+        throw new Error(`unexpected query: ${text}`);
+      }
+    }
+
+    const db = new RecoverableRunDb();
+    const reaped = await reapStaleFiredRuns(db, 120_000);
+
+    expect(reaped).toHaveLength(1);
+    expect(reaped[0]?.id).toBe("run-stuck");
+    expect(reaped[0]?.status).toBe("FAILED");
+    expect(db.statements[0]).toContain("status = 'FIRED' AND command_id IS NULL");
   });
 });

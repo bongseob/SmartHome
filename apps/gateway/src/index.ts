@@ -355,6 +355,10 @@ async function retryPendingNotifications(): Promise<void> {
 
 // 텔레메트리 배치 버퍼
 let buffer: TelemetryRow[] = [];
+// DB 장애가 계속돼도 메모리가 무한정 자라지 않게 하는 상한(코드 리뷰 P1 #9) — 넘치면
+// 오래된 행부터 버려 최신 데이터를 우선 보존한다(관제 목적상 최신값이 더 중요).
+const MAX_BUFFER_ROWS = 5000;
+
 async function flush(): Promise<void> {
   if (buffer.length === 0) return;
   const rows = buffer;
@@ -363,7 +367,15 @@ async function flush(): Promise<void> {
     await insertTelemetryBatch(rows);
     console.log(`[gateway] telemetry flush ${rows.length}행`);
   } catch (err) {
-    console.error("[gateway] telemetry insert 오류:", err);
+    // 예전엔 insert 전에 버퍼를 비워서 실패하면 그 배치가 통째로 유실됐다(코드 리뷰 P1 #9) —
+    // 실패한 행을 현재 버퍼 앞쪽으로 되돌려 다음 flush에서 재시도한다(시간 순서 보존).
+    console.error(`[gateway] telemetry insert 실패 — ${rows.length}행 재큐:`, err);
+    buffer = [...rows, ...buffer];
+    if (buffer.length > MAX_BUFFER_ROWS) {
+      const dropped = buffer.length - MAX_BUFFER_ROWS;
+      buffer = buffer.slice(dropped);
+      console.error(`[gateway] telemetry 버퍼 상한(${MAX_BUFFER_ROWS}행) 초과 — 오래된 ${dropped}행 유실`);
+    }
   }
 }
 
@@ -517,8 +529,11 @@ async function onMessage(
     if (!parsed.success) return;
     const status = parsed.data.status;
     if (lastStatus.get(parts.device) === status) return; // 변화 없음
-    lastStatus.set(parts.device, status);
     const update = await setDeviceStatus(parts.device, status);
+    // DB 반영이 성공한 뒤에만 캐시를 갱신한다(코드 리뷰 P1 #10) — 먼저 갱신하면 setDeviceStatus가
+    // 실패(또는 위에서 throw)했을 때도 캐시는 이미 "반영됨"으로 착각해, 재전달된 같은 상태를
+    // 위 dedup에서 걸러버려 DB가 영원히 stale 상태로 고착될 수 있었다.
+    lastStatus.set(parts.device, status);
     if (!update.deviceId) {
       console.warn(`[gateway] 미등록 device '${parts.device}' — state 무시`);
       return;
