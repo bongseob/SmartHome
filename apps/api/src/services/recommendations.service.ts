@@ -7,6 +7,7 @@ import {
   getRecommendation,
   insertAuditLog,
   listRecommendations,
+  markRecommendationDispatchFailed,
   markRecommendationExecuted,
   query,
   recordHitlDecisionInTx,
@@ -209,12 +210,52 @@ export class RecommendationsService {
     }
 
     // APPROVE — 실제 제어 발행. 승인 트랜잭션과는 별도(네트워크 I/O인 MQTT 발행을 DB 트랜잭션
-    // 안에 넣지 않는다 — scheduler/gateway와 동일한 원칙).
-    const dispatch = await this.commands.dispatchAsAi(
-      updated.targetId,
-      updated.proposedCommand,
-      updated.proposedPayload as Record<string, unknown> | undefined,
+    // 안에 넣지 않는다 — scheduler/gateway와 동일한 원칙). 여기서 던지면 예전엔 APPROVED에
+    // 영구히 멈춰 재승인도 재시도도 못 했다(코드 리뷰 P1 #4) — 실패를 DISPATCH_FAILED로
+    // 명시적으로 남기고 운영자가 retryDispatch()로 재시도할 수 있게 한다.
+    return this.dispatchAndFinalize(id, updated.targetId, updated.proposedCommand, updated.proposedPayload);
+  }
+
+  /**
+   * 운영자가 DISPATCH_FAILED 추천을 다시 발행 시도한다(코드 리뷰 P1 #4). 승인 자체를 다시
+   * 거치지 않는다 — 이미 승인된 제어 내용을 그대로 재발행할 뿐이라 CONTROL 권한만 다시 확인한다.
+   */
+  async retryDispatch(id: string, auth: AuthContext): Promise<unknown> {
+    const recommendation = await getRecommendation(dbExecutor, id);
+    if (!recommendation) {
+      throw new NotFoundException(`recommendation not found: ${id}`);
+    }
+    if (recommendation.status !== "DISPATCH_FAILED") {
+      throw new ConflictException(
+        `DISPATCH_FAILED 상태에서만 재시도할 수 있습니다(현재: ${recommendation.status}).`,
+      );
+    }
+    await assertDeviceAccess(auth, recommendation.targetId, "CONTROL");
+    return this.dispatchAndFinalize(
+      id,
+      recommendation.targetId,
+      recommendation.proposedCommand,
+      recommendation.proposedPayload,
     );
-    return markRecommendationExecuted(dbExecutor, id, dispatch.commandId);
+  }
+
+  private async dispatchAndFinalize(
+    id: string,
+    targetId: string,
+    proposedCommand: string,
+    proposedPayload: unknown,
+  ): Promise<unknown> {
+    try {
+      const dispatch = await this.commands.dispatchAsAi(
+        targetId,
+        proposedCommand,
+        proposedPayload as Record<string, unknown> | undefined,
+      );
+      return await markRecommendationExecuted(dbExecutor, id, dispatch.commandId);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      await markRecommendationDispatchFailed(dbExecutor, id, `dispatch failed: ${reason}`);
+      throw new BadRequestException(`제어 발행 실패 — 추천은 DISPATCH_FAILED로 남았습니다: ${reason}`);
+    }
   }
 }

@@ -193,6 +193,6 @@ export class CameraAdapter {
       deviceId: identity.device,
       ...(reasonCode !== undefined ? { reasonCode } : {}),
     };
-    publish(this.client, identity, "cmd/ack", ack);
+    void publish(this.client, identity, "cmd/ack", ack);
   }
 }

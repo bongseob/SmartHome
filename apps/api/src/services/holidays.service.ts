@@ -13,6 +13,7 @@ import {
   listHolidays,
   query,
   updateHoliday,
+  withTransaction,
   type CreateHolidayInput,
 } from "@smarthome/db";
 
@@ -48,83 +49,91 @@ export class HolidaysService {
     return listHolidays(holidayExecutor, filter);
   }
 
+  // 업무 변경과 insertAuditLog를 같은 트랜잭션으로 묶는다 — 예전엔 별도 호출이라 audit
+  // insert가 실패해도 변경만 남을 수 있었다(코드 리뷰 P1 #3).
   async create(body: HolidayRequest, auth: AuthContext): Promise<unknown> {
     const input = this.validate(body);
-    let holiday;
-    try {
-      holiday = await createHoliday(holidayExecutor, input);
-    } catch (err) {
-      if (isUniqueViolation(err)) {
-        throw new ConflictException(
-          `holiday already exists: ${input.month}/${input.day} ${input.lunarSolar} '${input.name}'`,
-        );
+    return withTransaction(async (client) => {
+      let holiday;
+      try {
+        holiday = await createHoliday(client, input);
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          throw new ConflictException(
+            `holiday already exists: ${input.month}/${input.day} ${input.lunarSolar} '${input.name}'`,
+          );
+        }
+        throw err;
       }
-      throw err;
-    }
-    await insertAuditLog(holidayExecutor, {
-      actorType: "ADMIN",
-      actorId: auth.userId,
-      targetType: "HOLIDAY",
-      targetId: holiday.id,
-      command: "CREATE_HOLIDAY",
-      reason: `holiday '${holiday.name}' (${holiday.month}/${holiday.day}, ${holiday.lunarSolar}) created`,
-      executionStatus: "SUCCEEDED",
-      mqttReasonCode: null,
-      sessionId: null,
-      commandId: null,
+      await insertAuditLog(client, {
+        actorType: "ADMIN",
+        actorId: auth.userId,
+        targetType: "HOLIDAY",
+        targetId: holiday.id,
+        command: "CREATE_HOLIDAY",
+        reason: `holiday '${holiday.name}' (${holiday.month}/${holiday.day}, ${holiday.lunarSolar}) created`,
+        executionStatus: "SUCCEEDED",
+        mqttReasonCode: null,
+        sessionId: null,
+        commandId: null,
+      });
+      return holiday;
     });
-    return holiday;
   }
 
   async update(id: string, body: HolidayRequest, auth: AuthContext): Promise<unknown> {
     const input = this.validate(body);
-    let holiday;
-    try {
-      holiday = await updateHoliday(holidayExecutor, id, input);
-    } catch (err) {
-      if (isUniqueViolation(err)) {
-        throw new ConflictException(
-          `holiday already exists: ${input.month}/${input.day} ${input.lunarSolar} '${input.name}'`,
-        );
+    return withTransaction(async (client) => {
+      let holiday;
+      try {
+        holiday = await updateHoliday(client, id, input);
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          throw new ConflictException(
+            `holiday already exists: ${input.month}/${input.day} ${input.lunarSolar} '${input.name}'`,
+          );
+        }
+        throw err;
       }
-      throw err;
-    }
-    if (!holiday) {
-      throw new NotFoundException(`holiday not found: ${id}`);
-    }
-    await insertAuditLog(holidayExecutor, {
-      actorType: "ADMIN",
-      actorId: auth.userId,
-      targetType: "HOLIDAY",
-      targetId: holiday.id,
-      command: "UPDATE_HOLIDAY",
-      reason: `holiday '${holiday.name}' (${holiday.month}/${holiday.day}, ${holiday.lunarSolar}) updated`,
-      executionStatus: "SUCCEEDED",
-      mqttReasonCode: null,
-      sessionId: null,
-      commandId: null,
+      if (!holiday) {
+        throw new NotFoundException(`holiday not found: ${id}`);
+      }
+      await insertAuditLog(client, {
+        actorType: "ADMIN",
+        actorId: auth.userId,
+        targetType: "HOLIDAY",
+        targetId: holiday.id,
+        command: "UPDATE_HOLIDAY",
+        reason: `holiday '${holiday.name}' (${holiday.month}/${holiday.day}, ${holiday.lunarSolar}) updated`,
+        executionStatus: "SUCCEEDED",
+        mqttReasonCode: null,
+        sessionId: null,
+        commandId: null,
+      });
+      return holiday;
     });
-    return holiday;
   }
 
   async remove(id: string, auth: AuthContext): Promise<unknown> {
-    const deleted = await deleteHoliday(holidayExecutor, id);
-    if (!deleted) {
-      throw new NotFoundException(`holiday not found: ${id}`);
-    }
-    await insertAuditLog(holidayExecutor, {
-      actorType: "ADMIN",
-      actorId: auth.userId,
-      targetType: "HOLIDAY",
-      targetId: id,
-      command: "DELETE_HOLIDAY",
-      reason: `holiday ${id} deleted`,
-      executionStatus: "SUCCEEDED",
-      mqttReasonCode: null,
-      sessionId: null,
-      commandId: null,
+    return withTransaction(async (client) => {
+      const deleted = await deleteHoliday(client, id);
+      if (!deleted) {
+        throw new NotFoundException(`holiday not found: ${id}`);
+      }
+      await insertAuditLog(client, {
+        actorType: "ADMIN",
+        actorId: auth.userId,
+        targetType: "HOLIDAY",
+        targetId: id,
+        command: "DELETE_HOLIDAY",
+        reason: `holiday ${id} deleted`,
+        executionStatus: "SUCCEEDED",
+        mqttReasonCode: null,
+        sessionId: null,
+        commandId: null,
+      });
+      return { deleted: true };
     });
-    return { deleted: true };
   }
 
   /** month 1–12, day 1–31, lunarSolar enum, name 필수. DB CHECK와 일관되게 API에서 먼저 400 처리. */

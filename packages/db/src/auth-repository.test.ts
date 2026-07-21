@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { QueryResultRow } from "./pool.js";
 import type { QueryExecutor } from "./audit-repository.js";
 import {
+  claimRefreshToken,
   getActiveRefreshToken,
   getDeviceAccessLevel,
   getUserAuthByUsername,
@@ -87,5 +88,35 @@ describe("auth repository", () => {
     await revokeRefreshToken(db, "hash-1", "hash-2");
 
     expect(token?.tokenHash).toBe("hash-1");
+  });
+
+  it("claimRefreshToken은 같은 토큰을 두 번 claim할 수 없다(동시 refresh 경쟁조건 방지, 코드 리뷰 P1 #1)", async () => {
+    // 실제 Postgres의 "UPDATE...WHERE revoked_at IS NULL...RETURNING"이 첫 트랜잭션 커밋 후
+    // 두 번째 요청에서 0행이 되는 것을, 상태를 기억하는 페이크 DB로 재현한다.
+    class StatefulRefreshTokenDb implements QueryExecutor {
+      private revoked = false;
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+      ): Promise<{ rows: T[]; rowCount: number | null }> {
+        if (text.includes("UPDATE refresh_token") && text.includes("RETURNING user_id")) {
+          if (this.revoked) {
+            return { rows: [], rowCount: 0 };
+          }
+          this.revoked = true;
+          return {
+            rows: [{ user_id: "11111111-1111-1111-1111-111111111111" } as unknown as T],
+            rowCount: 1,
+          };
+        }
+        throw new Error(`unexpected query: ${text}`);
+      }
+    }
+
+    const db = new StatefulRefreshTokenDb();
+    const first = await claimRefreshToken(db, "hash-1");
+    const second = await claimRefreshToken(db, "hash-1"); // 동시 요청(또는 재전송) 시뮬레이션
+
+    expect(first?.userId).toBe("11111111-1111-1111-1111-111111111111");
+    expect(second).toBeNull();
   });
 });

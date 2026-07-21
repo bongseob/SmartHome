@@ -109,12 +109,12 @@ export class MockResponder {
   private publishState(identity: DeviceIdentity, status: DeviceStatus): void {
     if (!this.client) return;
     const state: StatePayload = { status, ts: Date.now() };
-    publish(this.client, identity, "state", state); // retained
+    void publish(this.client, identity, "state", state); // retained
   }
 
   private sendAck(identity: DeviceIdentity, ack: AckPayload): void {
     if (!this.client) return;
-    publish(this.client, identity, "cmd/ack", ack);
+    void publish(this.client, identity, "cmd/ack", ack);
   }
 
   async stop(): Promise<void> {

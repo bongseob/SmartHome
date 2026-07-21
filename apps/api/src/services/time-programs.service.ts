@@ -19,6 +19,8 @@ import {
   query,
   setTimeProgramEnabled,
   unmapTimeProgramGroup,
+  withTransaction,
+  type QueryExecutor,
 } from "@smarthome/db";
 
 const tpExecutor = { query };
@@ -73,40 +75,55 @@ export class TimeProgramsService {
     const name = typeof body.name === "string" ? body.name.trim() : "";
     if (name.length === 0) throw new BadRequestException("name is required");
 
-    let program;
-    try {
-      program = await createTimeProgram(tpExecutor, {
-        programNo: body.programNo,
-        name,
-        createdBy: auth.userId,
-      });
-    } catch (err) {
-      if (pgCode(err) === PG_UNIQUE_VIOLATION) {
-        throw new ConflictException(`program_no already exists: ${body.programNo}`);
+    // 업무 변경(createTimeProgram)과 insertAuditLog를 같은 트랜잭션으로 묶는다 — 예전엔
+    // 별도 호출이라 audit insert가 실패해도 생성만 남을 수 있었다(코드 리뷰 P1 #3).
+    return withTransaction(async (client) => {
+      let program;
+      try {
+        program = await createTimeProgram(client, {
+          programNo: body.programNo,
+          name,
+          createdBy: auth.userId,
+        });
+      } catch (err) {
+        if (pgCode(err) === PG_UNIQUE_VIOLATION) {
+          throw new ConflictException(`program_no already exists: ${body.programNo}`);
+        }
+        throw err;
       }
-      throw err;
-    }
-    await this.audit(auth, "CREATE_TIME_PROGRAM", program.id, `time program #${program.programNo} '${program.name}' created`);
-    return program;
+      await this.audit(
+        client,
+        auth,
+        "CREATE_TIME_PROGRAM",
+        program.id,
+        `time program #${program.programNo} '${program.name}' created`,
+      );
+      return program;
+    });
   }
 
   async setEnabled(id: string, enabled: boolean, auth: AuthContext): Promise<unknown> {
-    const program = await setTimeProgramEnabled(tpExecutor, id, enabled);
-    if (!program) throw new NotFoundException(`time program not found: ${id}`);
-    await this.audit(
-      auth,
-      enabled ? "ENABLE_TIME_PROGRAM" : "DISABLE_TIME_PROGRAM",
-      program.id,
-      `time program #${program.programNo} ${enabled ? "enabled" : "disabled"}`,
-    );
-    return program;
+    return withTransaction(async (client) => {
+      const program = await setTimeProgramEnabled(client, id, enabled);
+      if (!program) throw new NotFoundException(`time program not found: ${id}`);
+      await this.audit(
+        client,
+        auth,
+        enabled ? "ENABLE_TIME_PROGRAM" : "DISABLE_TIME_PROGRAM",
+        program.id,
+        `time program #${program.programNo} ${enabled ? "enabled" : "disabled"}`,
+      );
+      return program;
+    });
   }
 
   async remove(id: string, auth: AuthContext): Promise<unknown> {
-    const deleted = await deleteTimeProgram(tpExecutor, id);
-    if (!deleted) throw new NotFoundException(`time program not found: ${id}`);
-    await this.audit(auth, "DELETE_TIME_PROGRAM", id, `time program ${id} deleted`);
-    return { deleted: true };
+    return withTransaction(async (client) => {
+      const deleted = await deleteTimeProgram(client, id);
+      if (!deleted) throw new NotFoundException(`time program not found: ${id}`);
+      await this.audit(client, auth, "DELETE_TIME_PROGRAM", id, `time program ${id} deleted`);
+      return { deleted: true };
+    });
   }
 
   async addSlot(id: string, body: AddSlotRequest, auth: AuthContext): Promise<unknown> {
@@ -127,27 +144,32 @@ export class TimeProgramsService {
     if (typeof body.powerOn !== "boolean") {
       throw new BadRequestException("powerOn must be a boolean");
     }
-    const slot = await addTimeProgramSlot(tpExecutor, {
-      timeProgramId: id,
-      dayOfWeek,
-      isHoliday,
-      atTime: body.atTime,
-      powerOn: body.powerOn,
+    return withTransaction(async (client) => {
+      const slot = await addTimeProgramSlot(client, {
+        timeProgramId: id,
+        dayOfWeek,
+        isHoliday,
+        atTime: body.atTime,
+        powerOn: body.powerOn,
+      });
+      await this.audit(
+        client,
+        auth,
+        "ADD_TIME_PROGRAM_SLOT",
+        id,
+        `slot ${isHoliday ? "holiday" : `dow=${dayOfWeek}`} @${body.atTime} → ${body.powerOn ? "ON" : "OFF"}`,
+      );
+      return slot;
     });
-    await this.audit(
-      auth,
-      "ADD_TIME_PROGRAM_SLOT",
-      id,
-      `slot ${isHoliday ? "holiday" : `dow=${dayOfWeek}`} @${body.atTime} → ${body.powerOn ? "ON" : "OFF"}`,
-    );
-    return slot;
   }
 
   async removeSlot(id: string, slotId: string, auth: AuthContext): Promise<unknown> {
-    const removed = await deleteTimeProgramSlot(tpExecutor, id, slotId);
-    if (!removed) throw new NotFoundException(`slot not found: ${slotId}`);
-    await this.audit(auth, "DELETE_TIME_PROGRAM_SLOT", id, `slot ${slotId} deleted`);
-    return { deleted: true };
+    return withTransaction(async (client) => {
+      const removed = await deleteTimeProgramSlot(client, id, slotId);
+      if (!removed) throw new NotFoundException(`slot not found: ${slotId}`);
+      await this.audit(client, auth, "DELETE_TIME_PROGRAM_SLOT", id, `slot ${slotId} deleted`);
+      return { deleted: true };
+    });
   }
 
   /** 스케줄 등록: 프로그램 ↔ Device_Group 매핑. */
@@ -156,27 +178,31 @@ export class TimeProgramsService {
     if (typeof groupId !== "string" || groupId.length === 0) {
       throw new BadRequestException("groupId is required");
     }
-    try {
-      await mapTimeProgramGroup(tpExecutor, id, groupId);
-    } catch (err) {
-      const code = pgCode(err);
-      if (code === PG_UNIQUE_VIOLATION) {
-        throw new ConflictException(`group already mapped: ${groupId}`);
+    return withTransaction(async (client) => {
+      try {
+        await mapTimeProgramGroup(client, id, groupId);
+      } catch (err) {
+        const code = pgCode(err);
+        if (code === PG_UNIQUE_VIOLATION) {
+          throw new ConflictException(`group already mapped: ${groupId}`);
+        }
+        if (code === PG_FK_VIOLATION) {
+          throw new BadRequestException(`group not found: ${groupId}`);
+        }
+        throw err;
       }
-      if (code === PG_FK_VIOLATION) {
-        throw new BadRequestException(`group not found: ${groupId}`);
-      }
-      throw err;
-    }
-    await this.audit(auth, "MAP_TIME_PROGRAM_GROUP", id, `group ${groupId} mapped`);
-    return { mapped: true };
+      await this.audit(client, auth, "MAP_TIME_PROGRAM_GROUP", id, `group ${groupId} mapped`);
+      return { mapped: true };
+    });
   }
 
   async unmapGroup(id: string, groupId: string, auth: AuthContext): Promise<unknown> {
-    const removed = await unmapTimeProgramGroup(tpExecutor, id, groupId);
-    if (!removed) throw new NotFoundException(`mapping not found: program ${id} / group ${groupId}`);
-    await this.audit(auth, "UNMAP_TIME_PROGRAM_GROUP", id, `group ${groupId} unmapped`);
-    return { unmapped: true };
+    return withTransaction(async (client) => {
+      const removed = await unmapTimeProgramGroup(client, id, groupId);
+      if (!removed) throw new NotFoundException(`mapping not found: program ${id} / group ${groupId}`);
+      await this.audit(client, auth, "UNMAP_TIME_PROGRAM_GROUP", id, `group ${groupId} unmapped`);
+      return { unmapped: true };
+    });
   }
 
   private async ensureProgram(id: string): Promise<void> {
@@ -184,8 +210,14 @@ export class TimeProgramsService {
     if (!program) throw new NotFoundException(`time program not found: ${id}`);
   }
 
-  private async audit(auth: AuthContext, command: string, targetId: string, reason: string): Promise<void> {
-    await insertAuditLog(tpExecutor, {
+  private async audit(
+    db: QueryExecutor,
+    auth: AuthContext,
+    command: string,
+    targetId: string,
+    reason: string,
+  ): Promise<void> {
+    await insertAuditLog(db, {
       actorType: "ADMIN",
       actorId: auth.userId,
       targetType: "TIME_PROGRAM",

@@ -227,3 +227,43 @@ export async function revokeRefreshToken(
     [tokenHash, replacedByHash],
   );
 }
+
+export interface ClaimedRefreshToken {
+  userId: string;
+}
+
+/**
+ * refresh 회전 전용 — 조회(SELECT)와 폐기(UPDATE)를 분리하지 않고 단일 UPDATE...RETURNING으로
+ * 원자적으로 claim한다(코드 리뷰 P1 #1). 동시에 같은 refresh token으로 두 요청이 오면, 먼저 이
+ * 행에 도달한 트랜잭션이 커밋될 때까지 두 번째 UPDATE는 Postgres 행 잠금으로 대기하다가
+ * 커밋 후 재평가되어 `revoked_at IS NULL` 조건에 걸려 자동으로 0행(실패)이 된다 — 두 트랜잭션
+ * 모두 유효한 후손 토큰을 발급하는 경쟁을 원천 차단한다. `withTransaction`으로 감싼 client와
+ * 함께 호출해야 한다(단독 query 실행이면 락이 즉시 풀려 원자성 보장이 없다).
+ */
+export async function claimRefreshToken(
+  db: QueryExecutor,
+  tokenHash: string,
+  now = new Date(),
+): Promise<ClaimedRefreshToken | null> {
+  const result = await db.query<{ user_id: string }>(
+    `UPDATE refresh_token
+     SET revoked_at = now()
+     WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > $2
+     RETURNING user_id::text`,
+    [tokenHash, now],
+  );
+  const row = result.rows[0];
+  return row ? { userId: row.user_id } : null;
+}
+
+/** claimRefreshToken으로 폐기(claim)한 행에 "무엇으로 교체됐는지" 기록만 남긴다(감사용). */
+export async function setRefreshTokenReplacement(
+  db: QueryExecutor,
+  tokenHash: string,
+  replacedByHash: string,
+): Promise<void> {
+  await db.query(
+    `UPDATE refresh_token SET replaced_by_hash = $2 WHERE token_hash = $1`,
+    [tokenHash, replacedByHash],
+  );
+}

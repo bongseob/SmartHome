@@ -8,6 +8,7 @@ import {
   query,
   setAlarmPolicyEnabled,
   updateAlarmPolicyCameraLink,
+  withTransaction,
 } from "@smarthome/db";
 
 const policyExecutor = { query };
@@ -38,75 +39,83 @@ export class AlarmPoliciesService {
     return listAlarmPolicies(policyExecutor);
   }
 
+  // 업무 변경과 insertAuditLog를 같은 트랜잭션으로 묶는다 — 예전엔 별도 호출이라 audit
+  // insert가 실패해도 변경만 남을 수 있었다(코드 리뷰 P1 #3).
   async create(body: CreateAlarmPolicyRequest, auth: AuthContext): Promise<unknown> {
-    const policy = await createAlarmPolicy(policyExecutor, {
-      name: body.name,
-      tier: body.tier,
-      targetType: body.targetType,
-      targetId: body.targetId ?? null,
-      metric: body.metric ?? null,
-      operator: body.operator ?? null,
-      thresholdValue: body.thresholdValue ?? null,
-      durationSec: body.durationSec ?? null,
-      severity: body.severity,
-      createdBy: auth.userId,
-      linkedCameraId: body.linkedCameraId ?? null,
-      autoGotoPresetId: body.autoGotoPresetId ?? null,
+    return withTransaction(async (client) => {
+      const policy = await createAlarmPolicy(client, {
+        name: body.name,
+        tier: body.tier,
+        targetType: body.targetType,
+        targetId: body.targetId ?? null,
+        metric: body.metric ?? null,
+        operator: body.operator ?? null,
+        thresholdValue: body.thresholdValue ?? null,
+        durationSec: body.durationSec ?? null,
+        severity: body.severity,
+        createdBy: auth.userId,
+        linkedCameraId: body.linkedCameraId ?? null,
+        autoGotoPresetId: body.autoGotoPresetId ?? null,
+      });
+      // 정책 변경은 관리자 설정 변경(§6 "권한 변경·...·스케줄러 변경"과 동일 성격) — 감사 대상.
+      await insertAuditLog(client, {
+        actorType: "ADMIN",
+        actorId: auth.userId,
+        targetType: "ALARM_POLICY",
+        targetId: policy.id,
+        command: "CREATE_ALARM_POLICY",
+        reason: `policy '${policy.name}' created`,
+        executionStatus: "SUCCEEDED",
+        mqttReasonCode: null,
+        sessionId: null,
+        commandId: null,
+      });
+      return policy;
     });
-    // 정책 변경은 관리자 설정 변경(§6 "권한 변경·...·스케줄러 변경"과 동일 성격) — 감사 대상.
-    await insertAuditLog(policyExecutor, {
-      actorType: "ADMIN",
-      actorId: auth.userId,
-      targetType: "ALARM_POLICY",
-      targetId: policy.id,
-      command: "CREATE_ALARM_POLICY",
-      reason: `policy '${policy.name}' created`,
-      executionStatus: "SUCCEEDED",
-      mqttReasonCode: null,
-      sessionId: null,
-      commandId: null,
-    });
-    return policy;
   }
 
   async setEnabled(id: string, enabled: boolean, auth: AuthContext): Promise<unknown> {
-    const policy = await setAlarmPolicyEnabled(policyExecutor, id, enabled);
-    if (!policy) {
-      throw new NotFoundException(`alarm policy not found: ${id}`);
-    }
-    await insertAuditLog(policyExecutor, {
-      actorType: "ADMIN",
-      actorId: auth.userId,
-      targetType: "ALARM_POLICY",
-      targetId: policy.id,
-      command: enabled ? "ENABLE_ALARM_POLICY" : "DISABLE_ALARM_POLICY",
-      reason: `policy '${policy.name}' ${enabled ? "enabled" : "disabled"}`,
-      executionStatus: "SUCCEEDED",
-      mqttReasonCode: null,
-      sessionId: null,
-      commandId: null,
+    return withTransaction(async (client) => {
+      const policy = await setAlarmPolicyEnabled(client, id, enabled);
+      if (!policy) {
+        throw new NotFoundException(`alarm policy not found: ${id}`);
+      }
+      await insertAuditLog(client, {
+        actorType: "ADMIN",
+        actorId: auth.userId,
+        targetType: "ALARM_POLICY",
+        targetId: policy.id,
+        command: enabled ? "ENABLE_ALARM_POLICY" : "DISABLE_ALARM_POLICY",
+        reason: `policy '${policy.name}' ${enabled ? "enabled" : "disabled"}`,
+        executionStatus: "SUCCEEDED",
+        mqttReasonCode: null,
+        sessionId: null,
+        commandId: null,
+      });
+      return policy;
     });
-    return policy;
   }
 
   /** 카메라 연동 설정/해제(§5-cam) — null을 주면 해당 필드를 해제한다. */
   async setCameraLink(id: string, body: SetAlarmPolicyCameraLinkRequest, auth: AuthContext): Promise<unknown> {
-    const policy = await updateAlarmPolicyCameraLink(policyExecutor, id, body);
-    if (!policy) {
-      throw new NotFoundException(`alarm policy not found: ${id}`);
-    }
-    await insertAuditLog(policyExecutor, {
-      actorType: "ADMIN",
-      actorId: auth.userId,
-      targetType: "ALARM_POLICY",
-      targetId: policy.id,
-      command: "ALARM_POLICY_CAMERA_LINK",
-      reason: `linkedCameraId → '${policy.linkedCameraId ?? "null"}', autoGotoPresetId → '${policy.autoGotoPresetId ?? "null"}'`,
-      executionStatus: "SUCCEEDED",
-      mqttReasonCode: null,
-      sessionId: null,
-      commandId: null,
+    return withTransaction(async (client) => {
+      const policy = await updateAlarmPolicyCameraLink(client, id, body);
+      if (!policy) {
+        throw new NotFoundException(`alarm policy not found: ${id}`);
+      }
+      await insertAuditLog(client, {
+        actorType: "ADMIN",
+        actorId: auth.userId,
+        targetType: "ALARM_POLICY",
+        targetId: policy.id,
+        command: "ALARM_POLICY_CAMERA_LINK",
+        reason: `linkedCameraId → '${policy.linkedCameraId ?? "null"}', autoGotoPresetId → '${policy.autoGotoPresetId ?? "null"}'`,
+        executionStatus: "SUCCEEDED",
+        mqttReasonCode: null,
+        sessionId: null,
+        commandId: null,
+      });
+      return policy;
     });
-    return policy;
   }
 }

@@ -341,36 +341,43 @@ export class CamerasService {
 
   async addCoverage(cameraId: string, areaId: string, auth: AuthContext): Promise<{ mapped: true }> {
     await this.get(cameraId);
-    await addCameraCoverage(cameraExecutor, cameraId, areaId);
-    await insertAuditLog(cameraExecutor, {
-      actorType: "ADMIN",
-      actorId: auth.userId,
-      targetType: "DEVICE",
-      targetId: cameraId,
-      command: "CAMERA_COVERAGE_ADD",
-      reason: `area '${areaId}' 커버리지 추가`,
-      executionStatus: "SUCCEEDED",
-      mqttReasonCode: null,
-      sessionId: null,
-      commandId: null,
+    // 업무 변경(addCameraCoverage)과 insertAuditLog를 같은 트랜잭션으로 묶는다 — 예전엔 별도
+    // executor로 순차 호출해서, audit insert가 실패해도 커버리지 매핑만 남을 수 있었다
+    // (코드 리뷰 P1 #3). withTransaction 클라이언트는 QueryExecutor와 호환된다.
+    await withTransaction(async (client) => {
+      await addCameraCoverage(client, cameraId, areaId);
+      await insertAuditLog(client, {
+        actorType: "ADMIN",
+        actorId: auth.userId,
+        targetType: "DEVICE",
+        targetId: cameraId,
+        command: "CAMERA_COVERAGE_ADD",
+        reason: `area '${areaId}' 커버리지 추가`,
+        executionStatus: "SUCCEEDED",
+        mqttReasonCode: null,
+        sessionId: null,
+        commandId: null,
+      });
     });
     return { mapped: true };
   }
 
   async removeCoverage(cameraId: string, areaId: string, auth: AuthContext): Promise<{ removed: true }> {
     await this.get(cameraId);
-    await removeCameraCoverage(cameraExecutor, cameraId, areaId);
-    await insertAuditLog(cameraExecutor, {
-      actorType: "ADMIN",
-      actorId: auth.userId,
-      targetType: "DEVICE",
-      targetId: cameraId,
-      command: "CAMERA_COVERAGE_REMOVE",
-      reason: `area '${areaId}' 커버리지 해제`,
-      executionStatus: "SUCCEEDED",
-      mqttReasonCode: null,
-      sessionId: null,
-      commandId: null,
+    await withTransaction(async (client) => {
+      await removeCameraCoverage(client, cameraId, areaId);
+      await insertAuditLog(client, {
+        actorType: "ADMIN",
+        actorId: auth.userId,
+        targetType: "DEVICE",
+        targetId: cameraId,
+        command: "CAMERA_COVERAGE_REMOVE",
+        reason: `area '${areaId}' 커버리지 해제`,
+        executionStatus: "SUCCEEDED",
+        mqttReasonCode: null,
+        sessionId: null,
+        commandId: null,
+      });
     });
     return { removed: true };
   }

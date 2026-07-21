@@ -89,7 +89,7 @@ export async function recordHitlDecisionInTx(
   return updated;
 }
 
-/** 승인된 추천의 실제 명령 발행이 끝난 뒤 APPROVED→EXECUTED로 마무리한다. */
+/** 승인된 추천의 실제 명령 발행이 끝난 뒤 APPROVED/DISPATCH_FAILED→EXECUTED로 마무리한다. */
 export async function markRecommendationExecuted(
   db: QueryExecutor,
   recommendationId: string,
@@ -101,4 +101,36 @@ export async function markRecommendationExecuted(
   }
   assertRecommendationTransition(current.status, "EXECUTED");
   return updateRecommendationStatus(db, recommendationId, "EXECUTED", commandId);
+}
+
+/**
+ * 승인 커밋(APPROVED) 이후 실제 제어 발행이 실패했을 때 남기는 상태(코드 리뷰 P1 #4) —
+ * 예전엔 여기서 아무것도 안 남기고 그냥 throw만 해서 APPROVED에 영구히 멈췄다. 이 함수는
+ * 최초 실패든 재시도 실패든 같은 방식으로 호출한다(DISPATCH_FAILED→DISPATCH_FAILED 자기
+ * 전이도 허용).
+ */
+export async function markRecommendationDispatchFailed(
+  db: QueryExecutor,
+  recommendationId: string,
+  reason: string,
+): Promise<RecommendationRecord> {
+  const current = await lockRecommendationById(db, recommendationId);
+  if (!current) {
+    throw new RecommendationNotFoundError(recommendationId);
+  }
+  assertRecommendationTransition(current.status, "DISPATCH_FAILED");
+  const updated = await updateRecommendationStatus(db, recommendationId, "DISPATCH_FAILED");
+  await insertAuditLog(db, {
+    actorType: "AI",
+    actorId: null,
+    targetType: "AI_RECOMMENDATION",
+    targetId: recommendationId,
+    command: "AI_RECOMMENDATION_DISPATCH_FAILED",
+    reason,
+    executionStatus: "FAILED",
+    mqttReasonCode: null,
+    sessionId: null,
+    commandId: null,
+  });
+  return updated;
 }

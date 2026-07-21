@@ -38,4 +38,23 @@ describe("AI 추천 상태 머신 (SRS 3.5)", () => {
       IllegalRecommendationTransitionError,
     );
   });
+
+  describe("DISPATCH_FAILED 복구 경로(코드 리뷰 P1 #4)", () => {
+    it("APPROVED→DISPATCH_FAILED 허용(승인 후 발행 실패)", () => {
+      expect(canTransitionRecommendation("APPROVED", "DISPATCH_FAILED")).toBe(true);
+    });
+
+    it("DISPATCH_FAILED→EXECUTED 허용(재시도 성공)", () => {
+      expect(canTransitionRecommendation("DISPATCH_FAILED", "EXECUTED")).toBe(true);
+    });
+
+    it("DISPATCH_FAILED→DISPATCH_FAILED 허용(재시도도 다시 실패)", () => {
+      expect(canTransitionRecommendation("DISPATCH_FAILED", "DISPATCH_FAILED")).toBe(true);
+    });
+
+    it("DISPATCH_FAILED는 종결 상태가 아니다 — REJECTED 등으로는 못 간다", () => {
+      expect(canTransitionRecommendation("DISPATCH_FAILED", "REJECTED")).toBe(false);
+      expect(canTransitionRecommendation("DISPATCH_FAILED", "PENDING_APPROVAL")).toBe(false);
+    });
+  });
 });

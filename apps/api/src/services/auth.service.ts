@@ -4,13 +4,16 @@ import type { AuthContext, TokenPair } from "@smarthome/auth";
 import { issueTokenPair, verifyJwt, verifyPassword } from "@smarthome/auth";
 import type { ActorType } from "@smarthome/contracts";
 import {
+  claimRefreshToken,
   getActiveRefreshToken,
   getUserAuthById,
   getUserAuthByUsername,
   insertAuditLog,
   query,
   revokeRefreshToken,
+  setRefreshTokenReplacement,
   storeRefreshToken,
+  withTransaction,
 } from "@smarthome/db";
 
 export interface LoginRequest {
@@ -151,48 +154,49 @@ export class AuthService {
       throw new UnauthorizedException(message);
     }
     const currentHash = tokenHash(body.refreshToken);
-    const stored = await getActiveRefreshToken(authExecutor, currentHash);
-    if (!stored) {
-      await auditAuthEvent(
-        "REFRESH",
-        "FAILED",
-        actorTypeFor(verified.roles),
-        verified.userId,
-        "refresh failed: token not found, already rotated, or expired",
-      );
-      throw new UnauthorizedException("invalid refresh token");
-    }
 
-    const user = await getUserAuthById(authExecutor, stored.userId);
-    if (!user || !user.isActive) {
-      await auditAuthEvent(
-        "REFRESH",
-        "FAILED",
-        "USER",
-        stored.userId,
-        "refresh failed: user inactive or not found",
-      );
-      throw new UnauthorizedException("invalid refresh token");
-    }
+    // 조회(SELECT)와 폐기(UPDATE)를 분리하면 그 사이에 동시 refresh 요청이 둘 다 통과해
+    // 복수의 유효한 후손 토큰이 발급될 수 있었다(코드 리뷰 P1 #1). claimRefreshToken이
+    // 단일 UPDATE...RETURNING으로 원자적으로 폐기하고, 트랜잭션 안에서 이어지는 조회·발급까지
+    // 같은 행 잠금 아래 묶는다.
+    const rotation = await withTransaction(async (client) => {
+      const claimed = await claimRefreshToken(client, currentHash);
+      if (!claimed) {
+        return { ok: false as const, reason: "token not found, already rotated, or expired", userId: null };
+      }
 
-    const tokens = issueTokenPair(
-      {
-        userId: user.id,
-        username: user.username,
-        roles: user.roles,
-        topics: user.topics,
-      },
-      jwtSecret(),
-      accessTtlSeconds(),
-      refreshTtlSeconds(),
-    );
-    const nextHash = tokenHash(tokens.refreshToken);
-    await storeRefreshToken(authExecutor, {
-      userId: user.id,
-      tokenHash: nextHash,
-      expiresAt: refreshExpiresAt(),
+      const user = await getUserAuthById(client, claimed.userId);
+      if (!user || !user.isActive) {
+        // claim(폐기) 자체는 그대로 커밋된다 — 비활성/삭제된 사용자의 이 토큰이 계속 살아있는
+        // 것보다는 여기서 확실히 무효화되는 편이 안전하다(의도된 부수 효과).
+        return { ok: false as const, reason: "user inactive or not found", userId: claimed.userId };
+      }
+
+      const tokens = issueTokenPair(
+        { userId: user.id, username: user.username, roles: user.roles, topics: user.topics },
+        jwtSecret(),
+        accessTtlSeconds(),
+        refreshTtlSeconds(),
+      );
+      const nextHash = tokenHash(tokens.refreshToken);
+      await storeRefreshToken(client, { userId: user.id, tokenHash: nextHash, expiresAt: refreshExpiresAt() });
+      await setRefreshTokenReplacement(client, currentHash, nextHash);
+
+      return { ok: true as const, tokens, user };
     });
-    await revokeRefreshToken(authExecutor, currentHash, nextHash);
+
+    if (!rotation.ok) {
+      await auditAuthEvent(
+        "REFRESH",
+        "FAILED",
+        rotation.userId ? actorTypeFor(verified.roles) : "USER",
+        rotation.userId,
+        `refresh failed: ${rotation.reason}`,
+      );
+      throw new UnauthorizedException("invalid refresh token");
+    }
+
+    const { tokens, user } = rotation;
     await auditAuthEvent(
       "REFRESH",
       "SUCCEEDED",

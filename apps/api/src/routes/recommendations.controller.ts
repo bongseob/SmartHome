@@ -40,4 +40,14 @@ export class RecommendationsController {
   ): Promise<unknown> {
     return this.recommendations.decide(id, body, auth);
   }
+
+  /**
+   * 승인은 됐지만 실제 제어 발행이 실패해 DISPATCH_FAILED로 남은 추천을 재시도한다
+   * (코드 리뷰 P1 #4 — 예전엔 이 복구 경로 자체가 없었다).
+   */
+  @Roles("ADMIN", "HITL_APPROVER")
+  @Post(":id/retry-dispatch")
+  retryDispatch(@Param("id") id: string, @CurrentAuth() auth: AuthContext): Promise<unknown> {
+    return this.recommendations.retryDispatch(id, auth);
+  }
 }

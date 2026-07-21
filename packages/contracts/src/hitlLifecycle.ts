@@ -4,16 +4,23 @@ import type { RecommendationStatus } from "./enums.js";
  * AI 추천 상태 머신 (SRS 3.5, PROJECT_RULES §9 — command/alarm lifecycle.ts와 동일한 패턴).
  *
  *   PENDING_APPROVAL → APPROVED → EXECUTED
+ *        │        │         └→ DISPATCH_FAILED → EXECUTED(재시도 성공) / DISPATCH_FAILED(재실패)
  *        │        └→ REJECTED
  *        └→ EXPIRED
  *
  * confidence≥임계치 이고 고위험 대상이 아니면(requiresHitl=false) PENDING_APPROVAL을 거치지
  * 않고 생성 시점에 바로 EXECUTED로 기록한다 — 이 상태 머신은 그 초기 기록에는 적용되지 않고,
  * PENDING_APPROVAL에서 시작하는 실제 승인 흐름의 전이만 검증한다.
+ *
+ * DISPATCH_FAILED(코드 리뷰 P1 #4): 승인 커밋(APPROVED)은 트랜잭션 안에서 끝나지만, 실제
+ * MQTT 발행은 트랜잭션 밖의 별도 I/O라 실패할 수 있다 — 그 실패를 여기서 명시적 상태로
+ * 남겨야 운영자가 재시도할 수 있고, 재시도도 실패하면 같은 상태에 머무른다(자기 자신으로의
+ * 전이도 허용).
  */
 const ALLOWED_RECOMMENDATION_TRANSITIONS: Record<RecommendationStatus, readonly RecommendationStatus[]> = {
   PENDING_APPROVAL: ["APPROVED", "REJECTED", "EXPIRED"],
-  APPROVED: ["EXECUTED"],
+  APPROVED: ["EXECUTED", "DISPATCH_FAILED"],
+  DISPATCH_FAILED: ["EXECUTED", "DISPATCH_FAILED"],
   REJECTED: [],
   EXECUTED: [],
   EXPIRED: [],

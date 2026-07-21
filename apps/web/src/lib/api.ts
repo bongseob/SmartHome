@@ -564,6 +564,13 @@ export function decideRecommendation(
   });
 }
 
+/** 승인 후 발행 실패(DISPATCH_FAILED)로 남은 추천을 재시도한다(코드 리뷰 P1 #4). */
+export function retryRecommendationDispatch(id: string): Promise<RecommendationRecord> {
+  return authedJson<RecommendationRecord>(`/api/v1/recommendations/${id}/retry-dispatch`, {
+    method: "POST",
+  });
+}
+
 // ─── 카메라/PTZ (M17, 옵션 — api-spec.md §4-cam) ────────────────────────────
 
 export function listCameras(filter?: { areaId?: string; isPtz?: boolean }): Promise<CameraSummary[]> {

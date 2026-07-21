@@ -104,6 +104,12 @@ export function connect(url: string, options: IClientOptions = {}): MqttClient {
 /**
  * suffix 규칙(QoS/Retained)을 적용해 발행한다. 감사 메타데이터가 있으면
  * MQTT5 User Properties 로 싣는다(payload 중복 금지, SRS 4.3.3).
+ *
+ * 콜백 없이 client.publish()만 호출하면 실패(브로커 연결 끊김 등)가 아무 데도 보고되지 않고
+ * 조용히 사라진다(코드 리뷰 P1 #5) — command-flow의 명령 발행처럼 실패를 반드시 잡아 FAILED로
+ * 전이해야 하는 호출부가 await로 실패를 감지할 수 있도록 Promise를 반환한다. 성공/실패 여부가
+ * 덜 중요한 ack/state 발행(camera-adapter, device-simulator)은 호출부가 그냥 무시해도 된다
+ * (기존과 동일한 fire-and-forget 동작 유지, void로 명시).
  */
 export function publish(
   client: MqttClient,
@@ -111,13 +117,18 @@ export function publish(
   suffix: TopicSuffix,
   payload: unknown,
   userProps?: CommandUserProperties,
-): void {
+): Promise<void> {
   const { qos, retain } = publishOptionsFor(suffix);
   const opts: IClientPublishOptions = { qos, retain };
   if (userProps) {
     opts.properties = { userProperties: toUserProperties(userProps) };
   }
-  client.publish(topicFor(id, suffix), JSON.stringify(payload), opts);
+  return new Promise<void>((resolve, reject) => {
+    client.publish(topicFor(id, suffix), JSON.stringify(payload), opts, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
 }
 
 export type { MqttClient, IClientOptions } from "mqtt";

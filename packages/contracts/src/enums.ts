@@ -126,6 +126,10 @@ export const RecommendationStatus = z.enum([
   "REJECTED",
   "EXECUTED",
   "EXPIRED",
+  /** 승인 커밋 후 실제 제어(MQTT) 발행이 실패한 상태 — 코드 리뷰 P1 #4. 예전엔 발행 실패 시
+   *  APPROVED에 영구히 멈춰 재승인도 재시도도 못 했다. 운영자가 재시도(POST retry-dispatch)로
+   *  EXECUTED까지 복구시킬 수 있다. */
+  "DISPATCH_FAILED",
 ]);
 export type RecommendationStatus = z.infer<typeof RecommendationStatus>;
 

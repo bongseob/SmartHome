@@ -6,6 +6,7 @@ import {
   decideRecommendation,
   listDevices,
   listRecommendations,
+  retryRecommendationDispatch,
 } from "../lib/api";
 import type { DeviceListItem, RecommendationRecord } from "../lib/types";
 
@@ -30,6 +31,7 @@ const STATUS_FILTERS: Array<{ value: string; label: string }> = [
   { value: "REJECTED", label: "거절됨" },
   { value: "EXECUTED", label: "실행됨" },
   { value: "EXPIRED", label: "만료됨" },
+  { value: "DISPATCH_FAILED", label: "발행 실패" },
 ];
 
 const STATUS_LABEL: Record<RecommendationStatus, string> = {
@@ -38,6 +40,8 @@ const STATUS_LABEL: Record<RecommendationStatus, string> = {
   REJECTED: "거절됨",
   EXECUTED: "실행됨",
   EXPIRED: "만료됨",
+  // 승인은 됐지만 실제 제어 발행이 실패한 상태(코드 리뷰 P1 #4) — 아래 표에서 재시도 버튼을 보여준다.
+  DISPATCH_FAILED: "발행 실패",
 };
 
 interface FormState {
@@ -143,6 +147,15 @@ export function RecommendationsAdmin(): JSX.Element {
         reload();
       })
       .catch((err: unknown) => setLoadError(err instanceof ApiError ? err.detail : "승인/거절에 실패했습니다."))
+      .finally(() => setDecidingId(null));
+  };
+
+  const handleRetryDispatch = (id: string): void => {
+    setDecidingId(id);
+    setLoadError(null);
+    retryRecommendationDispatch(id)
+      .then(reload)
+      .catch((err: unknown) => setLoadError(err instanceof ApiError ? err.detail : "재시도에 실패했습니다."))
       .finally(() => setDecidingId(null));
   };
 
@@ -275,6 +288,16 @@ export function RecommendationsAdmin(): JSX.Element {
                       거절
                     </button>
                   </div>
+                )}
+                {r.status === "DISPATCH_FAILED" && (
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={() => handleRetryDispatch(r.id)}
+                    disabled={decidingId === r.id}
+                  >
+                    {decidingId === r.id ? "재시도 중…" : "발행 재시도"}
+                  </button>
                 )}
               </td>
             </tr>
