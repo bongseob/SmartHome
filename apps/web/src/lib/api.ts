@@ -263,6 +263,14 @@ export function acknowledgeAlarm(id: string): Promise<AlarmRecord> {
   });
 }
 
+/** 알람 스누즈(USER) — RAISED/ACK → SNOOZED, minutes분 뒤 snoozedUntil. */
+export function snoozeAlarm(id: string, minutes: number): Promise<AlarmRecord> {
+  return authedJson<AlarmRecord>(`/api/v1/alarms/${id}/snooze`, {
+    method: "POST",
+    body: JSON.stringify({ minutes }),
+  });
+}
+
 /** 알람 발생원을 커버하는 카메라 목록(현장 확인용, §5-cam). */
 export function getAlarmCameras(id: string): Promise<CameraSummary[]> {
   return authedJson<CameraSummary[]>(`/api/v1/alarms/${id}/cameras`);

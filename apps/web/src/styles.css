@@ -430,6 +430,19 @@ body {
   background: #be123c;
 }
 
+.alarm-banner__snooze {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+}
+
+.alarm-banner__snooze select {
+  min-height: 28px;
+  padding: 0.1rem 0.4rem;
+  font-size: var(--font-sm);
+}
+
 /* ── 차단기 전체 모니터링 (분전반 환경감시) ───────────────────────── */
 .full-monitoring {
   flex: 1;

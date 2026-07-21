@@ -1,10 +1,16 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type FormEvent } from "react";
 import type { AlarmRecord } from "../lib/types";
 import { SEVERITY_COLOR } from "../lib/status";
+
+/** Snooze 시간 선택지(분) — SRS/UI 목업(§4.5)에 구체적 옵션이 명시돼 있지 않아 실무에서
+ *  흔한 구간(10분/30분/1시간/3시간)으로 정했다. */
+const SNOOZE_MINUTES_OPTIONS = [10, 30, 60, 180];
 
 interface AlarmBannerProps {
   alarms: AlarmRecord[];
   onAck: (id: string) => void;
+  /** Snooze(USER, §4.5) — 지정한 분(minutes) 동안 재알림을 억제한다. */
+  onSnooze: (id: string, minutes: number) => void;
   /** deviceId → 표시용 이름(없으면 메시지/ID로 대체). */
   resolveDeviceName?: (deviceId: string | null) => string | null;
   /** "📷현장" 버튼 — 지정하면 알람 행마다 노출(§5-cam 현장 확인). */
@@ -41,6 +47,7 @@ function beep(): void {
 export function AlarmBanner({
   alarms,
   onAck,
+  onSnooze,
   resolveDeviceName,
   onOpenCameras,
   onNavigateToDevice,
@@ -105,6 +112,25 @@ export function AlarmBanner({
               <button type="button" className="alarm-banner__ack" onClick={() => onAck(alarm.id)}>
                 확인
               </button>
+              <form
+                className="alarm-banner__snooze"
+                onSubmit={(e: FormEvent<HTMLFormElement>) => {
+                  e.preventDefault();
+                  const minutes = Number(new FormData(e.currentTarget).get("minutes"));
+                  onSnooze(alarm.id, minutes);
+                }}
+              >
+                <select name="minutes" defaultValue={SNOOZE_MINUTES_OPTIONS[1]} aria-label="Snooze 시간(분)">
+                  {SNOOZE_MINUTES_OPTIONS.map((m) => (
+                    <option key={m} value={m}>
+                      {m}분
+                    </option>
+                  ))}
+                </select>
+                <button type="submit" className="alarm-banner__ack">
+                  Snooze
+                </button>
+              </form>
             </li>
           );
         })}

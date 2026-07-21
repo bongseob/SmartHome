@@ -16,6 +16,7 @@ import {
   setDeviceMonitoring,
   listActiveAlarms,
   acknowledgeAlarm,
+  snoozeAlarm,
 } from "./lib/api";
 import type {
   AlarmRecord,
@@ -142,6 +143,20 @@ export function App(): JSX.Element {
     (id: string) => {
       setAlarms((prev) => prev.filter((alarm) => alarm.id !== id));
       acknowledgeAlarm(id)
+        .then(() => refreshAlarms())
+        .catch((err: unknown) => {
+          if (err instanceof AuthExpiredError) handleLogout();
+          else refreshAlarms(); // 실패 시 원복
+        });
+    },
+    [refreshAlarms, handleLogout],
+  );
+
+  // 알람 스누즈(USER, §4.5) — 확인과 동일하게 즉시 배너에서 제거하고 서버 상태로 재동기화.
+  const handleSnoozeAlarm = useCallback(
+    (id: string, minutes: number) => {
+      setAlarms((prev) => prev.filter((alarm) => alarm.id !== id));
+      snoozeAlarm(id, minutes)
         .then(() => refreshAlarms())
         .catch((err: unknown) => {
           if (err instanceof AuthExpiredError) handleLogout();
@@ -583,6 +598,7 @@ export function App(): JSX.Element {
       <AlarmBanner
         alarms={alarms}
         onAck={handleAckAlarm}
+        onSnooze={handleSnoozeAlarm}
         resolveDeviceName={resolveDeviceName}
         onOpenCameras={handleOpenCameras}
         onNavigateToDevice={handleNavigateToDeviceById}
