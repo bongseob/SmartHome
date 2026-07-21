@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import { hasAreaAccess, isAdmin, verifyJwt, type AuthContext } from "@smarthome/auth";
+import { hasAreaAccess, isAdmin, type AuthContext } from "@smarthome/auth";
 import type { RealtimeEvent } from "@smarthome/contracts";
 import { listDevices, query } from "@smarthome/db";
 import {
@@ -8,6 +8,7 @@ import {
   subscribeRealtimeEvents,
   type RealtimeSubscriber,
 } from "@smarthome/realtime";
+import type { WsTicketService } from "../auth/ws-ticket.service.js";
 
 const executor = { query };
 const DEVICE_AREA_REFRESH_MS = 30_000;
@@ -19,7 +20,11 @@ interface ClientEntry {
 
 /**
  * WebSocket 대시보드 브리지 (docs/api-spec.md §10 GET /ws/realtime).
- * 인증: 브라우저 WebSocket API는 커스텀 헤더를 못 보내므로 쿼리스트링 `?token=<JWT>`로 전달.
+ * 인증: 브라우저 WebSocket API는 커스텀 헤더를 못 보내므로 쿼리스트링으로 넘겨야 한다 —
+ * 예전엔 장기(15분) access token을 그대로 `?token=<JWT>`로 실어서 프록시/APM/서버 접근
+ * 로그에 남았다(코드 리뷰 P2 #22). 이제는 `POST /api/v1/auth/ws-ticket`(access token으로
+ * 인증)이 발급한 30초짜리 1회용 ticket을 `?ticket=<...>`으로 받는다 — WsTicketService가
+ * Redis에서 소비 즉시 삭제하므로, 로그에 남아도 재사용할 수 없다.
  *
  * area 스코프 필터링(M7/M8 이월 부채 해소): 기기와 연관된 이벤트는 device→area 매핑을 30초
  * 캐시로 조회해 연결의 JWT `topics` claim과 대조한다(ADMIN은 전체 수신). 캐시에 없는 기기·area
@@ -32,22 +37,23 @@ export class RealtimeWsServer {
   private deviceAreaCache = new Map<string, string | null>();
   private cacheRefreshTimer: ReturnType<typeof setInterval> | undefined;
 
-  constructor(httpServer: HttpServer, path = "/ws/realtime") {
+  constructor(
+    httpServer: HttpServer,
+    private readonly wsTicket: WsTicketService,
+    path = "/ws/realtime",
+  ) {
     this.wss = new WebSocketServer({ server: httpServer, path });
-    this.wss.on("connection", (socket, request) => this.onConnection(socket, request.url));
+    this.wss.on("connection", (socket, request) => void this.onConnection(socket, request.url));
   }
 
-  private onConnection(socket: WebSocket, url: string | undefined): void {
-    const token = new URL(url ?? "", "http://internal").searchParams.get("token");
-    const secret = process.env.AUTH_JWT_SECRET;
-    if (!token || !secret) {
+  private async onConnection(socket: WebSocket, url: string | undefined): Promise<void> {
+    const ticket = new URL(url ?? "", "http://internal").searchParams.get("ticket");
+    if (!ticket) {
       socket.close(4401, "unauthorized");
       return;
     }
-    let auth: AuthContext;
-    try {
-      auth = verifyJwt(token, secret, "access");
-    } catch {
+    const auth = await this.wsTicket.consumeTicket(ticket);
+    if (!auth) {
       socket.close(4401, "unauthorized");
       return;
     }

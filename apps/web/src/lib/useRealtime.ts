@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { RealtimeEvent } from "@smarthome/contracts";
-import { wsUrl } from "./api";
+import { buildWsUrl } from "./api";
 
 const RECONNECT_DELAY_MS = 3000;
 
@@ -28,8 +28,22 @@ export function useRealtime(
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let stopped = false;
 
-    const connect = (): void => {
-      socket = new WebSocket(wsUrl());
+    // ticket 발급(authedJson) 자체가 비동기 REST 호출이라 connect도 비동기가 됐다 — 발급을
+    // 기다리는 사이 컴포넌트가 언마운트되거나 재연결 타이머가 또 돌 수 있으니 stopped를
+    // await 뒤에 다시 확인한다(고아 WebSocket이 열리는 것을 방지).
+    const connect = async (): Promise<void> => {
+      let url: string;
+      try {
+        url = await buildWsUrl();
+      } catch {
+        if (stopped) return;
+        onStatusChangeRef.current?.("disconnected");
+        reconnectTimer = setTimeout(() => void connect(), RECONNECT_DELAY_MS);
+        return;
+      }
+      if (stopped) return;
+
+      socket = new WebSocket(url);
       socket.onopen = () => {
         onStatusChangeRef.current?.("connected");
       };
@@ -52,11 +66,11 @@ export function useRealtime(
           onAuthExpiredRef.current();
           return;
         }
-        reconnectTimer = setTimeout(connect, RECONNECT_DELAY_MS);
+        reconnectTimer = setTimeout(() => void connect(), RECONNECT_DELAY_MS);
       };
     };
 
-    connect();
+    void connect();
 
     return () => {
       stopped = true;

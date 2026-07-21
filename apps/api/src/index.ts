@@ -1,9 +1,11 @@
 import "reflect-metadata";
 import { readFileSync } from "node:fs";
+import cookieParser from "cookie-parser";
 import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
 import type { Server as HttpServer } from "node:http";
 import { AppModule } from "./modules/app.module.js";
+import { WsTicketService } from "./auth/ws-ticket.service.js";
 import { ProblemJsonFilter } from "./filters/problem-json.filter.js";
 import { RealtimeWsServer } from "./realtime/realtime-ws.server.js";
 import { ensureFloorMapsDir, UPLOADS_ROOT } from "./config/uploads.js";
@@ -35,16 +37,26 @@ export async function main(): Promise<void> {
   ensureFloorMapsDir();
   const httpsOptions = loadHttpsOptions();
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
-    cors: true,
     ...(httpsOptions ? { httpsOptions } : {}),
   });
+  // refresh_token 쿠키를 컨트롤러에서 읽으려면 요청 파싱이 필요하다(코드 리뷰 P2 #22).
+  app.use(cookieParser());
+  // cors:true(요청 Origin을 그대로 반사)로는 credentials:include 쿠키를 브라우저가 거부한다 —
+  // 쿠키를 쓰려면 origin을 명시하고 credentials:true를 켜야 한다. 여러 origin을 허용하려면
+  // WEB_ORIGIN에 쉼표로 구분해 넣는다(예: 운영 도메인 + 사내 접속용 IP).
+  const webOrigins = (process.env.WEB_ORIGIN ?? "http://localhost:5173")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+  app.enableCors({ origin: webOrigins, credentials: true });
   app.useGlobalFilters(new ProblemJsonFilter());
   // 도면 이미지(M16) — 로컬 파일시스템에 저장된 파일을 /uploads/... 경로로 정적 서빙
   app.useStaticAssets(UPLOADS_ROOT, { prefix: "/uploads" });
   const port = Number(process.env.API_PORT ?? "3000");
   await app.listen(port);
 
-  const realtime = new RealtimeWsServer(app.getHttpServer() as HttpServer);
+  const wsTicketService = app.get(WsTicketService);
+  const realtime = new RealtimeWsServer(app.getHttpServer() as HttpServer, wsTicketService);
   await realtime.start();
 
   const scheme = httpsOptions ? "https" : "http";

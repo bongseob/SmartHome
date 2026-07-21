@@ -3,6 +3,7 @@ import { APP_GUARD } from "@nestjs/core";
 import { DeviceAccessGuard } from "../auth/device-access.guard.js";
 import { JwtAuthGuard } from "../auth/jwt-auth.guard.js";
 import { RolesGuard } from "../auth/roles.guard.js";
+import { WsTicketService } from "../auth/ws-ticket.service.js";
 import { AuthController } from "../routes/auth.controller.js";
 import { HealthController } from "../routes/health.controller.js";
 import { CommandsController } from "../routes/commands.controller.js";
@@ -56,6 +57,7 @@ import { SystemSettingService } from "../services/system-setting.service.js";
   ],
   providers: [
     AuthService,
+    WsTicketService,
     CommandsService,
     DevicesService,
     SpatialService,

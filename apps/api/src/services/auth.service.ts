@@ -21,11 +21,12 @@ export interface LoginRequest {
   password: string;
 }
 
-export interface RefreshRequest {
-  refreshToken: string;
-}
-
-interface LoginResponse extends TokenPair {
+/**
+ * refresh token은 이제 응답 body가 아니라 HttpOnly 쿠키로만 오간다(코드 리뷰 P2 #22 —
+ * localStorage 보관은 XSS 한 번에 장기 토큰이 그대로 털린다). 이 인터페이스는 서비스
+ * 내부 반환 타입일 뿐 — 컨트롤러가 refreshToken을 쿠키로 옮기고 body에서는 빼서 응답한다.
+ */
+export interface LoginResponse extends TokenPair {
   user: {
     id: string;
     username: string;
@@ -49,7 +50,8 @@ function accessTtlSeconds(): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 900;
 }
 
-function refreshTtlSeconds(): number {
+/** 컨트롤러가 refresh_token 쿠키의 Max-Age를 설정하는 데도 쓴다. */
+export function refreshTtlSeconds(): number {
   const parsed = Number(process.env.AUTH_REFRESH_TTL_SECONDS ?? "1209600");
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 1209600;
 }
@@ -141,19 +143,20 @@ export class AuthService {
     };
   }
 
-  async refresh(body: RefreshRequest): Promise<LoginResponse> {
-    if (!body.refreshToken) {
+  /** refreshToken은 컨트롤러가 refresh_token 쿠키에서 읽어 전달한다(코드 리뷰 P2 #22). */
+  async refresh(refreshToken: string | undefined): Promise<LoginResponse> {
+    if (!refreshToken) {
       throw new UnauthorizedException("refresh token is required");
     }
     let verified: AuthContext;
     try {
-      verified = verifyJwt(body.refreshToken, jwtSecret(), "refresh");
+      verified = verifyJwt(refreshToken, jwtSecret(), "refresh");
     } catch (err) {
       const message = err instanceof Error ? err.message : "invalid refresh token";
       await auditAuthEvent("REFRESH", "FAILED", "USER", null, `refresh failed: ${message}`);
       throw new UnauthorizedException(message);
     }
-    const currentHash = tokenHash(body.refreshToken);
+    const currentHash = tokenHash(refreshToken);
 
     // 조회(SELECT)와 폐기(UPDATE)를 분리하면 그 사이에 동시 refresh 요청이 둘 다 통과해
     // 복수의 유효한 후손 토큰이 발급될 수 있었다(코드 리뷰 P1 #1). claimRefreshToken이
@@ -216,9 +219,10 @@ export class AuthService {
     };
   }
 
-  async logout(body: RefreshRequest): Promise<{ revoked: true }> {
-    if (body.refreshToken) {
-      const hash = tokenHash(body.refreshToken);
+  /** refreshToken은 컨트롤러가 refresh_token 쿠키에서 읽어 전달한다(코드 리뷰 P2 #22). */
+  async logout(refreshToken: string | undefined): Promise<{ revoked: true }> {
+    if (refreshToken) {
+      const hash = tokenHash(refreshToken);
       const stored = await getActiveRefreshToken(authExecutor, hash);
       await revokeRefreshToken(authExecutor, hash);
       if (stored) {

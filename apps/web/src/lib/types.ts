@@ -27,9 +27,10 @@ export interface AuthUser {
   roles: Role[];
   topics: string[];
 }
+// refreshToken은 더 이상 응답 body에 없다 — HttpOnly 쿠키로만 오간다(코드 리뷰 P2 #22,
+// localStorage에 담긴 장기 토큰이 XSS 한 번에 그대로 털리는 문제를 막기 위함).
 export interface TokenPair {
   accessToken: string;
-  refreshToken: string;
   tokenType: "Bearer";
   expiresIn: number;
 }

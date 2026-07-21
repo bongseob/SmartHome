@@ -117,6 +117,10 @@ async function rawFetch(path: string, init: RequestInit): Promise<Response> {
   const isFormData = init.body instanceof FormData;
   return fetch(`${API_BASE}${path}`, {
     ...init,
+    // refresh_token이 이제 HttpOnly 쿠키라(코드 리뷰 P2 #22) 매 요청에 브라우저가 자동으로
+    // 실어 보내게 해야 한다 — 쿠키 자체는 path=/api/v1/auth로 스코프돼 있어 다른 API 호출에
+    // 불필요하게 실리지는 않는다.
+    credentials: "include",
     headers: isFormData ? init.headers : { "Content-Type": "application/json", ...init.headers },
   });
 }
@@ -152,10 +156,9 @@ function refreshSession(): Promise<StoredAuth> {
   inFlightRefresh = (async () => {
     const current = readStoredAuth();
     if (!current) throw new AuthExpiredError();
-    const response = await rawFetch("/api/v1/auth/refresh", {
-      method: "POST",
-      body: JSON.stringify({ refreshToken: current.tokens.refreshToken }),
-    });
+    // refreshToken은 더 이상 body에 실어 보내지 않는다 — HttpOnly 쿠키를 브라우저가 자동으로
+    // 붙인다(rawFetch의 credentials:"include"). 로컬 세션 존재 여부만 확인용으로 위에서 체크.
+    const response = await rawFetch("/api/v1/auth/refresh", { method: "POST", body: "{}" });
     if (!response.ok) {
       clearStoredAuth();
       throw new AuthExpiredError();
@@ -177,10 +180,8 @@ export async function logout(): Promise<void> {
   clearStoredAuth();
   if (!current) return;
   try {
-    await rawFetch("/api/v1/auth/logout", {
-      method: "POST",
-      body: JSON.stringify({ refreshToken: current.tokens.refreshToken }),
-    });
+    // refreshToken은 쿠키로 자동 전달된다(rawFetch의 credentials:"include") — body는 불필요.
+    await rawFetch("/api/v1/auth/logout", { method: "POST", body: "{}" });
   } catch {
     // 서버 호출 실패해도 로컬 세션은 이미 정리됨 — 무시
   }
@@ -520,10 +521,20 @@ export function deleteImage(id: string): Promise<{ deleted: true }> {
   return authedJson<{ deleted: true }>(`/api/v1/images/${id}`, { method: "DELETE" });
 }
 
-export function wsUrl(): string {
+/**
+ * 예전엔 장기 access token을 그대로 WS URL 쿼리스트링에 실어서 프록시/APM/서버 접근 로그에
+ * 남았다(코드 리뷰 P2 #22). 이제는 access token으로 인증된 REST 호출로 30초짜리 1회용
+ * ticket을 발급받아, 그 ticket만 쿼리스트링에 싣는다 — 로그에 남아도 이미 소비돼 못 쓴다.
+ */
+async function fetchWsTicket(): Promise<string> {
+  const { ticket } = await authedJson<{ ticket: string }>("/api/v1/auth/ws-ticket", { method: "POST" });
+  return ticket;
+}
+
+export async function buildWsUrl(): Promise<string> {
   const base = import.meta.env.VITE_WS_BASE ?? API_BASE.replace(/^http/, "ws");
-  const token = readStoredAuth()?.tokens.accessToken ?? "";
-  return `${base}/ws/realtime?token=${encodeURIComponent(token)}`;
+  const ticket = await fetchWsTicket();
+  return `${base}/ws/realtime?ticket=${encodeURIComponent(ticket)}`;
 }
 
 export interface SystemStatus {
