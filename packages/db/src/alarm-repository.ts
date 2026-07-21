@@ -65,6 +65,9 @@ const THRESHOLD_OPERATORS: Record<string, (value: number, threshold: number) => 
   "!=": (v, t) => v !== t,
 };
 
+/** 알람 정책 생성/수정 API가 저장 전에 검증하는 데 쓴다(코드 리뷰 P2 #14) — 여기가 단일 소스. */
+export const VALID_THRESHOLD_OPERATORS = Object.keys(THRESHOLD_OPERATORS);
+
 /** 알 수 없는 operator 문자열은 false — 잘못 설정된 정책이 오탐으로 알람을 올리지 않게 한다. */
 export function compareThreshold(operator: string, value: number, threshold: number): boolean {
   return THRESHOLD_OPERATORS[operator]?.(value, threshold) ?? false;

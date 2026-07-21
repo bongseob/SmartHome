@@ -1,5 +1,5 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
-import type { AlarmTier, Severity, TargetType } from "@smarthome/contracts";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { AlarmTier, Severity, TargetType } from "@smarthome/contracts";
 import type { AuthContext } from "@smarthome/auth";
 import {
   createAlarmPolicy,
@@ -9,6 +9,7 @@ import {
   setAlarmPolicyEnabled,
   updateAlarmPolicyCameraLink,
   withTransaction,
+  VALID_THRESHOLD_OPERATORS,
 } from "@smarthome/db";
 
 const policyExecutor = { query };
@@ -42,6 +43,34 @@ export class AlarmPoliciesService {
   // 업무 변경과 insertAuditLog를 같은 트랜잭션으로 묶는다 — 예전엔 별도 호출이라 audit
   // insert가 실패해도 변경만 남을 수 있었다(코드 리뷰 P1 #3).
   async create(body: CreateAlarmPolicyRequest, auth: AuthContext): Promise<unknown> {
+    // 예전엔 TypeScript interface 타입만 있고 런타임 검증이 없어서, 잘못된 enum 값이
+    // alarm_tier/target_type/severity 같은 DB 컬럼에 그대로 흘러들어가 400이 아니라
+    // DB 제약 위반 500으로 터졌다(코드 리뷰 P2 #14). 저장 전에 계약(zod enum)으로 검증한다.
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    if (!name) throw new BadRequestException("name은 필수입니다.");
+
+    const tier = AlarmTier.safeParse(body.tier);
+    if (!tier.success) {
+      throw new BadRequestException(`tier는 ${AlarmTier.options.join(", ")} 중 하나여야 합니다.`);
+    }
+    const targetType = TargetType.safeParse(body.targetType);
+    if (!targetType.success) {
+      throw new BadRequestException(`targetType은 ${TargetType.options.join(", ")} 중 하나여야 합니다.`);
+    }
+    const severity = Severity.safeParse(body.severity);
+    if (!severity.success) {
+      throw new BadRequestException(`severity는 ${Severity.options.join(", ")} 중 하나여야 합니다.`);
+    }
+    if (body.operator !== undefined && !VALID_THRESHOLD_OPERATORS.includes(body.operator)) {
+      throw new BadRequestException(`operator는 ${VALID_THRESHOLD_OPERATORS.join(", ")} 중 하나여야 합니다.`);
+    }
+    if (body.durationSec !== undefined && (!Number.isInteger(body.durationSec) || body.durationSec < 0)) {
+      throw new BadRequestException("durationSec은 0 이상의 정수여야 합니다.");
+    }
+    if (body.thresholdValue !== undefined && !Number.isFinite(body.thresholdValue)) {
+      throw new BadRequestException("thresholdValue는 유한한 숫자여야 합니다.");
+    }
+
     return withTransaction(async (client) => {
       const policy = await createAlarmPolicy(client, {
         name: body.name,
