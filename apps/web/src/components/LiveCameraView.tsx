@@ -115,10 +115,14 @@ export function LiveCameraView({ cameras, initialCameraId, onClose }: LiveCamera
           }
         });
       })
-      .catch((err: unknown) =>
-        setError(err instanceof ApiError ? err.detail : err instanceof Error ? err.message : "스트림 연결에 실패했습니다."),
-      )
-      .finally(() => setConnecting(false));
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof ApiError ? err.detail : err instanceof Error ? err.message : "스트림 연결에 실패했습니다.");
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setConnecting(false);
+      });
 
     return () => {
       cancelled = true;
@@ -131,9 +135,19 @@ export function LiveCameraView({ cameras, initialCameraId, onClose }: LiveCamera
       setPresets([]);
       return;
     }
+    let cancelled = false;
     listCameraPresets(cameraId)
-      .then(setPresets)
-      .catch(() => setPresets([]));
+      .then((result) => {
+        if (cancelled) return;
+        setPresets(result);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPresets([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [cameraId, cameraIsPtz]);
 
   const handlePtzMove = () => {

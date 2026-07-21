@@ -74,6 +74,13 @@ export function App(): JSX.Element {
   const [feed, setFeed] = useState<FeedEntry[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const feedSeq = useRef(0);
+  // getDeviceHistory 응답이 요청 순서와 다르게 도착할 수 있어(빠른 기기 전환/선택 해제), 응답을
+  // 반영하기 직전에 "여전히 이 기기가 선택돼 있는가"를 이 ref로 확인한다(오래된 응답이 최신 화면을
+  // 덮어쓰는 것 방지). selectedDeviceId가 바뀔 때마다 아래 useEffect로 동기화된다.
+  const selectedDeviceIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    selectedDeviceIdRef.current = selectedDeviceId;
+  }, [selectedDeviceId]);
 
   // 최상위 화면 전환(M16 Admin) — ADMIN 전용 스케줄러/시스템정보 화면과 기존 Floor Map 관제 화면을 오간다.
   const [view, setView] = useState<"dashboard" | "fullMonitoring" | "map" | "groupControl" | "schedulers" | "systemInfo" | "floorMaps" | "images" | "devices" | "cameras" | "cameraViewer" | "recommendations">("dashboard");
@@ -220,12 +227,16 @@ export function App(): JSX.Element {
       setHistory(null);
       setHistoryError(null);
       getDeviceHistory(deviceId)
-        .then(setHistory)
+        .then((result) => {
+          if (selectedDeviceIdRef.current !== deviceId) return;
+          setHistory(result);
+        })
         .catch((err: unknown) => {
           if (err instanceof AuthExpiredError) {
             handleLogout();
             return;
           }
+          if (selectedDeviceIdRef.current !== deviceId) return;
           setHistoryError(err instanceof Error ? err.message : "이력을 불러오지 못했습니다.");
         });
     },
@@ -416,8 +427,12 @@ export function App(): JSX.Element {
           return { ...prev, [entry[0]]: { commandId: event.commandId, status: event.status } };
         });
         if (selectedDevice && event.targetId === selectedDevice.id) {
-          getDeviceHistory(selectedDevice.id)
-            .then(setHistory)
+          const deviceId = selectedDevice.id;
+          getDeviceHistory(deviceId)
+            .then((result) => {
+              if (selectedDeviceIdRef.current !== deviceId) return;
+              setHistory(result);
+            })
             .catch(() => undefined);
         }
       }

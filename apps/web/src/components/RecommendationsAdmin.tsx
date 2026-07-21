@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { RecommendationStatus, RecommendationType } from "@smarthome/contracts";
 import {
   ApiError,
@@ -80,9 +80,18 @@ export function RecommendationsAdmin(): JSX.Element {
   const [reasonById, setReasonById] = useState<Record<string, string>>({});
   const [decidingId, setDecidingId] = useState<string | null>(null);
 
+  // 필터를 빠르게 바꾸면 이전 필터의 응답이 나중에 도착해 최신 필터의 목록을 덮어쓸 수 있어
+  // (statusFilter 변경 → reload 재호출 시점의 필터를 이 ref로 남겨 응답 반영 직전에 대조한다).
+  const statusFilterRef = useRef(statusFilter);
+  statusFilterRef.current = statusFilter;
+
   const reload = (): void => {
-    listRecommendations(statusFilter || undefined)
-      .then(setRecommendations)
+    const requestedFilter = statusFilter;
+    listRecommendations(requestedFilter || undefined)
+      .then((result) => {
+        if (statusFilterRef.current !== requestedFilter) return;
+        setRecommendations(result);
+      })
       .catch((err: unknown) => setLoadError(err instanceof ApiError ? err.detail : "추천 목록을 불러오지 못했습니다."));
   };
 
