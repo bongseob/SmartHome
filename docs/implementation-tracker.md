@@ -568,6 +568,36 @@ MQTT QoS1은 "적어도 한 번" 배달만 보장하므로(PUBACK 유실·재연
 ESP32 쪽은 이번에도 `pio run` 컴파일 검증을 못 했다(환경 제약, #6과 동일) — 실기기 반영 전
 로컬 빌드/플래싱 검증 필요.
 
+완료된 작업 단위 — ESP32 TLS 부팅 NTP 무한 대기 방지(2026-07-21, 코드 리뷰 P1 #12 조치):
+
+`MQTT_USE_TLS`일 때 TLS 인증서 유효기간 검증에 실제 시각이 필요해 NTP 동기화를 기다렸는데,
+타임아웃이 없어 NTP UDP가 막힌 환경(방화벽 등)에서는 `connectWiFi()`가 영원히 멈춰 MQTT
+연결·LWT 등록 자체를 시도조차 못 했다는 지적. `esp32/src/main.cpp`의 NTP 대기 루프에 30초
+타임아웃을 추가 — 시간 안에 동기화 못 하면 포기하고 그냥 진행한다. 이 보드는 RTC가 없어
+"마지막 정상 시각"을 보관할 수 없으므로, 이후 TLS 핸드셰이크는 실패하겠지만 이미 있는
+`reconnectMqtt()`의 재시도+로그 루프가 그 실패를 계속 보이게 재시도한다(조용한 무한 정지보다
+훨씬 나은 열화 상태). `pio run` 컴파일 검증은 이번에도 못 했다(환경 제약, #6·#7과 동일).
+
+완료된 작업 단위 — 알람 중복 방지 + 카메라 ONVIF 자격증명 암호화(2026-07-21, 코드 리뷰 P1 #13·P2 #17 조치):
+
+- **#13**: `findOpenAlarm`(SELECT)과 `insertAlarmLog`(INSERT) 사이에 동시 요청이 끼면 둘 다
+  "열린 알람 없음"으로 보고 중복 알람을 만들 수 있었다. `alarm_log(policy_id, device_id)`에
+  `WHERE state IN ('RAISED','ACK','SNOOZED')` 부분 유니크 인덱스(`0031_alarm_open_unique.sql`)를
+  추가하고, `raiseAlarmFromPolicyInTx`가 unique_violation을 잡아 승자의 알람을 대신 반환하도록
+  했다. **SAVEPOINT 없이 바로 재조회하면 Postgres가 트랜잭션 전체를 abort 상태로 만들어
+  25P02 에러가 난다는 걸 실제 동시 요청 10개로 재현해서 발견** — `SAVEPOINT`/`ROLLBACK TO
+  SAVEPOINT`로 INSERT 실패만 부분 롤백하도록 고쳤다. 에스컬레이션도 `bumpEscalatedLevel`을
+  `escalated_level < level` 조건부 UPDATE(compare-and-swap)로 바꿔 동시 sweep의 중복 알림을
+  막았다. 실제 DB에서 10-way 동시 raise → 정확히 1건만 생성됨을 확인.
+- **#17**: `camera.onvif_password`가 평문으로 저장돼 DB dump/백업만으로 카메라 계정이 노출될
+  수 있었다. `packages/auth`에 AES-256-GCM `encryptSecret`/`decryptSecret`을 추가하고,
+  `packages/db/src/camera-repository.ts`가 저장 시 암호화·조회 시 복호화하도록 투명하게
+  래핑했다(호출부는 여전히 평문만 다룸). 키는 `CAMERA_CREDENTIAL_KEY`(.env, AUTH_JWT_SECRET과
+  동일 수준). 기존에 평문으로 있던 개발용 더미 값은 재암호화가 불가능해(SQL 마이그레이션만으론
+  Node 암호화 로직 실행 불가) `0032_camera_onvif_password_encrypt.sql`로 NULL 처리해 재등록을
+  강제했다. 실제 DB에 새 비밀번호를 저장 후 원문 컬럼에 평문이 없는 것과, 조회 시 정확히
+  원문으로 복호화되는 것까지 확인.
+
 완료된 작업 단위 — 가상/실기기 구분(`device.simulated`, 2026-07-14):
 
 배경: 이 시스템은 기기가 실제로 MQTT에 붙어 응답해야 상태가 존재한다 — 실기기가 하나도 없으면

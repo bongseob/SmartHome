@@ -1,6 +1,31 @@
+import { decryptSecret, encryptSecret } from "@smarthome/auth";
 import { buildAreaTopicPrefix, type CameraProtocol, type DeviceStatus } from "@smarthome/contracts";
 import type { QueryResultRow } from "./pool.js";
 import type { QueryExecutor } from "./audit-repository.js";
+
+/**
+ * camera.onvif_password는 DB에 원문 보관이 불가피한 자격증명(migrations/0028 주석 참고)이라
+ * 애플리케이션 계층에서 암호화해 저장한다(코드 리뷰 P2 #17) — DB dump/백업만 유출돼도 카메라
+ * 계정을 그대로 얻을 수 있던 문제. getPool()의 DATABASE_URL과 같은 방식으로 packages/db가
+ * 직접 process.env를 읽는다(이 레포에서 이미 쓰는 패턴).
+ */
+function credentialKey(): string {
+  const key = process.env.CAMERA_CREDENTIAL_KEY;
+  if (!key) {
+    throw new Error("CAMERA_CREDENTIAL_KEY is not configured");
+  }
+  return key;
+}
+
+function encryptOnvifPassword(plaintext: string | null | undefined): string | null {
+  if (plaintext === null || plaintext === undefined) return null;
+  return encryptSecret(plaintext, credentialKey());
+}
+
+function decryptOnvifPassword(stored: string | null): string | null {
+  if (stored === null) return null;
+  return decryptSecret(stored, credentialKey());
+}
 
 // ─── Camera (device 1:1 확장, architecture.md §5-cam) ──────────────────────
 // camera는 category=CAMERA인 device의 확장 테이블(FK=device_id). device row 자체는
@@ -46,7 +71,7 @@ function toCamera(row: CameraRow): CameraRecord {
     fovDeg: row.fov_deg === null ? null : Number(row.fov_deg),
     headingDeg: row.heading_deg === null ? null : Number(row.heading_deg),
     onvifUsername: row.onvif_username,
-    onvifPassword: row.onvif_password,
+    onvifPassword: decryptOnvifPassword(row.onvif_password),
   };
 }
 
@@ -85,7 +110,7 @@ export async function insertCamera(db: QueryExecutor, input: InsertCameraInput):
       input.fovDeg ?? null,
       input.headingDeg ?? null,
       input.onvifUsername ?? null,
-      input.onvifPassword ?? null,
+      encryptOnvifPassword(input.onvifPassword),
     ],
   );
   const row = r.rows[0];
@@ -150,7 +175,7 @@ export async function updateCamera(
     sets.push(`onvif_username = $${params.length}`);
   }
   if (input.onvifPassword !== undefined) {
-    params.push(input.onvifPassword);
+    params.push(encryptOnvifPassword(input.onvifPassword));
     sets.push(`onvif_password = $${params.length}`);
   }
   if (sets.length === 0) return getCameraByDeviceId(db, deviceId);

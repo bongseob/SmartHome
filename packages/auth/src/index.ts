@@ -1,4 +1,4 @@
-import { createHmac, pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, pbkdf2Sync, randomBytes, timingSafeEqual } from "node:crypto";
 import type { AccessLevel, Role } from "@smarthome/contracts";
 
 export interface AuthContext {
@@ -268,4 +268,44 @@ export function verifyPassword(password: string, storedHash: string): boolean {
   const actualBuffer = Buffer.from(actual);
   const expectedBuffer = Buffer.from(expected);
   return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+/**
+ * 애플리케이션 계층 대칭 암호화(AES-256-GCM) — DB에 원문 보관이 불가피한 "우리가 상대 계정에
+ * 로그인하기 위한" 자격증명(예: camera.onvif_password, packages/db/migrations/0028)이 DB
+ * dump/백업만으로 그대로 노출되지 않도록 한다(코드 리뷰 P2 #17). 이 프로젝트엔 아직 KMS 같은
+ * 비밀관리 인프라가 없어 AUTH_JWT_SECRET/MQTT_PASSWORD와 같은 수준(.env의 대칭키)으로 맞춘다 —
+ * 키 자체가 유출되면 무력화되는 한계는 있지만, "DB만" 유출되는 훨씬 흔한 사고를 막는다.
+ */
+export function encryptSecret(plaintext: string, key: string): string {
+  const keyBuffer = secretKeyBuffer(key);
+  const iv = randomBytes(12); // GCM 표준 96비트 IV
+  const cipher = createCipheriv("aes-256-gcm", keyBuffer, iv);
+  const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return ["v1", iv.toString("base64url"), authTag.toString("base64url"), ciphertext.toString("base64url")].join("$");
+}
+
+export function decryptSecret(encoded: string, key: string): string {
+  const [version, ivText, authTagText, ciphertextText] = encoded.split("$");
+  if (version !== "v1" || !ivText || !authTagText || !ciphertextText) {
+    throw new Error("invalid encrypted secret format");
+  }
+  const keyBuffer = secretKeyBuffer(key);
+  const decipher = createDecipheriv("aes-256-gcm", keyBuffer, Buffer.from(ivText, "base64url"));
+  decipher.setAuthTag(Buffer.from(authTagText, "base64url"));
+  const plaintext = Buffer.concat([
+    decipher.update(Buffer.from(ciphertextText, "base64url")),
+    decipher.final(),
+  ]);
+  return plaintext.toString("utf8");
+}
+
+function secretKeyBuffer(key: string): Buffer {
+  if (key.length < 32) {
+    throw new Error("CAMERA_CREDENTIAL_KEY must be at least 32 characters");
+  }
+  // 임의 길이 문자열을 AES-256 키 길이(32바이트)로 정규화한다(HMAC 등의 KDF 없이 단순 해시 —
+  // 이 프로젝트 수준의 대칭키 관리 관례에 맞춤, AUTH_JWT_SECRET도 원문 길이 검증만 한다).
+  return createHmac("sha256", "camera-credential-key-v1").update(key).digest();
 }

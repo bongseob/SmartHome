@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { QueryResultRow } from "./pool.js";
 import type { QueryExecutor } from "./audit-repository.js";
-import { createAlarmPolicy, updateAlarmPolicyCameraLink } from "./alarm-repository.js";
+import { bumpEscalatedLevel, createAlarmPolicy, updateAlarmPolicyCameraLink } from "./alarm-repository.js";
 
 const POLICY_ROW = {
   id: "policy-1",
@@ -63,5 +63,33 @@ describe("alarm policy 카메라 연동(§5-cam)", () => {
     const db = new FakeAlarmPolicyDb();
     await updateAlarmPolicyCameraLink(db, "policy-1", { linkedCameraId: null, autoGotoPresetId: null });
     expect(db.params[0]).toEqual(["policy-1", null, null]);
+  });
+});
+
+describe("bumpEscalatedLevel — 동시 sweep 중복 방지(코드 리뷰 P1 #13)", () => {
+  it("조건부 UPDATE라 escalated_level < level일 때만 rowCount>0(true)", async () => {
+    class CasDb implements QueryExecutor {
+      statements: string[] = [];
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+      ): Promise<{ rows: T[]; rowCount: number | null }> {
+        this.statements.push(text);
+        return { rows: [] as T[], rowCount: 1 }; // 이번 호출은 실제로 갱신됐다고 가정
+      }
+    }
+    const db = new CasDb();
+    const applied = await bumpEscalatedLevel(db, "alarm-1", 2);
+    expect(applied).toBe(true);
+    expect(db.statements[0]).toContain("escalated_level < $2");
+  });
+
+  it("다른 sweep이 이미 먼저 올렸으면(rowCount=0) false를 반환한다", async () => {
+    class NoOpDb implements QueryExecutor {
+      async query<T extends QueryResultRow = QueryResultRow>(): Promise<{ rows: T[]; rowCount: number | null }> {
+        return { rows: [] as T[], rowCount: 0 }; // WHERE escalated_level < $2 조건에 안 걸림
+      }
+    }
+    const applied = await bumpEscalatedLevel(new NoOpDb(), "alarm-1", 2);
+    expect(applied).toBe(false);
   });
 });

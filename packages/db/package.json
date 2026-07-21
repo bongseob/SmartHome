@@ -21,6 +21,7 @@
     "provision:mqtt-auth": "dotenv -e ../../.env -- node dist/provision-mqtt-auth.js"
   },
   "dependencies": {
+    "@smarthome/auth": "workspace:*",
     "@smarthome/contracts": "workspace:*",
     "pg": "^8.13.1"
   },

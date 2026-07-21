@@ -545,9 +545,19 @@ export interface UpdateAlarmStatePatch {
   escalatedLevel?: number;
 }
 
-/** 에스컬레이션 sweep 전용 — 상태는 건드리지 않고 진행 레벨만 올린다. */
-export async function bumpEscalatedLevel(db: QueryExecutor, id: string, level: number): Promise<void> {
-  await db.query(`UPDATE alarm_log SET escalated_level = $2 WHERE id::text = $1`, [id, level]);
+/**
+ * 에스컬레이션 sweep 전용 — 상태는 건드리지 않고 진행 레벨만 올린다. 조건 없는 UPDATE였다면
+ * 동시에 도는 두 sweep(다중 gateway 인스턴스 등)이 같은 alarm의 같은 레벨을 둘 다 "아직 안
+ * 올랐다"고 보고 둘 다 성공해 알림이 중복 발송될 수 있었다(코드 리뷰 P1 #13) —
+ * `escalated_level < level` 조건으로 두 번째 UPDATE는 0행이 되게 해서(compare-and-swap)
+ * 호출부가 "내가 실제로 이 레벨을 처음 올렸는지"를 rowCount로 판정할 수 있게 한다.
+ */
+export async function bumpEscalatedLevel(db: QueryExecutor, id: string, level: number): Promise<boolean> {
+  const r = await db.query(
+    `UPDATE alarm_log SET escalated_level = $2 WHERE id::text = $1 AND escalated_level < $2`,
+    [id, level],
+  );
+  return (r.rowCount ?? 0) > 0;
 }
 
 export async function updateAlarmState(

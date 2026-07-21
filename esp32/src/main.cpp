@@ -253,9 +253,21 @@ static void connectWiFi() {
 
 #if MQTT_USE_TLS
   // TLS 인증서 유효기간(notBefore/notAfter) 검증은 보드의 실제 시각이 필요하다 — NTP 동기화
-  // 전에 TLS 핸드셰이크를 시도하면 실패한다(시각이 1970년 근처). 동기화될 때까지 대기.
+  // 전에 TLS 핸드셰이크를 시도하면 실패한다(시각이 1970년 근처). 동기화될 때까지 대기하되,
+  // NTP UDP가 막힌 방화벽 등 시각 자체를 영영 못 받는 경우 예전엔 여기서 무한정 멈춰
+  // MQTT 연결·LWT 등록조차 시도하지 못했다(코드 리뷰 P1 #12). 이 보드엔 RTC가 없어 "마지막
+  // 정상 시각"을 보관할 수도 없으므로, 유예 시간 안에 못 받으면 포기하고 넘어간다 — 이후
+  // TLS 핸드셰이크는 실패하겠지만 reconnectMqtt()의 기존 재시도+로그 루프가 그 실패를
+  // 눈에 보이게 계속 재시도한다(조용한 무한 정지보다 훨씬 낫다).
   Serial.print("[time] NTP 동기화 대기 중");
+  const uint32_t ntpTimeoutMs = 30000;
+  const uint32_t ntpStart = millis();
   while (time(nullptr) < 1700000000) {
+    if (millis() - ntpStart > ntpTimeoutMs) {
+      Serial.println(" 시간 초과 — NTP 동기화 실패, 부정확한 시각으로 계속 진행");
+      Serial.println("[time] TLS 핸드셰이크가 실패할 수 있음 — reconnectMqtt()가 계속 재시도함");
+      return;
+    }
     delay(300);
     Serial.print(".");
   }

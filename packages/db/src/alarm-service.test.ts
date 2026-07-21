@@ -45,6 +45,9 @@ class FakeAlarmDb implements QueryExecutor {
   ): Promise<{ rows: T[]; rowCount: number | null }> {
     this.statements.push(text);
 
+    if (text.includes("SAVEPOINT")) {
+      return { rows: [], rowCount: 0 };
+    }
     if (text.includes("SELECT") && text.includes("FROM alarm_log") && text.includes("FOR UPDATE")) {
       return { rows: this.row ? [{ ...this.row } as unknown as T] : [], rowCount: this.row ? 1 : 0 };
     }
@@ -165,5 +168,53 @@ describe("raiseAlarmFromPolicyInTx", () => {
     expect(result.alarm.state).toBe("ACK");
     expect(db.statements.some((s) => s.includes("INSERT INTO alarm_log"))).toBe(false);
     expect(db.statements.some((s) => s.includes("INSERT INTO audit_log"))).toBe(false);
+  });
+
+  it("동시 raise 경쟁(unique_violation)이 나면 에러로 취급하지 않고 승자의 알람을 반환한다(코드 리뷰 P1 #13)", async () => {
+    // findOpenAlarm(첫 조회)은 아직 아무도 못 봤다고 응답하지만, insertAlarmLog 시점에는
+    // 다른 트랜잭션이 이미 커밋해 idx_alarm_log_open_unique 위반이 나는 상황을 재현한다.
+    class RacingAlarmDb implements QueryExecutor {
+      statements: string[] = [];
+      private insertAttempted = false;
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+      ): Promise<{ rows: T[]; rowCount: number | null }> {
+        this.statements.push(text);
+        if (text.includes("SAVEPOINT")) {
+          return { rows: [] as T[], rowCount: 0 };
+        }
+        if (text.includes("INSERT INTO alarm_log")) {
+          this.insertAttempted = true;
+          const err = new Error("duplicate key value violates unique constraint") as Error & { code: string };
+          err.code = "23505";
+          throw err;
+        }
+        if (text.includes("FROM alarm_log") && text.includes("WHERE policy_id")) {
+          // 첫 호출(경쟁 전 조회)은 없음, insert 실패 이후 재조회는 승자의 행을 반환.
+          if (!this.insertAttempted) return { rows: [], rowCount: 0 };
+          return {
+            rows: [{ ...alarmRow("RAISED") } as unknown as T],
+            rowCount: 1,
+          };
+        }
+        throw new Error(`unexpected query: ${text}`);
+      }
+    }
+
+    const db = new RacingAlarmDb();
+    const result = await raiseAlarmFromPolicyInTx(db, {
+      policy: policyStub,
+      deviceId: "device-1",
+      message: "가스 누출 감지",
+    });
+
+    expect(result.raised).toBe(false);
+    expect(result.alarm.state).toBe("RAISED");
+    // audit는 승자 쪽에서만 남긴다 — 패자는 남기지 않는다.
+    expect(db.statements.some((s) => s.includes("INSERT INTO audit_log"))).toBe(false);
+    // SAVEPOINT로 INSERT 실패만 부분 롤백해야 바깥 트랜잭션에서 재조회가 가능하다
+    // (SAVEPOINT 없이 바로 재조회하면 Postgres가 "current transaction is aborted"로 거부함
+    // — 실제 동시 요청 10개로 재현해서 발견한 버그).
+    expect(db.statements.some((s) => s.includes("ROLLBACK TO SAVEPOINT"))).toBe(true);
   });
 });

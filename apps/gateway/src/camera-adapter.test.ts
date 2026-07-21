@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
+import { encryptSecret } from "@smarthome/auth";
 import type { QueryResultRow } from "@smarthome/db";
 import type { MqttClient } from "@smarthome/mqtt";
 import { CameraAdapter, parseOnvifEndpoint, type ConnectOnvif, type OnvifPtzClient } from "./camera-adapter.js";
+
+// camera-repository.ts가 onvif_password를 복호화해서 돌려주므로(코드 리뷰 P2 #17), 저장된
+// 것처럼 미리 암호화한 값을 fixture에 넣어야 한다 — CameraAdapter는 평문("secret")을 받는다.
+process.env.CAMERA_CREDENTIAL_KEY = "test-camera-credential-key-32chars-min";
 
 const TOPIC = "enterprise/site1/bldg-a/2f/room/cam-01/cmd";
 
@@ -36,7 +41,7 @@ const ONVIF_CAMERA_ROW = {
   fov_deg: null,
   heading_deg: null,
   onvif_username: "admin",
-  onvif_password: "secret",
+  onvif_password: encryptSecret("secret", process.env.CAMERA_CREDENTIAL_KEY!),
 };
 
 const PRESET_ROW = {

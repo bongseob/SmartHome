@@ -140,6 +140,9 @@ importers:
 
   apps/gateway:
     dependencies:
+      '@smarthome/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@smarthome/command-flow':
         specifier: workspace:*
         version: link:../../packages/command-flow
@@ -297,6 +300,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@smarthome/auth':
+        specifier: workspace:*
+        version: link:../auth
       '@smarthome/contracts':
         specifier: workspace:*
         version: link:../contracts

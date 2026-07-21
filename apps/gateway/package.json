@@ -12,6 +12,7 @@
     "start": "dotenv -e ../../.env -- node dist/index.js"
   },
   "dependencies": {
+    "@smarthome/auth": "workspace:*",
     "@smarthome/command-flow": "workspace:*",
     "@smarthome/contracts": "workspace:*",
     "@smarthome/db": "workspace:*",

@@ -1,5 +1,7 @@
 ﻿import { describe, expect, it } from "vitest";
 import {
+  decryptSecret,
+  encryptSecret,
   hashPassword,
   hasAreaAccess,
   issueJwt,
@@ -76,6 +78,33 @@ describe("password hashing", () => {
 
     expect(verifyPassword("admin1234", hash)).toBe(true);
     expect(verifyPassword("wrong", hash)).toBe(false);
+  });
+});
+
+describe("encryptSecret/decryptSecret(코드 리뷰 P2 #17 — ONVIF 자격증명 at-rest 암호화)", () => {
+  const key = "test-camera-credential-key-32chars-min";
+
+  it("암호화한 값을 같은 키로 복호화하면 원문이 나온다", () => {
+    const encrypted = encryptSecret("super-secret-onvif-password", key);
+    expect(encrypted).not.toContain("super-secret-onvif-password");
+    expect(decryptSecret(encrypted, key)).toBe("super-secret-onvif-password");
+  });
+
+  it("같은 평문도 매번 다른 IV로 암호화해 다른 암호문이 나온다(재사용 공격 방지)", () => {
+    const a = encryptSecret("same-password", key);
+    const b = encryptSecret("same-password", key);
+    expect(a).not.toBe(b);
+    expect(decryptSecret(a, key)).toBe("same-password");
+    expect(decryptSecret(b, key)).toBe("same-password");
+  });
+
+  it("다른 키로 복호화하면 실패한다(GCM 인증 태그 불일치)", () => {
+    const encrypted = encryptSecret("secret", key);
+    expect(() => decryptSecret(encrypted, "a-completely-different-key-32chars!")).toThrow();
+  });
+
+  it("형식이 잘못된 입력은 명확히 실패한다", () => {
+    expect(() => decryptSecret("not-encrypted-plaintext", key)).toThrow("invalid encrypted secret format");
   });
 });
 
