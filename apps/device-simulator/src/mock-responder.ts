@@ -10,6 +10,9 @@ import {
 import { listSimulatedDeviceCodes, query } from "@smarthome/db";
 
 const SIMULATED_REFRESH_MS = 30_000;
+// 첫 simulated 목록 조회를 기다리는 상한(코드 리뷰 P2 #18) — DB가 느리거나 잠깐 안 붙어도
+// 데모 환경에서 계속 쓸 수 있어야 하므로 무한정 기다리지는 않는다.
+const STARTUP_LOOKUP_TIMEOUT_MS = 3000;
 
 /**
  * 브로커 전역 목(mock) 응답기 — 모든 기기의 `/cmd`를 와일드카드로 받아
@@ -42,17 +45,32 @@ export class MockResponder {
     const client = connect(this.url, { clientId: `sim:mock-all-${process.pid}` });
     this.client = client;
 
-    client.on("connect", () => {
-      // cmd(7세그먼트)만 매칭 — cmd/ack(8세그먼트)·state 는 매칭되지 않아 루프가 없다.
-      const sub = "enterprise/+/+/+/+/+/cmd";
-      client.subscribe(sub, { qos: qosFor("cmd") });
-      console.log(`[sim-mock] ${sub} 구독 — 모든 기기 cmd에 SUCCEEDED ack + state 응답(데모용)`);
-    });
     client.on("message", (topic: string, payload: Buffer) => this.handle(topic, payload));
     client.on("error", (err: Error) => console.error(`[sim-mock] error: ${err.message}`));
 
-    void this.refreshSimulatedCodes();
+    // 예전엔 connect 즉시 구독해서, 첫 simulated 목록 조회가 끝나기 전에 도착한 명령은
+    // this.simulatedCodes===null인 fail-open 창에 걸려 무조건 응답했다(코드 리뷰 P2 #18 —
+    // simulated=false인 실기기 명령까지 답할 위험). 첫 조회(또는 타임아웃)가 끝날 때까지
+    // 구독 자체를 미뤄 그 창을 없앤다 — DB가 느리거나 없는 데모 환경은 타임아웃 후 기존과
+    // 동일하게 fail-open으로 동작한다(문서화된 설계 의도 유지).
+    const initialLookup = this.waitForInitialSimulatedCodes();
+    client.on("connect", () => {
+      void initialLookup.then(() => {
+        // cmd(7세그먼트)만 매칭 — cmd/ack(8세그먼트)·state 는 매칭되지 않아 루프가 없다.
+        const sub = "enterprise/+/+/+/+/+/cmd";
+        client.subscribe(sub, { qos: qosFor("cmd") });
+        console.log(`[sim-mock] ${sub} 구독 — 모든 기기 cmd에 SUCCEEDED ack + state 응답(데모용)`);
+      });
+    });
+
     this.refreshTimer = setInterval(() => void this.refreshSimulatedCodes(), SIMULATED_REFRESH_MS);
+  }
+
+  private waitForInitialSimulatedCodes(): Promise<void> {
+    return Promise.race([
+      this.refreshSimulatedCodes(),
+      new Promise<void>((resolve) => setTimeout(resolve, STARTUP_LOOKUP_TIMEOUT_MS)),
+    ]);
   }
 
   private async refreshSimulatedCodes(): Promise<void> {

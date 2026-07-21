@@ -82,6 +82,10 @@ export class VirtualDevice {
       const cmdTopic = topicFor(this.cfg.identity, "cmd");
       client.subscribe(cmdTopic, { qos: qosFor("cmd") });
       const interval = this.cfg.telemetryIntervalMs ?? 1000;
+      // 브로커 재연결마다 이 콜백이 다시 실행된다 — 이전 인터벌을 정리하지 않고 그냥 덮어쓰면
+      // 예전 인터벌이 참조를 잃은 채 계속 돌아 재연결이 반복될수록 telemetry가 중복 발행되고
+      // 인터벌이 누적됐다(코드 리뷰 P2 #19).
+      if (this.timer) clearInterval(this.timer);
       this.timer = setInterval(() => this.emitTelemetry(), interval);
     });
     client.on("message", (topic: string, payload: Buffer) => {

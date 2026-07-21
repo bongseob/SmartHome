@@ -71,7 +71,12 @@ export function decideAuth(
     return 204;
   }
 
-  if (payload.action !== "read") {
+  // "playback"도 저장된 영상(녹화본)에 접근하는 액션이라 read와 같은 토큰 검사를 적용한다
+  // (코드 리뷰 P2 #20) — 예전엔 read 이외 모든 액션을 무조건 허용해서, 지금은 꺼져 있는
+  // mediamtx.yml의 playback 서버가 나중에 켜지면 토큰 없이도 녹화 영상에 접근할 수 있는
+  // 잠재 위험이 있었다. api/metrics/pprof는 mediamtx.yml의 authHTTPExclude가 애초에 이
+  // 웹훅 호출 자체를 건너뛰므로(도달 시 방어적으로 허용) 기존 동작을 그대로 둔다.
+  if (payload.action !== "read" && payload.action !== "playback") {
     return 204;
   }
 

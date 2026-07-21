@@ -3,10 +3,23 @@ import { decideAuth, type MediaMtxAuthRequest } from "./auth-webhook.js";
 
 const PORT = Number(process.env.MEDIA_GATEWAY_PORT ?? "8190");
 
+// 인증 payload는 { user, password, action, path, ... } 정도의 짧은 JSON뿐이다 — 상한이 없으면
+// 아무나 이 웹훅에 거대한 body를 보내 메모리를 소모시킬 수 있었다(코드 리뷰 P2 #20).
+const MAX_AUTH_BODY_BYTES = 8 * 1024;
+
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = "";
-    req.on("data", (chunk: Buffer) => (data += chunk.toString()));
+    let bytes = 0;
+    req.on("data", (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (bytes > MAX_AUTH_BODY_BYTES) {
+        req.destroy();
+        reject(new Error("auth request body too large"));
+        return;
+      }
+      data += chunk.toString();
+    });
     req.on("end", () => resolve(data));
     req.on("error", reject);
   });

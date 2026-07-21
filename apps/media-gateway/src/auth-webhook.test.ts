@@ -9,9 +9,25 @@ describe("decideAuth", () => {
     expect(decideAuth({ action: "read", path: "cam-01" }, undefined)).toBe(500);
   });
 
-  it("read/publish가 아닌 액션(api/metrics 등)은 무조건 허용", () => {
+  it("read/publish/playback이 아닌 액션(api/metrics 등)은 무조건 허용", () => {
     expect(decideAuth({ action: "api", path: "" }, SECRET)).toBe(204);
     expect(decideAuth({ action: "metrics", path: "" }, SECRET)).toBe(204);
+  });
+
+  describe("playback(코드 리뷰 P2 #20 — read와 동일하게 토큰 검사)", () => {
+    it("토큰 없이는 401(예전엔 무조건 허용이었음)", () => {
+      expect(decideAuth({ action: "playback", path: "cam-01" }, SECRET)).toBe(401);
+    });
+
+    it("유효한 토큰 + 일치하는 path면 204", () => {
+      const token = issueStreamToken({ cameraId: "cam-01", path: "cam-01" }, SECRET, 60, 1000);
+      expect(decideAuth({ action: "playback", path: "cam-01", token }, SECRET, 1001)).toBe(204);
+    });
+
+    it("다른 카메라 path로는 401", () => {
+      const token = issueStreamToken({ cameraId: "cam-01", path: "cam-01" }, SECRET, 60, 1000);
+      expect(decideAuth({ action: "playback", path: "cam-02", token }, SECRET, 1001)).toBe(401);
+    });
   });
 
   describe("publish", () => {
