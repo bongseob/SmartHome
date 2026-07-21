@@ -126,7 +126,8 @@
 추적 포인트:
 - DB 변경은 마이그레이션 파일로만 한다.
 - command 상태 전이와 audit 기록은 같은 transaction으로 묶어야 한다.
-- telemetry retention/continuous aggregate는 아직 구현되지 않았다.
+- telemetry retention/continuous aggregate는 0033_telemetry_retention_aggregate 마이그레이션으로
+  구현됨(코드 리뷰 P2 #16) — timescaledb 확장이 있을 때만 적용되는 조건부 정책(0010과 동일 패턴).
 
 ### 3.3 MQTT / Gateway / Simulator
 
@@ -778,8 +779,8 @@ state를 발행하면 경쟁 상태 발생). ESP32처럼 실기기가 하나씩 
 
 작업:
 - telemetry batch tuning
-- TimescaleDB retention policy
-- continuous aggregate
+- [완료] TimescaleDB retention policy (0033_telemetry_retention_aggregate, 코드 리뷰 P2 #16)
+- [완료] continuous aggregate (telemetry_hourly, 위와 동일 마이그레이션)
 - command latency metric
 - alarm propagation metric
 - load simulator mode
