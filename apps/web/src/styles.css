@@ -188,6 +188,12 @@ body {
 
 /* 접점별 상태 패널 (감시장비 클릭 시) */
 .floor-map__contacts {
+  /* .floor-map__stage(지도 캔버스, flex:1)가 남는 공간을 욕심껏 차지하면서 이 패널이
+     flex 기본 shrink로 최소 크기까지 눌려 아래 .floor-map__contacts-grid의 320px보다도
+     작아지고, 그만큼 마지막 행이 overflow:hidden에 잘리는 문제가 있었다 — 지도는 항상
+     제자리를 지키고, 목록은 항상 최대 320px까지는 확보되도록 이 패널 자체는 눌리지
+     않게 한다(실제 스크롤은 .floor-map__contacts-grid의 overflow-y: auto가 담당). */
+  flex-shrink: 0;
   margin-top: 0.6rem;
   border: 1px solid var(--ui-border);
   border-radius: 10px;
@@ -239,7 +245,7 @@ body {
 }
 
 .floor-map__contacts-grid {
-  max-height: 320px;
+  max-height: 300px;
   overflow-y: auto;
 }
 

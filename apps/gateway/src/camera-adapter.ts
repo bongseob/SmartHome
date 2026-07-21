@@ -85,12 +85,32 @@ export function parseOnvifEndpoint(
  * - 우리 `camera_preset`은 ONVIF 자체 프리셋 토큰이 아니라 pan/tilt/zoom 절대값을 저장하므로
  *   `ptz_goto_preset`은 ONVIF의 GotoPreset이 아니라 AbsoluteMove로 변환한다.
  */
+interface CachedAckResult {
+  status: "SUCCEEDED" | "FAILED";
+  reasonCode?: number;
+}
+
+// MQTT QoS1 redelivery(브로커 재연결·PUBACK 유실 등)로 같은 commandId가 두 번 오면 PTZ를 다시
+// 실행하지 않고 캐시된 ack만 재발행한다(코드 리뷰 P1 #7 — 상대이동 PTZ는 중복 실행 시 실제
+// 위치가 달라진다). 프로세스 생애 동안 무한정 자라지 않도록 오래된 항목부터 밀어낸다.
+const MAX_DEDUP_ENTRIES = 500;
+
 export class CameraAdapter {
+  private readonly processedCommands = new Map<string, CachedAckResult>();
+
   constructor(
     private readonly client: MqttClient,
     private readonly connectOnvif: ConnectOnvif = connectOnvifCam,
     private readonly db: QueryExecutor = { query },
   ) {}
+
+  private recordProcessed(commandId: string, result: CachedAckResult): void {
+    this.processedCommands.set(commandId, result);
+    if (this.processedCommands.size > MAX_DEDUP_ENTRIES) {
+      const oldestKey = this.processedCommands.keys().next().value;
+      if (oldestKey !== undefined) this.processedCommands.delete(oldestKey);
+    }
+  }
 
   async handleMessage(topic: string, raw: Buffer): Promise<void> {
     if (!topic.endsWith("/cmd")) return;
@@ -108,6 +128,19 @@ export class CameraAdapter {
     if (!parsed.success) return;
     const cmd = parsed.data;
     if (cmd.command !== "ptz_move" && cmd.command !== "ptz_goto_preset") return;
+
+    const cached = this.processedCommands.get(cmd.commandId);
+    if (cached) {
+      if (cached.status === "SUCCEEDED") {
+        this.ack(identity, cmd.commandId, "SUCCEEDED");
+      } else {
+        this.ack(identity, cmd.commandId, "FAILED", cached.reasonCode ?? 0x80);
+      }
+      console.log(
+        `[gateway] camera-adapter ${identity.device} ${cmd.command}(${cmd.commandId}) 중복 수신 — PTZ 재실행 없이 ack만 재발행`,
+      );
+      return;
+    }
 
     const device = await getDeviceState(this.db, identity.device);
     if (!device || device.category !== "CAMERA") return;
@@ -140,10 +173,13 @@ export class CameraAdapter {
       }
 
       this.ack(identity, cmd.commandId, "SUCCEEDED");
+      this.recordProcessed(cmd.commandId, { status: "SUCCEEDED" });
       console.log(`[gateway] camera-adapter ${identity.device} ${cmd.command}(${cmd.commandId}) → SUCCEEDED`);
     } catch (err) {
       console.error(`[gateway] camera-adapter PTZ 실패 device=${identity.device} command=${cmd.commandId}:`, err);
-      this.ack(identity, cmd.commandId, "FAILED", 0x80); // Unspecified error(MQTT5 reason code)
+      const reasonCode = 0x80; // Unspecified error(MQTT5 reason code)
+      this.ack(identity, cmd.commandId, "FAILED", reasonCode);
+      this.recordProcessed(cmd.commandId, { status: "FAILED", reasonCode });
     }
   }
 

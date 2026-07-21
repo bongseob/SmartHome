@@ -4,6 +4,7 @@ import { BarChart as EChartsBarChart } from "echarts/charts";
 import { GridComponent, LegendComponent, TooltipComponent } from "echarts/components";
 import { CanvasRenderer } from "echarts/renderers";
 import type { EChartsOption } from "echarts";
+import { parseDeviceBase } from "@smarthome/contracts";
 import { ApiError, listDevices, listFloors } from "../lib/api";
 import type { DeviceListItem, FloorSummary } from "../lib/types";
 
@@ -35,11 +36,6 @@ function deviceKind(device: DeviceListItem): DeviceKind {
   if (type.includes("aircon") || type.includes("hvac")) return "aircon";
   if (type.includes("fire")) return "fire_detector";
   return "other";
-}
-
-function floorSlugFromTopic(topic: string): string | null {
-  const parts = topic.split("/");
-  return parts.length >= 5 ? parts[3] ?? null : null;
 }
 
 function percent(value: number, total: number): number {
@@ -178,11 +174,11 @@ export function Dashboard(): JSX.Element {
       else if (device.currentStatus === "ALARM") byStatus.alarm += 1;
       else byStatus.offline += 1;
 
-      const topicParts = device.mqttTopic.split("/");
-      const areaSlug = topicParts[4] ?? "";
+      const base = parseDeviceBase(device.mqttTopic);
+      const areaSlug = base?.area ?? "";
       if (areaSlug in byAreaType) byAreaType[areaSlug] += 1;
 
-      const floor = bySlug.get(floorSlugFromTopic(device.mqttTopic) ?? "");
+      const floor = bySlug.get(base?.floor ?? "");
       if (!floor) continue;
       const stat = floorStats.get(floor.id);
       if (!stat) continue;

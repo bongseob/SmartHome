@@ -1,4 +1,4 @@
-import type { CameraProtocol, DeviceStatus } from "@smarthome/contracts";
+import { buildAreaTopicPrefix, type CameraProtocol, type DeviceStatus } from "@smarthome/contracts";
 import type { QueryResultRow } from "./pool.js";
 import type { QueryExecutor } from "./audit-repository.js";
 
@@ -188,7 +188,10 @@ interface CameraSummaryRow extends QueryResultRow {
   name: string;
   current_status: DeviceStatus;
   area_id: string | null;
-  area_topic_prefix: string | null;
+  site_slug: string | null;
+  building_slug: string | null;
+  floor_slug: string | null;
+  area_slug: string | null;
   protocol: CameraProtocol;
   stream_url: string;
   onvif_endpoint: string | null;
@@ -205,7 +208,17 @@ function toCameraSummary(row: CameraSummaryRow): CameraSummary {
     name: row.name,
     currentStatus: row.current_status,
     areaId: row.area_id,
-    areaTopicPrefix: row.area_topic_prefix,
+    // SQL에서 토픽 문자열을 CONCAT하지 않고 slug만 받아 여기서 buildAreaTopicPrefix()로 만든다
+    // (CLAUDE.md — UNS 토픽 하드코딩 금지).
+    areaTopicPrefix:
+      row.site_slug && row.building_slug && row.floor_slug && row.area_slug
+        ? buildAreaTopicPrefix({
+            site: row.site_slug,
+            building: row.building_slug,
+            floor: row.floor_slug,
+            area: row.area_slug,
+          })
+        : null,
     protocol: row.protocol,
     streamUrl: row.stream_url,
     onvifEndpoint: row.onvif_endpoint,
@@ -218,11 +231,7 @@ function toCameraSummary(row: CameraSummaryRow): CameraSummary {
 
 const CAMERA_SUMMARY_COLUMNS = `
   d.id::text AS device_id, d.code, d.name, d.current_status, d.area_id::text,
-  CASE
-    WHEN a.id IS NOT NULL THEN
-      CONCAT('enterprise/', s.slug, '/', b.slug, '/', f.slug, '/', a.slug)
-    ELSE NULL
-  END AS area_topic_prefix,
+  s.slug AS site_slug, b.slug AS building_slug, f.slug AS floor_slug, a.slug AS area_slug,
   c.protocol, c.stream_url, c.onvif_endpoint, c.is_ptz, c.resolution,
   c.fov_deg::text, c.heading_deg::text
 `;

@@ -33,7 +33,7 @@ export class CommandsController {
 
   @Roles("USER", "MONITOR", "HITL_APPROVER")
   @Get(":commandId")
-  get(@Param("commandId") commandId: string): Promise<unknown> {
-    return this.commands.get(commandId);
+  get(@Param("commandId") commandId: string, @CurrentAuth() auth: AuthContext): Promise<unknown> {
+    return this.commands.get(commandId, auth);
   }
 }

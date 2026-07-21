@@ -20,14 +20,14 @@ export class RecommendationsController {
 
   @Roles("ADMIN", "HITL_APPROVER")
   @Get()
-  list(@Query("status") status?: string): Promise<unknown> {
-    return this.recommendations.list(status);
+  list(@Query("status") status: string | undefined, @CurrentAuth() auth: AuthContext): Promise<unknown> {
+    return this.recommendations.list(status, auth);
   }
 
   @Roles("ADMIN", "HITL_APPROVER")
   @Get(":id")
-  get(@Param("id") id: string): Promise<unknown> {
-    return this.recommendations.get(id);
+  get(@Param("id") id: string, @CurrentAuth() auth: AuthContext): Promise<unknown> {
+    return this.recommendations.get(id, auth);
   }
 
   /** Approve/Reject — HITL 승인자(SRS 2.4). */

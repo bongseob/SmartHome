@@ -13,6 +13,7 @@ import {
   withTransaction,
   createRecommendation as dbCreateRecommendation,
 } from "@smarthome/db";
+import { assertDeviceAccess } from "../auth/device-access.guard.js";
 import { CommandsService } from "./commands.service.js";
 
 const dbExecutor = { query };
@@ -154,15 +155,22 @@ export class RecommendationsService {
     return recommendation;
   }
 
-  async list(status?: string): Promise<unknown> {
-    return listRecommendations(dbExecutor, status ? { status: status as RecommendationStatus } : {});
+  async list(status: string | undefined, auth: AuthContext): Promise<unknown> {
+    // area 제한 사용자는 자기 권한 범위(device 단독 권한 또는 area 권한)의 추천만 본다
+    // (코드 리뷰 P1 #2). ADMIN은 전체를 본다.
+    const userId = isAdmin(auth) ? null : auth.userId;
+    return listRecommendations(dbExecutor, {
+      ...(status ? { status: status as RecommendationStatus } : {}),
+      userId,
+    });
   }
 
-  async get(id: string): Promise<unknown> {
+  async get(id: string, auth: AuthContext): Promise<unknown> {
     const recommendation = await getRecommendation(dbExecutor, id);
     if (!recommendation) {
       throw new NotFoundException(`recommendation not found: ${id}`);
     }
+    await assertDeviceAccess(auth, recommendation.targetId, "VIEW");
     return recommendation;
   }
 
@@ -175,6 +183,16 @@ export class RecommendationsService {
     if (!decision.success) {
       throw new BadRequestException(`decision은 ${HitlDecision.options.join(", ")} 중 하나여야 합니다.`);
     }
+
+    // 승인/거절 트랜잭션을 시작하기 전에 대상 device 제어 권한을 확인한다(코드 리뷰 P1 #2 —
+    // 전에는 area 제한 승인자가 다른 area 기기의 AI 추천을 승인해 그 기기에 명령을 발행할 수
+    // 있었다). 트랜잭션 이후에 검사하면 이미 APPROVED로 커밋된 뒤라 되돌리기 번거로우므로
+    // 여기서 먼저 막는다.
+    const target = await getRecommendation(dbExecutor, id);
+    if (!target) {
+      throw new NotFoundException(`recommendation not found: ${id}`);
+    }
+    await assertDeviceAccess(auth, target.targetId, "CONTROL");
 
     const updated = await withTransaction((client) =>
       recordHitlDecisionInTx(client, {

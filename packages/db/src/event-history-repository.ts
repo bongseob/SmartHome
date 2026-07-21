@@ -51,6 +51,15 @@ export interface EventHistoryFilter {
   includeInfo: boolean;
   includeWarning: boolean;
   limit?: number;
+  /**
+   * null/undefined = ADMIN(area 스코프 없이 전체 조회). 값이 있으면 해당 사용자가 device
+   * 단독 권한(user_device_permission) 또는 device의 area 권한(user_area_permission)을
+   * 가진 행만 반환한다(코드 리뷰 P1 #2 — 전에는 area 제한 사용자가 전사 audit/alarm
+   * 이력을 다 볼 수 있었다). target_type='GROUP' 행은 target_id가 device.id가 아니므로
+   * 이 조인에 안 걸려 자동으로 제외된다(fail-closed — command-flow는 현재 GROUP 행을
+   * 쓰지 않지만, 혹시 생기더라도 area 스코프 사용자에게는 안전하게 숨겨진다).
+   */
+  userId?: string | null;
 }
 
 export async function listEventHistory(
@@ -60,6 +69,7 @@ export async function listEventHistory(
   const from = filter.from ?? null;
   const to = filter.to ?? null;
   const limit = filter.limit ?? 200;
+  const userId = filter.userId ?? null;
   const r = await db.query<EventRow>(
     `SELECT source, grade, time, target_type, target_id, label, detail, status
      FROM (
@@ -83,9 +93,23 @@ export async function listEventHistory(
          AND ($1::timestamptz IS NULL OR raised_at >= $1)
          AND ($2::timestamptz IS NULL OR raised_at <= $2)
      ) e
+     WHERE $6::text IS NULL OR EXISTS (
+       SELECT 1 FROM device d
+       WHERE d.id::text = e.target_id
+         AND (
+           EXISTS (
+             SELECT 1 FROM user_device_permission udp
+             WHERE udp.user_id::text = $6 AND udp.device_id = d.id
+           )
+           OR EXISTS (
+             SELECT 1 FROM user_area_permission uap
+             WHERE uap.user_id::text = $6 AND uap.area_id = d.area_id
+           )
+         )
+     )
      ORDER BY time DESC
      LIMIT $5`,
-    [from, to, filter.includeInfo, filter.includeWarning, limit],
+    [from, to, filter.includeInfo, filter.includeWarning, limit, userId],
   );
   return r.rows.map(toEvent);
 }

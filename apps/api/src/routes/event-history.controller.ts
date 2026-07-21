@@ -1,5 +1,6 @@
 import { Controller, Get, Query } from "@nestjs/common";
-import { Roles } from "../auth/auth.decorators.js";
+import type { AuthContext } from "@smarthome/auth";
+import { CurrentAuth, Roles } from "../auth/auth.decorators.js";
 import { EventHistoryService } from "../services/event-history.service.js";
 
 /**
@@ -13,11 +14,12 @@ export class EventHistoryController {
   @Roles("MONITOR", "USER", "HITL_APPROVER")
   @Get()
   list(
+    @CurrentAuth() auth: AuthContext,
     @Query("grade") grade?: string,
     @Query("from") from?: string,
     @Query("to") to?: string,
     @Query("limit") limit?: string,
   ): Promise<unknown> {
-    return this.history.list({ grade, from, to, limit });
+    return this.history.list({ grade, from, to, limit }, auth);
   }
 }

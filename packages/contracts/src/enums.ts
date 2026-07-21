@@ -90,6 +90,14 @@ export type AlarmActionType = z.infer<typeof AlarmActionType>;
 export const ChannelType = z.enum(["PUSH", "EMAIL", "SMS", "WEBHOOK"]);
 export type ChannelType = z.infer<typeof ChannelType>;
 
+/**
+ * 알람 통지 발송 결과 추적(코드 리뷰 P1 #11 — 발송 실패가 조용히 사라지던 문제).
+ * PENDING: 즉시 재시도까지 실패해 배경 재시도 대기 중. DELIVERED: 발송 성공.
+ * FAILED_PERMANENT: 재시도 한도 초과 — 운영자가 확인해야 한다.
+ */
+export const NotificationDeliveryStatus = z.enum(["PENDING", "DELIVERED", "FAILED_PERMANENT"]);
+export type NotificationDeliveryStatus = z.infer<typeof NotificationDeliveryStatus>;
+
 export const ScheduleType = z.enum([
   "ONE_TIME",
   "DAILY",

@@ -8,6 +8,7 @@ import {
 } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import { actorRole, hasAccessLevel, isAdmin, type AuthContext } from "@smarthome/auth";
+import { assertDeviceAccess } from "../auth/device-access.guard.js";
 import {
   buildServiceStatusWildcard,
   parseDeviceBase,
@@ -308,11 +309,15 @@ export class CommandsService implements OnModuleInit, OnModuleDestroy {
     return { groupId, command: body.command, intervalMs, count: results.length, results };
   }
 
-  async get(commandId: string): Promise<unknown> {
+  async get(commandId: string, auth: AuthContext): Promise<unknown> {
     const command = await getCommandById(commandExecutor, commandId);
     if (!command) {
       throw new NotFoundException(`command not found: ${commandId}`);
     }
+    // targetType은 command-flow가 항상 "DEVICE"로 고정한다(publishDeviceCommand) — command 조회는
+    // create()의 @RequireDeviceAccess와 동등한 VIEW 권한 검사가 빠져 있었다(코드 리뷰 P1 #2:
+    // 다른 area의 commandId로 payload·actor·session을 읽을 수 있었음).
+    await assertDeviceAccess(auth, command.targetId, "VIEW");
     return command;
   }
 

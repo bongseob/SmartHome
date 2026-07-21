@@ -16,7 +16,9 @@
 - **MQTT 3.1.1로 접속한다(MQTT5 아님).** 서버가 `/cmd` 발행 시 붙이는 MQTT5 User
   Properties(감사 메타데이터: Actor_ID·Session_ID 등)는 서버가 Audit_Log에 남기는 용도이지,
   기기가 읽거나 ack에 되실을 필요가 없다 — `apps/gateway`의 ack 처리는 JSON 바디만 검사한다.
-  그래서 임베디드에서 가장 널리 쓰이는 PubSubClient(3.1.1)로도 프로토콜 계약을 100% 만족한다.
+  그래서 임베디드용 MQTT 3.1.1 클라이언트로도 프로토콜 계약을 100% 만족한다(현재
+  256dpi/arduino-mqtt 사용 — PubSubClient는 publish()에 QoS를 지정할 수 없어 state/cmd·ack
+  QoS1 규칙을 지킬 수 없었기 때문에 코드 리뷰 후 교체했다, 코드 리뷰 P1 #6).
 - **전등(DO 채널)은 telemetry가 없다.** 디지털 출력이라 주기적으로 보낼 수치가 없으므로
   `state`(값 바뀔 때만, retained) + `cmd`/`cmd/ack`만 쓴다.
 

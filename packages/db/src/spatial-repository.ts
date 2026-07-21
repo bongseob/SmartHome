@@ -1,4 +1,4 @@
-﻿import { UNS_ROOT } from "@smarthome/contracts";
+﻿import { buildAreaTopicPrefix, buildFloorTopicPrefix } from "@smarthome/contracts";
 import type {
   AreaKind,
   DeviceCategory,
@@ -126,7 +126,7 @@ function toFloorSummary(row: FloorSummaryRow): FloorSummary {
     buildingSlug: row.building_slug,
     siteName: row.site_name,
     siteSlug: row.site_slug,
-    topicPrefix: [UNS_ROOT, row.site_slug, row.building_slug, row.floor_slug].join("/"),
+    topicPrefix: buildFloorTopicPrefix({ site: row.site_slug, building: row.building_slug, floor: row.floor_slug }),
   };
 }
 
@@ -204,7 +204,12 @@ function toArea(row: AreaRow): Area {
     floorId: row.floor_id,
     name: row.name,
     slug: row.slug,
-    topicPrefix: [UNS_ROOT, row.site_slug, row.building_slug, row.floor_slug, row.area_slug].join("/"),
+    topicPrefix: buildAreaTopicPrefix({
+      site: row.site_slug,
+      building: row.building_slug,
+      floor: row.floor_slug,
+      area: row.area_slug,
+    }),
     polygon: row.polygon,
     kind: row.kind,
     imageId: row.image_id,
@@ -389,7 +394,12 @@ function toAreaSummary(row: AreaSummaryRow): AreaSummary {
     floorName: row.floor_name,
     buildingName: row.building_name,
     siteName: row.site_name,
-    topicPrefix: [UNS_ROOT, row.site_slug, row.building_slug, row.floor_slug, row.slug].join("/"),
+    topicPrefix: buildAreaTopicPrefix({
+      site: row.site_slug,
+      building: row.building_slug,
+      floor: row.floor_slug,
+      area: row.slug,
+    }),
     imageId: row.image_id,
     imageUrl: row.image_url,
     imageWidthPx: row.image_width_px,
@@ -515,7 +525,10 @@ interface DeviceListRow extends QueryResultRow {
   terminal_block: string | null;
   load_class: LoadClass | null;
   area_id: string | null;
-  area_topic_prefix: string | null;
+  site_slug: string | null;
+  building_slug: string | null;
+  floor_slug: string | null;
+  area_slug: string | null;
   pos_x: string | null;
   pos_y: string | null;
   connection_protocol: DeviceConnectionProtocol | null;
@@ -549,7 +562,17 @@ function toDeviceListItem(row: DeviceListRow): DeviceListItem {
     terminalBlock: row.terminal_block,
     loadClass: row.load_class,
     areaId: row.area_id,
-    areaTopicPrefix: row.area_topic_prefix,
+    // SQL에서 토픽 문자열을 CONCAT하지 않고 slug만 받아 여기서 buildAreaTopicPrefix()로 만든다
+    // (CLAUDE.md — UNS 토픽 하드코딩 금지).
+    areaTopicPrefix:
+      row.site_slug && row.building_slug && row.floor_slug && row.area_slug
+        ? buildAreaTopicPrefix({
+            site: row.site_slug,
+            building: row.building_slug,
+            floor: row.floor_slug,
+            area: row.area_slug,
+          })
+        : null,
     posX: row.pos_x,
     posY: row.pos_y,
     connectionProtocol: row.connection_protocol,
@@ -568,11 +591,7 @@ const DEVICE_SELECT_COLUMNS = `
   d.connection_protocol, d.connection_config,
   d.image_id::text, dimg.image_url,
   d.updated_at,
-  CASE
-    WHEN a.id IS NOT NULL THEN
-      CONCAT('enterprise/', s.slug, '/', b.slug, '/', f.slug, '/', a.slug)
-    ELSE NULL
-  END AS area_topic_prefix
+  s.slug AS site_slug, b.slug AS building_slug, f.slug AS floor_slug, a.slug AS area_slug
 `;
 
 export interface DeviceListFilter {

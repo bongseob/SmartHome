@@ -541,6 +541,33 @@ MVP 범위 밖으로 의도적으로 제외한 것(ui-ux-design.md 전체 스펙
    OFFLINE을 재현해 10개 채널 전부 캐스케이드되는 것과 알람 10건이 정상 발생하는 것을 확인
 8. MQTT 계정/ACL 발급 자체는 [M13](#m13-운영-보안)에 기록(같은 트랙, 보안 마일스톤 쪽에 상세 있음)
 
+완료된 작업 단위 — MQTT 라이브러리 QoS1 전환(2026-07-21, 코드 리뷰 P1 #6 조치):
+
+전수 코드 리뷰에서 지적됨 — PubSubClient는 `publish()`에 QoS를 지정하는 파라미터 자체가 없어
+(구독만 QoS1 가능), state/cmd·ack를 QoS1로 발행해야 하는 프로젝트 규칙(PROJECT_RULES §2)을
+실제로는 지키지 못하고 있었다. `256dpi/arduino-mqtt`(lwmqtt 기반, PlatformIO `256dpi/MQTT@^2.5.3`)로
+교체 — PubSubClient와 같은 `Client&` 기반이라 TLS 설정은 그대로 재사용. 이 라이브러리는 메시지
+콜백 안에서 publish/subscribe를 직접 호출하면 교착될 수 있다고 공식 안내하므로, `onMqttMessage`는
+검증만 하고 실행할 동작을 `pendingQueue`에 적재 → `loop()`에서 `mqtt.loop()` 이후
+`processPendingCommands()`가 실제 릴레이 구동·ack 발행을 처리하도록 구조를 바꿨다.
+**`pio run` 컴파일 검증은 이 세션에서 못함**(환경에 PlatformIO 미설치) — 실기기 반영 전 로컬
+빌드/플래싱 검증 필요.
+
+완료된 작업 단위 — ESP32/PTZ 명령 멱등성(2026-07-21, 코드 리뷰 P1 #7 조치):
+
+MQTT QoS1은 "적어도 한 번" 배달만 보장하므로(PUBACK 유실·재연결 시 재전송), 같은 commandId가
+두 번 올 수 있는데 그때마다 물리 동작을 재실행하면 안 된다는 지적. 두 곳 모두 채널/커맨드별로
+최근 처리한 commandId + 결과를 캐시해뒀다가, 중복 수신이면 물리 동작 없이 같은 ack만 재발행하도록
+고쳤다:
+- `esp32/src/main.cpp` — 채널마다 최근 4개 commandId 히스토리(`cmdHistory`)를 두고, `onMqttMessage`가
+  중복이면 `applyOn=false`인 `PendingCommand`를 큐에 넣어 릴레이는 건드리지 않고 ack만 재발행.
+- `apps/gateway/src/camera-adapter.ts` — `CameraAdapter` 인스턴스에 `processedCommands`
+  Map(최대 500건, 오래된 것부터 제거)을 두고, 이미 처리한 commandId면 ONVIF `relativeMove`/
+  `absoluteMove`를 다시 호출하지 않고 캐시된 ack만 재발행(상대이동 PTZ 중복 실행은 실제 카메라
+  위치가 달라지는 실질적 위험이었음). 재전송 시나리오 유닛 테스트 2건 추가.
+ESP32 쪽은 이번에도 `pio run` 컴파일 검증을 못 했다(환경 제약, #6과 동일) — 실기기 반영 전
+로컬 빌드/플래싱 검증 필요.
+
 완료된 작업 단위 — 가상/실기기 구분(`device.simulated`, 2026-07-14):
 
 배경: 이 시스템은 기기가 실제로 MQTT에 붙어 응답해야 상태가 존재한다 — 실기기가 하나도 없으면

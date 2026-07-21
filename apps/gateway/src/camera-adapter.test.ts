@@ -183,6 +183,37 @@ describe("CameraAdapter", () => {
     ]);
   });
 
+  it("같은 commandId가 재전달되면 PTZ를 다시 실행하지 않고 캐시된 ack만 재발행한다(QoS1 redelivery 멱등성)", async () => {
+    const client = new FakeMqttClient();
+    const onvif = fakeOnvifClient();
+    const connectOnvif: ConnectOnvif = vi.fn().mockResolvedValue(onvif);
+    const db = new FakeGatewayDb(DEVICE_ROW, ONVIF_CAMERA_ROW);
+    const adapter = new CameraAdapter(client as unknown as MqttClient, connectOnvif, db);
+    const payload = commandPayload("ptz_move", { pan: 10, tilt: -5, zoom: 0 });
+
+    await adapter.handleMessage(TOPIC, payload);
+    await adapter.handleMessage(TOPIC, payload); // 재전달
+
+    expect(onvif.relativeMove).toHaveBeenCalledTimes(1); // 물리 PTZ 호출은 한 번만
+    expect(client.published).toHaveLength(2); // ack는 매번 재발행
+    expect(client.published[1]?.payload).toMatchObject({ commandId: "CMD-1", status: "SUCCEEDED" });
+  });
+
+  it("실패한 commandId가 재전달되면 ONVIF를 다시 호출하지 않고 같은 FAILED ack를 재발행한다", async () => {
+    const client = new FakeMqttClient();
+    const connectOnvif: ConnectOnvif = vi.fn().mockRejectedValue(new Error("connection refused"));
+    const db = new FakeGatewayDb(DEVICE_ROW, ONVIF_CAMERA_ROW);
+    const adapter = new CameraAdapter(client as unknown as MqttClient, connectOnvif, db);
+    const payload = commandPayload("ptz_move", { pan: 1 });
+
+    await adapter.handleMessage(TOPIC, payload);
+    await adapter.handleMessage(TOPIC, payload); // 재전달
+
+    expect(connectOnvif).toHaveBeenCalledTimes(1);
+    expect(client.published).toHaveLength(2);
+    expect(client.published[1]?.payload).toMatchObject({ status: "FAILED", reasonCode: 0x80 });
+  });
+
   it("ptz_move {stop:true} → stop 호출", async () => {
     const client = new FakeMqttClient();
     const onvif = fakeOnvifClient();

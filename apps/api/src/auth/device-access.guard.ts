@@ -1,7 +1,8 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { getDeviceAccessLevel, query } from "@smarthome/db";
-import { hasAccessLevel, isAdmin } from "@smarthome/auth";
+import { hasAccessLevel, isAdmin, type AuthContext } from "@smarthome/auth";
+import type { AccessLevel } from "@smarthome/contracts";
 import {
   DEVICE_ACCESS_KEY,
   type DeviceAccessRequirement,
@@ -9,6 +10,22 @@ import {
 } from "./auth.decorators.js";
 
 const accessExecutor = { query };
+
+/**
+ * DeviceAccessGuard와 같은 판정 로직을 라우트 데코레이터로 표현할 수 없는 곳(대상 device id를
+ * 얻으려면 먼저 다른 레코드를 조회해야 하는 경우 — 예: commandId → command.targetId)에서
+ * 서비스가 직접 호출한다(코드 리뷰 P1 #2 — 이런 지점들에 권한 검사가 아예 빠져 있었다).
+ */
+export async function assertDeviceAccess(
+  auth: AuthContext,
+  deviceId: string,
+  level: AccessLevel,
+): Promise<void> {
+  if (isAdmin(auth)) return;
+  const access = await getDeviceAccessLevel(accessExecutor, auth.userId, deviceId);
+  if (access && hasAccessLevel(access, level)) return;
+  throw new ForbiddenException("device access denied");
+}
 
 function bodyTargetId(body: unknown): string | null {
   if (typeof body !== "object" || body === null || !("target" in body)) {
@@ -47,18 +64,12 @@ export class DeviceAccessGuard implements CanActivate {
     if (!auth) {
       throw new ForbiddenException("auth context missing");
     }
-    if (isAdmin(auth)) {
-      return true;
-    }
 
     const deviceId = deviceIdFromRequest(request, requirement);
     if (!deviceId) {
       throw new ForbiddenException("device target is required");
     }
-    const access = await getDeviceAccessLevel(accessExecutor, auth.userId, deviceId);
-    if (access && hasAccessLevel(access, requirement.level)) {
-      return true;
-    }
-    throw new ForbiddenException("device access denied");
+    await assertDeviceAccess(auth, deviceId, requirement.level);
+    return true;
   }
 }

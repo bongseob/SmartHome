@@ -118,6 +118,13 @@ export async function lockRecommendationById(db: QueryExecutor, id: string): Pro
 
 export interface RecommendationListFilter {
   status?: RecommendationStatus;
+  /**
+   * null/undefined = ADMIN(area 스코프 없이 전체 조회). 값이 있으면 target_id(DEVICE만
+   * 존재 — recommendations.service.ts가 생성 시점에 강제)에 device 단독 권한 또는 area
+   * 권한이 있는 행만 반환한다(코드 리뷰 P1 #2 — area 제한 사용자가 다른 area의 AI 추천을
+   * 열람할 수 있었다).
+   */
+  userId?: string | null;
 }
 
 export async function listRecommendations(
@@ -129,6 +136,23 @@ export async function listRecommendations(
   if (filter.status) {
     params.push(filter.status);
     conditions.push(`status = $${params.length}`);
+  }
+  if (filter.userId) {
+    params.push(filter.userId);
+    conditions.push(`EXISTS (
+      SELECT 1 FROM device d
+      WHERE d.id = ai_recommendation.target_id
+        AND (
+          EXISTS (
+            SELECT 1 FROM user_device_permission udp
+            WHERE udp.user_id::text = $${params.length} AND udp.device_id = d.id
+          )
+          OR EXISTS (
+            SELECT 1 FROM user_area_permission uap
+            WHERE uap.user_id::text = $${params.length} AND uap.area_id = d.area_id
+          )
+        )
+    )`);
   }
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   const r = await db.query<RecommendationRow>(

@@ -34,8 +34,14 @@ describe("event history repository", () => {
     const from = new Date("2026-07-01T00:00:00Z");
     const to = new Date("2026-07-31T23:59:59Z");
     await listEventHistory(db, { from, to, includeInfo: true, includeWarning: false, limit: 50 });
-    // [from, to, includeInfo, includeWarning, limit]
-    expect(db.lastParams).toEqual([from, to, true, false, 50]);
+    // [from, to, includeInfo, includeWarning, limit, userId]
+    expect(db.lastParams).toEqual([from, to, true, false, 50, null]);
+  });
+
+  it("userId를 지정하면 마지막 파라미터로 바인딩된다(area 스코프 필터)", async () => {
+    const db = new CapturingDb();
+    await listEventHistory(db, { includeInfo: true, includeWarning: true, userId: "user-1" });
+    expect(db.lastParams).toEqual([null, null, true, true, 200, "user-1"]);
   });
 
   it("row를 camelCase 레코드로 매핑한다", async () => {
@@ -53,6 +59,6 @@ describe("event history repository", () => {
   it("from/to 미지정 시 null, limit 기본 200", async () => {
     const db = new CapturingDb();
     await listEventHistory(db, { includeInfo: true, includeWarning: true });
-    expect(db.lastParams).toEqual([null, null, true, true, 200]);
+    expect(db.lastParams).toEqual([null, null, true, true, 200, null]);
   });
 });

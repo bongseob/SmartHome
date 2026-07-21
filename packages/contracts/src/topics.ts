@@ -87,6 +87,38 @@ export function buildDeviceBase(
   return [UNS_ROOT, parts.site, parts.building, parts.floor, parts.area, parts.device].join("/");
 }
 
+/**
+ * 층(Floor) 토픽 프리픽스(area·디바이스·suffix 없는 4세그먼트) — "이 층에 속한 모든 지역"을
+ * 가리킬 때 쓴다. area 단위보다 한 단계 위 집계용(예: 층별 대시보드 topicPrefix).
+ * DB에서 slug를 조합해 SQL/TS에서 직접 문자열을 만들지 말고 이 함수로만 만든다
+ * (CLAUDE.md — UNS 토픽 문자열 하드코딩 금지).
+ */
+export function buildFloorTopicPrefix(parts: { site: string; building: string; floor: string }): string {
+  assertSegment("site", parts.site);
+  assertSegment("building", parts.building);
+  assertSegment("floor", parts.floor);
+  return [UNS_ROOT, parts.site, parts.building, parts.floor].join("/");
+}
+
+/**
+ * 지역(Area) 토픽 프리픽스(디바이스·suffix 없는 5세그먼트) — "이 지역에 속한 모든 기기"를
+ * 가리킬 때 쓴다(알람/카메라/기기 목록에서 지역별로 묶어 보여줄 때, area_topic_prefix로 응답).
+ * DB에서 site/building/floor/area slug를 조합해 SQL로 직접 문자열을 만들지 말고 이 함수로만
+ * 만든다(CLAUDE.md — UNS 토픽 문자열 하드코딩 금지, 반드시 buildTopic() 계열 사용).
+ */
+export function buildAreaTopicPrefix(parts: {
+  site: string;
+  building: string;
+  floor: string;
+  area: string;
+}): string {
+  assertSegment("site", parts.site);
+  assertSegment("building", parts.building);
+  assertSegment("floor", parts.floor);
+  assertSegment("area", parts.area);
+  return [UNS_ROOT, parts.site, parts.building, parts.floor, parts.area].join("/");
+}
+
 export function buildEnterpriseAclTopic(): string {
   return `${UNS_ROOT}/#`;
 }

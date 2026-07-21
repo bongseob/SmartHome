@@ -22,13 +22,19 @@ import {
   insertTelemetryBatch,
   listAlarmPolicies,
   listChannelsForPolicy,
+  listDueNotificationRetries,
+  markNotificationDelivered,
+  markNotificationRetryOrFailed,
   query,
   raiseAlarmFromPolicy,
   raiseUnexpectedStateChangeAlarm,
+  recordFailedDelivery,
   setDeviceStatus,
   sweepDueEscalations,
   transitionCommandWithAudit,
   type AlarmPolicyRecord,
+  type NotificationChannelRecord,
+  type NotificationDeliveryPayload,
   type TelemetryRow,
 } from "@smarthome/db";
 import { dispatchNotification } from "@smarthome/notify";
@@ -138,6 +144,30 @@ async function refreshAlarmPolicyCache(): Promise<void> {
   }
 }
 
+/**
+ * dispatchNotification은 동기 재시도까지 실패하면 성공/실패를 명시적으로 반환한다
+ * (코드 리뷰 P1 #11 — 예전엔 실패해도 조용히 성공 취급했다). 여기서 실패를
+ * notification_delivery에 남겨 배경 재시도(retryPendingNotifications)로 넘긴다.
+ */
+async function dispatchAndTrackNotification(
+  channel: NotificationChannelRecord,
+  payload: NotificationDeliveryPayload,
+): Promise<void> {
+  const result = await dispatchNotification(channel, payload);
+  if (result.success) return;
+  try {
+    await recordFailedDelivery(dbExecutor, {
+      alarmId: payload.alarmId,
+      channelId: channel.id,
+      payload,
+      attemptCount: result.attempts,
+      error: result.error ?? "unknown error",
+    });
+  } catch (err) {
+    console.error(`[gateway] notification_delivery 기록 실패 channel=${channel.name}:`, err);
+  }
+}
+
 async function notifyPolicyChannels(policyId: string, alarmId: string, alarm: {
   tier: string;
   severity: string;
@@ -147,7 +177,7 @@ async function notifyPolicyChannels(policyId: string, alarmId: string, alarm: {
   const channels = await listChannelsForPolicy(dbExecutor, policyId);
   await Promise.all(
     channels.map((channel) =>
-      dispatchNotification(channel, {
+      dispatchAndTrackNotification(channel, {
         alarmId,
         tier: alarm.tier,
         severity: alarm.severity,
@@ -267,7 +297,7 @@ async function sweepAlarmEscalations(): Promise<void> {
       if (item.notifyChannelId) {
         const channel = await getNotificationChannelById(dbExecutor, item.notifyChannelId);
         if (channel) {
-          await dispatchNotification(channel, {
+          await dispatchAndTrackNotification(channel, {
             alarmId: item.alarm.id,
             tier: item.alarm.tier,
             severity: item.alarm.severity,
@@ -284,6 +314,42 @@ async function sweepAlarmEscalations(): Promise<void> {
     }
   } catch (err) {
     console.error("[gateway] 에스컬레이션 sweep 오류:", err);
+  }
+}
+
+/**
+ * notification_delivery에 쌓인 PENDING(동기 재시도까지 실패한) 건을 지수 백오프
+ * 일정에 따라 재시도한다(코드 리뷰 P1 #11). 별도 워커 프로세스 없이 sweepAlarmEscalations와
+ * 같은 폴링 패턴을 재사용 — channel 조회 실패(삭제된 채널 등)는 즉시 FAILED_PERMANENT로
+ * 확정해 무한정 sweep에 남지 않게 한다.
+ */
+async function retryPendingNotifications(): Promise<void> {
+  try {
+    const due = await listDueNotificationRetries(dbExecutor);
+    for (const item of due) {
+      const channel = await getNotificationChannelById(dbExecutor, item.channelId);
+      if (!channel) {
+        await markNotificationRetryOrFailed(dbExecutor, {
+          id: item.id,
+          attemptCount: item.attemptCount + 1,
+          error: `channel ${item.channelId} not found`,
+        });
+        continue;
+      }
+      const result = await dispatchNotification(channel, item.payload);
+      if (result.success) {
+        await markNotificationDelivered(dbExecutor, item.id);
+        console.log(`[gateway] notification_delivery ${item.id} 배경 재시도 성공(channel=${channel.name})`);
+      } else {
+        await markNotificationRetryOrFailed(dbExecutor, {
+          id: item.id,
+          attemptCount: item.attemptCount + 1,
+          error: result.error ?? "unknown error",
+        });
+      }
+    }
+  } catch (err) {
+    console.error("[gateway] notification_delivery 재시도 sweep 오류:", err);
   }
 }
 
@@ -593,12 +659,16 @@ async function main(): Promise<void> {
   const timeoutTimer = setInterval(() => void sweepCommandTimeouts(redis, events), 1000);
   const policyRefreshTimer = setInterval(() => void refreshAlarmPolicyCache(), 30_000);
   const escalationTimer = setInterval(() => void sweepAlarmEscalations(), 5_000);
+  // 백오프 최소 단위(1분)보다 촘촘히 돌 필요는 없다 — listDueNotificationRetries가
+  // next_retry_at <= now()만 골라오므로 더 자주 돌아도 실제 재시도 빈도는 그대로다.
+  const notificationRetryTimer = setInterval(() => void retryPendingNotifications(), 30_000);
 
   const shutdown = (): void => {
     clearInterval(flushTimer);
     clearInterval(timeoutTimer);
     clearInterval(policyRefreshTimer);
     clearInterval(escalationTimer);
+    clearInterval(notificationRetryTimer);
     publishServiceStatus(client, "gateway", "OFFLINE");
     void flush().then(() =>
       client.end(false, {}, () =>

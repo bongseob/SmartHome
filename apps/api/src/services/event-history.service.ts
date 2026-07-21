@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
+import { isAdmin, type AuthContext } from "@smarthome/auth";
 import { listEventHistory, query } from "@smarthome/db";
 
 const executor = { query };
@@ -17,7 +18,7 @@ export interface EventHistoryQuery {
 /** addendum §8 — 장애이력 조회(읽기 전용). 등급(알림/경고/전체) + 기간 필터. */
 @Injectable()
 export class EventHistoryService {
-  async list(q: EventHistoryQuery): Promise<unknown> {
+  async list(q: EventHistoryQuery, auth: AuthContext): Promise<unknown> {
     const grade = (q.grade ?? "ALL").toUpperCase();
     if (!GRADES.has(grade)) {
       throw new BadRequestException(`grade must be ALL, INFO, or WARNING: ${q.grade}`);
@@ -40,7 +41,10 @@ export class EventHistoryService {
       limit = n;
     }
 
-    return listEventHistory(executor, { from, to, includeInfo, includeWarning, limit });
+    // area 제한 사용자는 자기 권한 범위(device 단독 권한 또는 area 권한)의 행만 본다
+    // (코드 리뷰 P1 #2). ADMIN은 전사 이력을 그대로 본다.
+    const userId = isAdmin(auth) ? null : auth.userId;
+    return listEventHistory(executor, { from, to, includeInfo, includeWarning, limit, userId });
   }
 
   private parseDate(value: string | undefined, field: string): Date | null {

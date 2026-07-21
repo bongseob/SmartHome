@@ -1,4 +1,4 @@
-import type { AlarmActionType, AlarmState, AlarmTier, ChannelType, Role, Severity, TargetType } from "@smarthome/contracts";
+import { buildAreaTopicPrefix, type AlarmActionType, type AlarmState, type AlarmTier, type ChannelType, type Role, type Severity, type TargetType } from "@smarthome/contracts";
 import type { QueryResultRow } from "./pool.js";
 import type { QueryExecutor } from "./audit-repository.js";
 
@@ -449,6 +449,24 @@ export interface AlarmWithAreaRow extends AlarmRecord {
   areaId: string | null;
 }
 
+interface AreaSlugColumns {
+  site_slug: string | null;
+  building_slug: string | null;
+  floor_slug: string | null;
+  area_slug: string | null;
+}
+
+/** SQL에서 토픽 문자열을 직접 CONCAT하지 않고, slug만 받아 여기서 buildAreaTopicPrefix()로 만든다. */
+function areaTopicPrefixFromSlugs(row: AreaSlugColumns): string | null {
+  if (!row.site_slug || !row.building_slug || !row.floor_slug || !row.area_slug) return null;
+  return buildAreaTopicPrefix({
+    site: row.site_slug,
+    building: row.building_slug,
+    floor: row.floor_slug,
+    area: row.area_slug,
+  });
+}
+
 export async function listAlarms(
   db: QueryExecutor,
   filter: AlarmListFilter = {},
@@ -475,12 +493,10 @@ export async function listAlarms(
   const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   params.push(limit);
 
-  const r = await db.query<AlarmRow & { area_topic_prefix: string | null; area_id: string | null }>(
+  const r = await db.query<AlarmRow & AreaSlugColumns & { area_id: string | null }>(
     `SELECT al.id::text, al.policy_id::text, al.device_id::text, al.tier, al.severity, al.message,
             al.state, al.raised_at, al.snoozed_until, al.resolved_at, al.escalated_level,
-            CASE WHEN a.id IS NOT NULL THEN
-              CONCAT('enterprise/', s.slug, '/', b.slug, '/', f.slug, '/', a.slug)
-            ELSE NULL END AS area_topic_prefix,
+            s.slug AS site_slug, b.slug AS building_slug, f.slug AS floor_slug, a.slug AS area_slug,
             a.id::text AS area_id
      FROM alarm_log al
      LEFT JOIN device d     ON d.id = al.device_id
@@ -493,19 +509,21 @@ export async function listAlarms(
      LIMIT $${params.length}`,
     params,
   );
-  return r.rows.map((row) => ({ ...toAlarmRecord(row), areaTopicPrefix: row.area_topic_prefix, areaId: row.area_id }));
+  return r.rows.map((row) => ({
+    ...toAlarmRecord(row),
+    areaTopicPrefix: areaTopicPrefixFromSlugs(row),
+    areaId: row.area_id,
+  }));
 }
 
 export async function getAlarmWithAreaScope(
   db: QueryExecutor,
   id: string,
 ): Promise<AlarmWithAreaRow | null> {
-  const r = await db.query<AlarmRow & { area_topic_prefix: string | null; area_id: string | null }>(
+  const r = await db.query<AlarmRow & AreaSlugColumns & { area_id: string | null }>(
     `SELECT al.id::text, al.policy_id::text, al.device_id::text, al.tier, al.severity, al.message,
             al.state, al.raised_at, al.snoozed_until, al.resolved_at, al.escalated_level,
-            CASE WHEN a.id IS NOT NULL THEN
-              CONCAT('enterprise/', s.slug, '/', b.slug, '/', f.slug, '/', a.slug)
-            ELSE NULL END AS area_topic_prefix,
+            s.slug AS site_slug, b.slug AS building_slug, f.slug AS floor_slug, a.slug AS area_slug,
             a.id::text AS area_id
      FROM alarm_log al
      LEFT JOIN device d     ON d.id = al.device_id
@@ -517,7 +535,7 @@ export async function getAlarmWithAreaScope(
     [id],
   );
   const row = r.rows[0];
-  return row ? { ...toAlarmRecord(row), areaTopicPrefix: row.area_topic_prefix, areaId: row.area_id } : null;
+  return row ? { ...toAlarmRecord(row), areaTopicPrefix: areaTopicPrefixFromSlugs(row), areaId: row.area_id } : null;
 }
 
 export interface UpdateAlarmStatePatch {

@@ -13,6 +13,7 @@ export * from "./auth-repository.js";
 export * from "./spatial-repository.js";
 export * from "./alarm-repository.js";
 export * from "./alarm-service.js";
+export * from "./notification-repository.js";
 export * from "./scheduler-repository.js";
 export * from "./holiday-repository.js";
 export * from "./time-program-repository.js";
