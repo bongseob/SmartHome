@@ -284,7 +284,9 @@ export function App(): JSX.Element {
   );
 
   /** 스케줄러 등에서 DEVICE 대상을 클릭 → 그 기기가 속한 지역으로 전환하고 Floor Map에서 선택한다.
-   * 기기의 areaTopicPrefix는 곧 그 지역(area) 자신의 topicPrefix이므로 정확히 일치하는 지역을 찾는다. */
+   * 기기의 areaTopicPrefix는 곧 그 지역(area) 자신의 topicPrefix이므로 정확히 일치하는 지역을 찾는다.
+   * 대상이 감시장비 하위 접점(센서)이면 handleNavigateToDeviceById와 동일하게 parentDeviceId로
+   * 접점 드릴다운을 열어야 실제로 보인다. */
   const handleNavigateToDevice = useCallback(
     (device: DeviceListItem) => {
       const area = areas.find((a) => a.topicPrefix === device.areaTopicPrefix);
@@ -293,13 +295,18 @@ export function App(): JSX.Element {
       setMode("execute");
       if (area) setSelectedAreaId(area.id);
       setView("map");
+      if (device.parentDeviceId) setFocusEquipmentId(device.parentDeviceId);
       handleSelectDevice(device);
     },
     [areas, dirtyCount, handleSelectDevice],
   );
 
   /** 알람 배너 "기기로 이동" — deviceId만 알고 있으므로 GET /devices/:id/state로 소속 지역을
-   *  알아낸 뒤 handleNavigateToDevice와 동일한 절차(지역 전환 + Floor Map 선택)를 수행한다. */
+   *  알아낸 뒤 handleNavigateToDevice와 동일한 절차(지역 전환 + Floor Map 선택)를 수행한다.
+   *  알람이 걸린 기기가 감시장비 하위 접점(센서)이면 parentDeviceId로 그 감시장비의 접점
+   *  드릴다운을 열어야 실제로 보인다 — FloorMap은 기본이 "감시장비" 레벨이라 접점(센서)은
+   *  드릴다운을 열지 않으면 렌더 대상에서 아예 빠져, selectedDeviceId만 넘겨서는 화면에
+   *  나타나지 않고 감시장비 목록만 보였다(코드 리뷰 2026-07-22). */
   const handleNavigateToDeviceById = useCallback(
     (deviceId: string) => {
       getDeviceState(deviceId)
@@ -310,6 +317,7 @@ export function App(): JSX.Element {
           setMode("execute");
           if (area) setSelectedAreaId(area.id);
           setView("map");
+          if (device.parentDeviceId) setFocusEquipmentId(device.parentDeviceId);
           selectDeviceById(device.id);
         })
         .catch((err: unknown) => {

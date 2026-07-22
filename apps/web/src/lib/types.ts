@@ -78,12 +78,15 @@ export interface AreaSummary {
   imageHeightPx: number | null;
 }
 
-/** GET /devices/:id/state 응답 중 알람 "기기로 이동"에 필요한 최소 필드만 뽑아 쓴다. */
+/** GET /devices/:id/state 응답 중 알람 "기기로 이동"에 필요한 최소 필드만 뽑아 쓴다.
+ *  parentDeviceId: 감시장비 하위 접점(센서)이면 그 감시장비 id — FloorMap 접점 드릴다운을
+ *  열 때 필요하다(응답 자체는 전체 Device 레코드라 실제로는 항상 내려온다). */
 export interface DeviceStateSummary {
   id: string;
   code: string;
   name: string;
   areaId: string | null;
+  parentDeviceId: string | null;
 }
 
 export interface DeviceListItem {
