@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { ExpiringMap } from "./expiring-map.js";
 import {
   AckPayload,
   IllegalCommandTransitionError,
@@ -67,6 +68,14 @@ process.on("unhandledRejection", (reason) => {
 
 const dbExecutor = { query };
 const INTENTIONAL_STATE_WINDOW_MS = Number(process.env.INTENTIONAL_STATE_WINDOW_MS ?? "30000");
+// 양성(등록된 기기) id는 오래 캐시해도 안전하지만, 음성(미등록) 결과를 같은 TTL로 캐시하면
+// 기기를 등록한 뒤에도 이 TTL이 지날 때까지 계속 "미등록"으로 오인한다(코드 리뷰 P2-2) —
+// 음성 결과는 짧게, 양성 결과는 길게 캐시한다.
+const ID_CACHE_POSITIVE_TTL_MS = Number(process.env.GATEWAY_ID_CACHE_TTL_MS ?? 5 * 60_000);
+const ID_CACHE_NEGATIVE_TTL_MS = Number(process.env.GATEWAY_ID_CACHE_NEGATIVE_TTL_MS ?? 10_000);
+// 삭제/폐기된 기기의 마지막 상태를 무기한 보존하지 않도록 TTL을 둔다(코드 리뷰 P2-2) — 폐기
+// 이벤트 훅이 따로 없어, 그 기기가 더 이상 state를 보내지 않으면 자연스럽게 sweep으로 빠진다.
+const LAST_STATUS_TTL_MS = Number(process.env.GATEWAY_LAST_STATUS_TTL_MS ?? 24 * 60 * 60_000);
 
 /**
  * @smarthome/gateway — MQTT 인제스트 (docs/architecture.md §8).
@@ -78,19 +87,19 @@ const INTENTIONAL_STATE_WINDOW_MS = Number(process.env.INTENTIONAL_STATE_WINDOW_
  * @smarthome/realtime(Redis pub/sub) 단일 소스를 재사용한다.
  */
 
-// code → device.id 캐시(음성 캐시 포함: 미등록은 null)
-const idCache = new Map<string, string | null>();
+// code → device.id 캐시(음성 캐시 포함: 미등록은 null, TTL은 위 상수 참고)
+const idCache = new ExpiringMap<string, string | null>(ID_CACHE_POSITIVE_TTL_MS);
 async function resolveDeviceId(code: string): Promise<string | null> {
   const cached = idCache.get(code);
   if (cached !== undefined) return cached;
   const id = await getDeviceIdByCode(code);
-  idCache.set(code, id);
+  idCache.set(code, id, id === null ? ID_CACHE_NEGATIVE_TTL_MS : ID_CACHE_POSITIVE_TTL_MS);
   if (id === null) console.warn(`[gateway] 미등록 device '${code}' — 데이터 무시`);
   return id;
 }
 
 // 상태 변화 감지(retained 재수신·중복 억제)
-const lastStatus = new Map<string, string>();
+const lastStatus = new ExpiringMap<string, string>(LAST_STATUS_TTL_MS);
 
 function stateCommandSourceLabel(actorType: string): string {
   if (actorType === "SYSTEM") return "스케줄/예약";

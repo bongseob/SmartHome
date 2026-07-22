@@ -14,6 +14,11 @@ import {
   type StatePayload,
   type TelemetryPayload,
 } from "@smarthome/contracts";
+import { ExpiringMap } from "./expiring-map.js";
+
+/** 재전송/재시도로 같은 commandId가 다시 올 가능성이 있는 기간 — 이보다 오래된 처리 기록은
+ *  버려도 안전하다(코드 리뷰 P2-2, 무제한 증가 방지). */
+const PROCESSED_COMMAND_TTL_MS = Number(process.env.SIM_PROCESSED_COMMAND_TTL_MS ?? 10 * 60_000);
 
 /** sine 텔레메트리 프로파일 (docs/device-simulator.md §6) */
 export interface SineMetric {
@@ -56,7 +61,7 @@ export class VirtualDevice {
   private startedAt = 0;
   private status: DeviceStatus = "ON";
   /** 처리한 commandId → 최종 ack (동일 commandId 재수신 시 재실행 금지, ack 재전송) */
-  private readonly processed = new Map<string, AckPayload>();
+  private readonly processed = new ExpiringMap<string, AckPayload>(PROCESSED_COMMAND_TTL_MS);
 
   constructor(
     private readonly url: string,
@@ -187,6 +192,7 @@ export class VirtualDevice {
 
   async stop(): Promise<void> {
     if (this.timer) clearInterval(this.timer);
+    this.processed.stop();
     const client = this.client;
     if (!client) return;
     const offline: StatePayload = { status: "OFFLINE", ts: Date.now() };

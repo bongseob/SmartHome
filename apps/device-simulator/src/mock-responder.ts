@@ -8,8 +8,11 @@ import {
   type StatePayload,
 } from "@smarthome/contracts";
 import { listSimulatedDeviceCodes, query } from "@smarthome/db";
+import { ExpiringMap } from "./expiring-map.js";
 
 const SIMULATED_REFRESH_MS = 30_000;
+/** 재전송으로 같은 commandId가 다시 올 가능성이 있는 기간(코드 리뷰 P2-2, 무제한 증가 방지). */
+const PROCESSED_COMMAND_TTL_MS = Number(process.env.SIM_PROCESSED_COMMAND_TTL_MS ?? 10 * 60_000);
 // 첫 simulated 목록 조회를 기다리는 상한(코드 리뷰 P2 #18) — DB가 느리거나 잠깐 안 붙어도
 // 데모 환경에서 계속 쓸 수 있어야 하므로 무한정 기다리지는 않는다.
 const STARTUP_LOOKUP_TIMEOUT_MS = 3000;
@@ -35,7 +38,7 @@ const STARTUP_LOOKUP_TIMEOUT_MS = 3000;
  */
 export class MockResponder {
   private client: MqttClient | undefined;
-  private readonly processed = new Map<string, AckPayload>();
+  private readonly processed = new ExpiringMap<string, AckPayload>(PROCESSED_COMMAND_TTL_MS);
   private simulatedCodes: Set<string> | null = null;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -137,6 +140,7 @@ export class MockResponder {
 
   async stop(): Promise<void> {
     if (this.refreshTimer) clearInterval(this.refreshTimer);
+    this.processed.stop();
     const client = this.client;
     if (!client) return;
     await new Promise<void>((resolve) => {
