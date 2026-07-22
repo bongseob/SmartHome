@@ -100,7 +100,7 @@ export interface AckCompletionResult {
   applied: boolean;
 }
 
-const TERMINAL_STATUSES: ReadonlySet<ExecutionStatus> = new Set([
+export const TERMINAL_STATUSES: ReadonlySet<ExecutionStatus> = new Set([
   "SUCCEEDED",
   "FAILED",
   "TIMED_OUT",

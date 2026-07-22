@@ -1,9 +1,12 @@
 import type { ActorType, Role } from "@smarthome/contracts";
-import { CommandPayload } from "@smarthome/contracts";
+import { CommandPayload, IllegalCommandTransitionError } from "@smarthome/contracts";
 import { publish, type DeviceIdentity, type MqttClient } from "@smarthome/mqtt";
 import {
   createCommandWithAuditResult,
+  getCommandById,
+  query,
   transitionCommandWithAudit,
+  TERMINAL_STATUSES,
   type CommandRecord,
 } from "@smarthome/db";
 import {
@@ -14,6 +17,8 @@ import {
   type CommandCorrelationState,
   type RedisCommandClient,
 } from "./correlation.js";
+
+const dbExecutor = { query };
 
 export interface PublishDeviceCommandInput {
   commandId: string;
@@ -107,11 +112,31 @@ export async function publishDeviceCommand(
       requestTimeMs: timestamp,
     });
 
-    const inProgress = await transitionCommandWithAudit({
-      commandId: input.commandId,
-      toStatus: "IN_PROGRESS",
-      reason: "mqtt command published",
-    });
+    let inProgress: CommandRecord;
+    try {
+      inProgress = await transitionCommandWithAudit({
+        commandId: input.commandId,
+        toStatus: "IN_PROGRESS",
+        reason: "mqtt command published",
+      });
+    } catch (transitionErr) {
+      // 기기가 즉시 ack를 보내면 게이트웨이가 completeCommandFromAck로 PENDING→IN_PROGRESS→
+      // terminal까지 먼저 끝낼 수 있다. 그러면 발행측의 이 IN_PROGRESS 전이는 불법(terminal→
+      // IN_PROGRESS)이 되어 여기서 throw한다 — 실제로는 명령이 성공했는데 발행측이 이를 실패로
+      // 오보하던 문제(코드 리뷰 P1-1). 재조회해서 이미 terminal이면 ack가 이겼다고 보고 성공
+      // 취급한다. correlation은 gateway의 ack 처리가 이미 clearCorrelation 했으므로 여기서
+      // 다시 건드리지 않는다.
+      if (
+        transitionErr instanceof IllegalCommandTransitionError &&
+        TERMINAL_STATUSES.has(transitionErr.from)
+      ) {
+        const current = await getCommandById(dbExecutor, input.commandId);
+        if (current && TERMINAL_STATUSES.has(current.status)) {
+          return { command: current, published: true };
+        }
+      }
+      throw transitionErr;
+    }
     await updateCorrelationStatus(
       redis,
       { ...pendingCorrelation, status: "IN_PROGRESS" },
