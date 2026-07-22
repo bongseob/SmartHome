@@ -130,6 +130,9 @@ export const RecommendationStatus = z.enum([
    *  APPROVED에 영구히 멈춰 재승인도 재시도도 못 했다. 운영자가 재시도(POST retry-dispatch)로
    *  EXECUTED까지 복구시킬 수 있다. */
   "DISPATCH_FAILED",
+  /** retryDispatch()의 원자적 claim 상태(코드 리뷰 P1-4) — 동시 재시도 요청 중 하나만
+   *  DISPATCH_FAILED→DISPATCHING claim에 성공해 실제 발행을 진행한다. */
+  "DISPATCHING",
 ]);
 export type RecommendationStatus = z.infer<typeof RecommendationStatus>;
 

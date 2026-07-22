@@ -16,11 +16,17 @@ import type { RecommendationStatus } from "./enums.js";
  * MQTT 발행은 트랜잭션 밖의 별도 I/O라 실패할 수 있다 — 그 실패를 여기서 명시적 상태로
  * 남겨야 운영자가 재시도할 수 있고, 재시도도 실패하면 같은 상태에 머무른다(자기 자신으로의
  * 전이도 허용).
+ *
+ * DISPATCHING(코드 리뷰 P1-4): retryDispatch()의 원자적 claim 상태. DISPATCH_FAILED→DISPATCHING은
+ * 조건부 UPDATE...WHERE status='DISPATCH_FAILED'로만 이뤄져(claimRecommendationForDispatch,
+ * ai-repository.ts) 동시 재시도 중 하나만 성공한다. 발행 도중 프로세스가 죽어도 회수 유예 후
+ * DISPATCHING→DISPATCHING 재-claim을 허용해 영구 고착을 막는다(자기 자신으로의 전이 허용).
  */
 const ALLOWED_RECOMMENDATION_TRANSITIONS: Record<RecommendationStatus, readonly RecommendationStatus[]> = {
   PENDING_APPROVAL: ["APPROVED", "REJECTED", "EXPIRED"],
   APPROVED: ["EXECUTED", "DISPATCH_FAILED"],
-  DISPATCH_FAILED: ["EXECUTED", "DISPATCH_FAILED"],
+  DISPATCH_FAILED: ["EXECUTED", "DISPATCH_FAILED", "DISPATCHING"],
+  DISPATCHING: ["EXECUTED", "DISPATCH_FAILED", "DISPATCHING"],
   REJECTED: [],
   EXECUTED: [],
   EXPIRED: [],

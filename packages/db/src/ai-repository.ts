@@ -162,6 +162,32 @@ export async function listRecommendations(
   return r.rows.map(toRecommendation);
 }
 
+const DISPATCH_CLAIM_STALE_MS = 120_000;
+
+/**
+ * retryDispatch()의 원자적 claim(코드 리뷰 P1-4) — 조건부 UPDATE...WHERE...RETURNING이라
+ * 동시 요청 중 하나만 성공한다(claimRefreshToken, auth-repository.ts와 동일 패턴). DISPATCH_FAILED
+ * 상태이거나, 이전 claim이 DISPATCH_CLAIM_STALE_MS를 넘겼으면(발행 도중 프로세스가 죽어 영구
+ * 고착된 경우) 재-claim을 허용한다. 0행(null)이면 다른 요청이 이미 선점했거나 claim 대상이 아니다.
+ */
+export async function claimRecommendationForDispatch(
+  db: QueryExecutor,
+  id: string,
+  now = new Date(),
+): Promise<RecommendationRecord | null> {
+  const staleBefore = new Date(now.getTime() - DISPATCH_CLAIM_STALE_MS);
+  const r = await db.query<RecommendationRow>(
+    `UPDATE ai_recommendation
+     SET status = 'DISPATCHING', claimed_at = $3
+     WHERE id::text = $1
+       AND (status = 'DISPATCH_FAILED' OR (status = 'DISPATCHING' AND claimed_at < $2))
+     RETURNING ${RECOMMENDATION_COLUMNS}`,
+    [id, staleBefore, now],
+  );
+  const row = r.rows[0];
+  return row ? toRecommendation(row) : null;
+}
+
 export async function updateRecommendationStatus(
   db: QueryExecutor,
   id: string,

@@ -3,6 +3,7 @@ import type { AuthContext } from "@smarthome/auth";
 import { isAdmin } from "@smarthome/auth";
 import { HitlDecision, RecommendationType, type RecommendationStatus } from "@smarthome/contracts";
 import {
+  claimRecommendationForDispatch,
   getDeviceState,
   getRecommendation,
   insertAuditLog,
@@ -97,11 +98,11 @@ export class RecommendationsService {
 
     if (!requiresHitl) {
       // confidence≥임계치 + 비고위험 — 승인 없이 즉시 실행(SRS 3.5 "임계치 이하일 경우에만" 승인 필요).
-      const dispatch = await this.commands.dispatchAsAi(
-        device.id,
-        body.proposedCommand,
-        body.proposedPayload as Record<string, unknown> | undefined,
-      );
+      // 먼저 추천 레코드+감사를 저장한 뒤 발행한다(코드 리뷰 P2-1) — 예전엔 발행부터 하고 레코드를
+      // 나중에 저장해서, 저장/감사 단계에서 DB 오류가 나면 이미 실행된 제어가 추천 레코드도
+      // 감사 이력도 남기지 못했다. status="APPROVED"는 사람의 승인이 아니라 "정책상 즉시 실행
+      // 확정"을 의미하며, decide()의 사람 승인 경로와 동일하게 dispatchAndFinalize가 그대로
+      // APPROVED→EXECUTED/DISPATCH_FAILED 전이를 재사용한다(새 상태를 따로 만들지 않음).
       const recommendation = await dbCreateRecommendation(dbExecutor, {
         type: type.data,
         targetType: "DEVICE",
@@ -110,8 +111,7 @@ export class RecommendationsService {
         proposedPayload: body.proposedPayload,
         confidenceScore: body.confidenceScore,
         requiresHitl: false,
-        status: "EXECUTED",
-        commandId: dispatch.commandId,
+        status: "APPROVED",
         modelVersion: body.modelVersion ?? null,
       });
       await insertAuditLog(dbExecutor, {
@@ -126,7 +126,7 @@ export class RecommendationsService {
         sessionId: null,
         commandId: null,
       });
-      return recommendation;
+      return this.dispatchAndFinalize(recommendation.id, device.id, body.proposedCommand, body.proposedPayload);
     }
 
     // 승인 필요 — 실행하지 않고 대기열에 넣는다.
@@ -219,23 +219,30 @@ export class RecommendationsService {
   /**
    * 운영자가 DISPATCH_FAILED 추천을 다시 발행 시도한다(코드 리뷰 P1 #4). 승인 자체를 다시
    * 거치지 않는다 — 이미 승인된 제어 내용을 그대로 재발행할 뿐이라 CONTROL 권한만 다시 확인한다.
+   *
+   * claimRecommendationForDispatch로 DISPATCH_FAILED→DISPATCHING을 원자적으로 claim한 뒤에만
+   * 실제 발행을 진행한다(코드 리뷰 P1-4) — 예전엔 상태 확인(check)과 발행(act) 사이에 원자성이
+   * 없어, 동시에 두 재시도 요청이 들어오면 둘 다 통과해 서로 다른 commandId로 같은 제어를
+   * 중복 발행할 수 있었다.
    */
   async retryDispatch(id: string, auth: AuthContext): Promise<unknown> {
     const recommendation = await getRecommendation(dbExecutor, id);
     if (!recommendation) {
       throw new NotFoundException(`recommendation not found: ${id}`);
     }
-    if (recommendation.status !== "DISPATCH_FAILED") {
+    await assertDeviceAccess(auth, recommendation.targetId, "CONTROL");
+
+    const claimed = await claimRecommendationForDispatch(dbExecutor, id);
+    if (!claimed) {
       throw new ConflictException(
-        `DISPATCH_FAILED 상태에서만 재시도할 수 있습니다(현재: ${recommendation.status}).`,
+        `DISPATCH_FAILED 상태에서만 재시도할 수 있습니다(현재: ${recommendation.status}, 이미 다른 요청이 재시도 중일 수 있습니다).`,
       );
     }
-    await assertDeviceAccess(auth, recommendation.targetId, "CONTROL");
     return this.dispatchAndFinalize(
       id,
-      recommendation.targetId,
-      recommendation.proposedCommand,
-      recommendation.proposedPayload,
+      claimed.targetId,
+      claimed.proposedCommand,
+      claimed.proposedPayload,
     );
   }
 

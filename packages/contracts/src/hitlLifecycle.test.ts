@@ -57,4 +57,25 @@ describe("AI 추천 상태 머신 (SRS 3.5)", () => {
       expect(canTransitionRecommendation("DISPATCH_FAILED", "PENDING_APPROVAL")).toBe(false);
     });
   });
+
+  describe("DISPATCHING 원자적 claim 경로(코드 리뷰 P1-4)", () => {
+    it("DISPATCH_FAILED→DISPATCHING 허용(재시도 claim)", () => {
+      expect(canTransitionRecommendation("DISPATCH_FAILED", "DISPATCHING")).toBe(true);
+    });
+
+    it("DISPATCHING→EXECUTED, DISPATCHING→DISPATCH_FAILED 허용(claim 후 발행 성공/실패)", () => {
+      expect(canTransitionRecommendation("DISPATCHING", "EXECUTED")).toBe(true);
+      expect(canTransitionRecommendation("DISPATCHING", "DISPATCH_FAILED")).toBe(true);
+    });
+
+    it("DISPATCHING→DISPATCHING 허용(오래된 claim 회수 후 재-claim)", () => {
+      expect(canTransitionRecommendation("DISPATCHING", "DISPATCHING")).toBe(true);
+    });
+
+    it("DISPATCHING에서 승인/거절 관련 상태로는 못 간다", () => {
+      expect(canTransitionRecommendation("DISPATCHING", "PENDING_APPROVAL")).toBe(false);
+      expect(canTransitionRecommendation("DISPATCHING", "REJECTED")).toBe(false);
+      expect(canTransitionRecommendation("DISPATCHING", "APPROVED")).toBe(false);
+    });
+  });
 });

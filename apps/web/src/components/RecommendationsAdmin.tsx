@@ -42,6 +42,9 @@ const STATUS_LABEL: Record<RecommendationStatus, string> = {
   EXPIRED: "만료됨",
   // 승인은 됐지만 실제 제어 발행이 실패한 상태(코드 리뷰 P1 #4) — 아래 표에서 재시도 버튼을 보여준다.
   DISPATCH_FAILED: "발행 실패",
+  // 재시도 발행이 원자적으로 claim한 순간의 짧은 과도 상태(코드 리뷰 P1-4) — 보통 바로
+  // EXECUTED/DISPATCH_FAILED로 넘어가므로 목록 폴링 타이밍에 드물게만 보인다.
+  DISPATCHING: "재발행 중",
 };
 
 interface FormState {
