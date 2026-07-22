@@ -68,21 +68,19 @@ function sensorLabel(device: DeviceListItem): string {
 }
 
 /**
- * 관제 화면 진입 시 기본 배율(2026-07-15 요청) — 도면을 잘라내지 않고 항상 전체가 화면 안에
- * 들어오되, 100%(원본 크기)를 넘겨 확대하지는 않는다. 뷰포트가 도면보다 작으면 축소해서 전부
- * 보여주고(contain), 뷰포트가 도면보다 크면 100%로 중앙에 배치한다(빈 여백은 정상).
+ * 관제 화면 진입 시 기본 배율(2026-07-22 요청) — 감시장비 접점 드릴다운(cover) 포함, 항상
+ * 100%(원본 크기)에서 시작해 중앙에 배치한다. 도면이 뷰포트보다 크면 가장자리는 패닝(드래그)
+ * 으로 확인한다(뷰포트에 맞춰 자동으로 축소·확대하지 않는다).
  */
 function fitMapToViewport(
   viewport: { width: number; height: number },
   map: { width: number; height: number },
 ): { scale: number; pos: { x: number; y: number } } {
-  const containScale = Math.min(viewport.width / map.width, viewport.height / map.height, 1);
-  const safeScale = Math.max(MIN_SCALE, containScale);
   return {
-    scale: safeScale,
+    scale: 1,
     pos: {
-      x: (viewport.width - map.width * safeScale) / 2,
-      y: (viewport.height - map.height * safeScale) / 2,
+      x: (viewport.width - map.width) / 2,
+      y: (viewport.height - map.height) / 2,
     },
   };
 }
@@ -160,15 +158,24 @@ function DeviceMarker({
 
   return (
     <Group
+      // 마커 레이어 자체가 배경(도면) 레이어와 분리된 고정 스케일 레이어라 x,y는 이미 화면
+      // 픽셀 좌표다(코드 리뷰 2026-07-22 — 이전엔 Stage 전체가 배경과 함께 확대·축소돼 마커도
+      // 같이 커지고 작아졌다). 배경만 scale/pos(zoom/pan)를 갖고, 마커는 그 위에 항상 고정
+      // 크기로 얹힌다 — 부모(FloorMap)가 map 좌표 × scale + pos로 미리 화면 좌표를 계산해 넘긴다.
       x={x}
       y={y}
       draggable={editMode}
       dragBoundFunc={(absolutePos) => {
-        const localX = (absolutePos.x - pos.x) / scale;
-        const localY = (absolutePos.y - pos.y) / scale;
-        const clampedX = Math.min(Math.max(localX, MARKER_EDGE_MARGIN), width - MARKER_EDGE_MARGIN);
-        const clampedY = Math.min(Math.max(localY, MARKER_EDGE_MARGIN), height - MARKER_EDGE_MARGIN);
-        return { x: clampedX * scale + pos.x, y: clampedY * scale + pos.y };
+        // absolutePos도 같은 화면 좌표계라 map 좌표 여백(MARKER_EDGE_MARGIN)에 scale을 곱해
+        // 화면 좌표 경계로 변환한 뒤 그대로 clamp한다.
+        const minX = pos.x + MARKER_EDGE_MARGIN * scale;
+        const maxX = pos.x + (width - MARKER_EDGE_MARGIN) * scale;
+        const minY = pos.y + MARKER_EDGE_MARGIN * scale;
+        const maxY = pos.y + (height - MARKER_EDGE_MARGIN) * scale;
+        return {
+          x: Math.min(Math.max(absolutePos.x, minX), maxX),
+          y: Math.min(Math.max(absolutePos.y, minY), maxY),
+        };
       }}
       onMouseEnter={(e) => {
         setCursor(e, "pointer");
@@ -191,11 +198,12 @@ function DeviceMarker({
       {isAlarmed && (
         <Circle
           radius={isEquipment ? 22 : 17}
-          stroke="#e11d48"
+          stroke="#f43f5e"
           strokeWidth={3}
           dash={[4, 3]}
-          shadowColor="#e11d48"
-          shadowBlur={12}
+          shadowColor="#f43f5e"
+          shadowBlur={22}
+          shadowOpacity={0.95}
           listening={false}
         />
       )}
@@ -230,10 +238,11 @@ function DeviceMarker({
             height={size}
             cornerRadius={5}
             fill={image ? undefined : markerColor}
-            stroke={selected ? "#111827" : hovered ? "#2563eb" : image ? markerColor : "#ffffff"}
+            stroke={selected ? "#38bdf8" : hovered ? "#7dd3fc" : image ? markerColor : "#ffffff"}
             strokeWidth={image ? (emphasized ? 3 : 2.5) : emphasized ? 2.5 : 1.5}
-            shadowColor="rgba(15, 23, 42, 0.35)"
-            shadowBlur={emphasized ? 9 : 6}
+            shadowColor={markerColor}
+            shadowBlur={emphasized ? 20 : 12}
+            shadowOpacity={0.85}
             onClick={() => !editMode && onToggleEquipment()}
             onTap={() => !editMode && onToggleEquipment()}
           />
@@ -272,8 +281,11 @@ function DeviceMarker({
           <Circle
             radius={radius}
             fill={image ? undefined : markerColor}
-            stroke={image ? markerColor : selected ? "#2c3e50" : "#ffffff"}
+            stroke={image ? markerColor : selected ? "#38bdf8" : "#ffffff"}
             strokeWidth={image ? (selected ? 3 : 2.5) : selected ? 2.5 : 1}
+            shadowColor={markerColor}
+            shadowBlur={selected ? 16 : 9}
+            shadowOpacity={0.8}
             onClick={onSelectSensor}
             onTap={onSelectSensor}
           />
@@ -282,7 +294,20 @@ function DeviceMarker({
           )}
         </>
       )}
-      <Text x={-30} y={12} width={60} align="center" text={device.name} fontSize={11} fill="#2c3e50" listening={false} />
+      <Text
+        x={-30}
+        y={18}
+        width={60}
+        align="center"
+        text={device.name}
+        fontSize={11}
+        fontStyle="bold"
+        fill="#e6edf7"
+        shadowColor="#020610"
+        shadowBlur={4}
+        shadowOpacity={1}
+        listening={false}
+      />
     </Group>
   );
 }
@@ -333,6 +358,9 @@ export function FloorMap({
   const [hoveredSensorId, setHoveredSensorId] = useState<string | null>(null);
   // 감시장비 클릭 → 접점별 상태 패널 대상.
   const [contactsEquipmentId, setContactsEquipmentId] = useState<string | null>(null);
+  // 접점 패널의 ✕는 패널만 접는다 — 감시장비 드릴다운(선택/확대 배경) 자체는 유지한다.
+  // 감시장비 목록으로 완전히 돌아가려면 "← 감시장비 목록" 버튼을 쓴다(별도 상호작용).
+  const [contactsPanelCollapsed, setContactsPanelCollapsed] = useState(false);
   const [dragPreview, setDragPreview] = useState<{ id: string; x: number; y: number } | null>(null);
 
   // 지역이 바뀌면 호버/접점 선택을 초기화한다(이전 지역의 잔상 방지).
@@ -340,7 +368,14 @@ export function FloorMap({
     setHoveredEquipmentId(null);
     setHoveredSensorId(null);
     setContactsEquipmentId(null);
+    setContactsPanelCollapsed(false);
   }, [overview.area.id]);
+
+  // 다른 감시장비를 새로 선택하면(또는 다시 열면) 이전에 접어둔 패널 상태를 이어받지 않고
+  // 항상 펼쳐진 채로 보여준다.
+  useEffect(() => {
+    setContactsPanelCollapsed(false);
+  }, [contactsEquipmentId]);
 
   useEffect(() => {
     const container = stageContainerRef.current;
@@ -363,11 +398,13 @@ export function FloorMap({
     return () => resizeObserver.disconnect();
   }, []);
 
+  // 감시장비 접점 드릴다운(contactsEquipmentId)에 들어가거나 나올 때도 100%·중앙으로 다시
+  // 맞춰야 하므로 deps에 포함한다.
   useEffect(() => {
     const fitted = fitMapToViewport(stageSize, { width, height });
     setScale(fitted.scale);
     setPos(fitted.pos);
-  }, [overview.area.id, stageSize, width, height]);
+  }, [overview.area.id, stageSize, width, height, contactsEquipmentId]);
 
   const activeDevices = useMemo(
     () => overview.devices.filter(isActiveMonitoringDevice),
@@ -443,10 +480,6 @@ export function FloorMap({
 
   function handleWheel(event: Konva.KonvaEventObject<WheelEvent>): void {
     event.evt.preventDefault();
-    const stage = stageRef.current;
-    if (!stage) return;
-    const pointer = stage.getPointerPosition();
-    if (!pointer) return;
 
     const direction = event.evt.deltaY > 0 ? -1 : 1;
     const factor = 1.05;
@@ -455,14 +488,18 @@ export function FloorMap({
       Math.max(MIN_SCALE, direction > 0 ? scale * factor : scale / factor),
     );
 
-    const mousePointTo = {
-      x: (pointer.x - pos.x) / scale,
-      y: (pointer.y - pos.y) / scale,
+    // 확대·축소 기준점은 항상 뷰포트 중앙으로 고정한다(2026-07-22 요청) — 커서 위치를 기준으로
+    // 하면 커서가 오른쪽에 있을 때 이미지가 왼쪽으로 커지는 것처럼 보인다. 중앙을 고정점으로
+    // 두면 좌우/상하 대칭으로 커지고 작아진다.
+    const anchor = { x: stageSize.width / 2, y: stageSize.height / 2 };
+    const anchorPointTo = {
+      x: (anchor.x - pos.x) / scale,
+      y: (anchor.y - pos.y) / scale,
     };
     setScale(nextScale);
     setPos({
-      x: pointer.x - mousePointTo.x * nextScale,
-      y: pointer.y - mousePointTo.y * nextScale,
+      x: anchor.x - anchorPointTo.x * nextScale,
+      y: anchor.y - anchorPointTo.y * nextScale,
     });
   }
 
@@ -529,26 +566,49 @@ export function FloorMap({
           ref={stageRef}
           width={stageSize.width}
           height={stageSize.height}
+          onWheel={handleWheel}
+        >
+        {/* 배경(도면) 레이어만 확대·축소·팬(scale/pos)을 갖는다 — 마커 레이어는 아래에서
+            변환 없이(고정 스케일) 별도로 그려, 배경만 줌/팬되고 마커는 항상 고정 크기로
+            보이게 한다(코드 리뷰 2026-07-22, 마커 이미지가 배율에 따라 커지고 작아지던 문제). */}
+        <Layer
           scaleX={scale}
           scaleY={scale}
           x={pos.x}
           y={pos.y}
-          draggable={!editMode}
-          onWheel={handleWheel}
-          onDragEnd={(e) => {
-            if (e.target !== e.target.getStage()) return;
-            setPos({ x: e.target.x(), y: e.target.y() });
-          }}
+          // 감시장비 접점을 드릴다운한 화면은 배경이 뷰포트를 꽉 채우는 몰입형 화면이라, 마우스
+          // 드래그로 팬(pan)하면 오히려 배치를 놓치기 쉽다 — 이 상태에서는 드래그를 막는다
+          // (휠 확대/축소는 계속 허용).
+          draggable={!editMode && !contactsEquipmentId}
+          onDragMove={(e) => setPos({ x: e.target.x(), y: e.target.y() })}
+          onDragEnd={(e) => setPos({ x: e.target.x(), y: e.target.y() })}
         >
-        <Layer listening={false}>
           {image && <KonvaImage image={image} width={width} height={height} opacity={0.9} />}
+          {/* 관제센터 느낌의 비네트 — 가장자리를 살짝 어둡게 눌러 도면보다 마커/상태가 도드라지게 한다. */}
+          {image && (
+            <Rect
+              width={width}
+              height={height}
+              listening={false}
+              fillRadialGradientStartPoint={{ x: width / 2, y: height / 2 }}
+              fillRadialGradientEndPoint={{ x: width / 2, y: height / 2 }}
+              fillRadialGradientStartRadius={0}
+              fillRadialGradientEndRadius={Math.max(width, height) / 1.25}
+              fillRadialGradientColorStops={[0, "rgba(2, 6, 16, 0)", 1, "rgba(2, 6, 16, 0.55)"]}
+            />
+          )}
         </Layer>
         <Layer>
           {renderedDevices.map((device, index) => {
+            // dragPreview는 드래그 중인 마커가 Konva에 직접 보고한 화면 좌표(이미 screen-space).
+            // 그 외에는 map 좌표(devicePosition)를 배경 레이어와 같은 scale/pos로 변환해 화면
+            // 좌표로 만든다 — 마커 레이어 자체는 고정 스케일(변환 없음)이라 이 변환을 여기서
+            // 직접 해줘야 배경 위 올바른 지점에 그려진다.
+            const mapPos = devicePosition(device, index, pendingPositions[device.id]);
             const { x, y } =
               dragPreview?.id === device.id
                 ? { x: dragPreview.x, y: dragPreview.y }
-                : devicePosition(device, index, pendingPositions[device.id]);
+                : { x: mapPos.x * scale + pos.x, y: mapPos.y * scale + pos.y };
             const isEquipment = device.deviceRole === "MONITORING_EQUIPMENT";
             const selected = isEquipment
               ? device.id === contactsEquipmentId
@@ -593,7 +653,8 @@ export function FloorMap({
                 onDragMove={(nx, ny) => setDragPreview({ id: device.id, x: nx, y: ny })}
                 onDragEnd={(nx, ny) => {
                   setDragPreview(null);
-                  onDeviceDragEnd?.(device.id, nx, ny);
+                  // 저장용 좌표는 항상 map 좌표(device.posX/posY 기준)라 화면 좌표를 역변환한다.
+                  onDeviceDragEnd?.(device.id, (nx - pos.x) / scale, (ny - pos.y) / scale);
                 }}
                 onSelectSensor={() => onSelectDevice(device)}
                 onToggleEquipment={() => setContactsEquipmentId((cur) => (cur === device.id ? null : device.id))}
@@ -603,11 +664,14 @@ export function FloorMap({
           {/* 호버 툴팁 — 감시장비의 일괄 상태(집계)만 간결하게 보여준다. */}
           {hoveredEquipment && hoveredSummary && (() => {
             const hoveredIndex = renderedDevices.findIndex((device) => device.id === hoveredEquipment.id);
-            const { x, y } = devicePosition(
+            const mapPos = devicePosition(
               hoveredEquipment,
               Math.max(hoveredIndex, 0),
               pendingPositions[hoveredEquipment.id],
             );
+            // 툴팁도 마커와 같은 고정 스케일 레이어에 있어 화면 좌표로 변환해야 한다.
+            const x = mapPos.x * scale + pos.x;
+            const y = mapPos.y * scale + pos.y;
             const lines = [
               hoveredEquipment.name,
               `전체 ${hoveredSummary.total} · ON ${hoveredSummary.on} · OFF ${hoveredSummary.off}`,
@@ -628,19 +692,30 @@ export function FloorMap({
 
             // 기본은 마커 오른쪽에 띄우고, 오른쪽에 공간이 부족하면 왼쪽으로 뒤집는다.
             // (예전엔 오른쪽 좌표를 캔버스 폭 안으로 clamp만 해서, 우측 여백이 부족하면
-            // 툴팁이 마커 쪽으로 밀려와 그대로 덮어버렸다.)
-            const fitsRight = x + MARKER_CLEARANCE + TOOLTIP_WIDTH <= width - CANVAS_MARGIN;
+            // 툴팁이 마커 쪽으로 밀려와 그대로 덮어버렸다.) 화면 좌표계이므로 map 크기가 아니라
+            // 실제 뷰포트(stageSize) 기준으로 clamp한다.
+            const fitsRight = x + MARKER_CLEARANCE + TOOLTIP_WIDTH <= stageSize.width - CANVAS_MARGIN;
             const tooltipX = fitsRight
               ? x + MARKER_CLEARANCE
               : Math.max(x - MARKER_CLEARANCE - TOOLTIP_WIDTH, CANVAS_MARGIN);
             const tooltipY = Math.min(
               Math.max(y - TOOLTIP_HEIGHT / 2, CANVAS_MARGIN),
-              height - TOOLTIP_HEIGHT - CANVAS_MARGIN,
+              stageSize.height - TOOLTIP_HEIGHT - CANVAS_MARGIN,
             );
 
             return (
               <Group x={tooltipX} y={tooltipY} listening={false}>
-                <Rect width={TOOLTIP_WIDTH} height={TOOLTIP_HEIGHT} cornerRadius={6} fill="#111827" opacity={0.92} shadowBlur={6} shadowColor="rgba(0,0,0,0.3)" />
+                <Rect
+                  width={TOOLTIP_WIDTH}
+                  height={TOOLTIP_HEIGHT}
+                  cornerRadius={6}
+                  fill="#0b101c"
+                  opacity={0.94}
+                  stroke="rgba(56, 189, 248, 0.4)"
+                  strokeWidth={1}
+                  shadowBlur={16}
+                  shadowColor="rgba(56, 189, 248, 0.25)"
+                />
                 <Rect x={0} y={0} width={TOOLTIP_WIDTH} height={4} cornerRadius={2} fill={DEVICE_STATUS_COLOR[hoveredSummary.status]} />
                 <Text x={12} y={12} width={TOOLTIP_WIDTH - 24} text={text} fontSize={12} lineHeight={1.4} fill="#f9fafb" />
               </Group>
@@ -649,11 +724,13 @@ export function FloorMap({
           {/* 개별 센서 호버 툴팁 — 하단 목록 대신 마우스오버 시에만 상세정보를 보여준다. */}
           {hoveredSensor && (() => {
             const hoveredIndex = renderedDevices.findIndex((device) => device.id === hoveredSensor.id);
-            const { x, y } = devicePosition(
+            const mapPos = devicePosition(
               hoveredSensor,
               Math.max(hoveredIndex, 0),
               pendingPositions[hoveredSensor.id],
             );
+            const x = mapPos.x * scale + pos.x;
+            const y = mapPos.y * scale + pos.y;
             const lines = [
               sensorLabel(hoveredSensor),
               `상태 ${hoveredSensor.currentStatus}`,
@@ -666,19 +743,29 @@ export function FloorMap({
             const MARKER_CLEARANCE = 16;
             const CANVAS_MARGIN = 10;
 
-            const fitsRight = x + MARKER_CLEARANCE + TOOLTIP_WIDTH <= width - CANVAS_MARGIN;
+            const fitsRight = x + MARKER_CLEARANCE + TOOLTIP_WIDTH <= stageSize.width - CANVAS_MARGIN;
             const tooltipX = fitsRight
               ? x + MARKER_CLEARANCE
               : Math.max(x - MARKER_CLEARANCE - TOOLTIP_WIDTH, CANVAS_MARGIN);
             const tooltipY = Math.min(
               Math.max(y - TOOLTIP_HEIGHT / 2, CANVAS_MARGIN),
-              height - TOOLTIP_HEIGHT - CANVAS_MARGIN,
+              stageSize.height - TOOLTIP_HEIGHT - CANVAS_MARGIN,
             );
 
             return (
               // 옆 센서가 어렴풋이 비치도록 감시장비 툴팁(0.92)보다 낮은 투명도(2026-07-15 요청).
               <Group x={tooltipX} y={tooltipY} listening={false}>
-                <Rect width={TOOLTIP_WIDTH} height={TOOLTIP_HEIGHT} cornerRadius={6} fill="#111827" opacity={0.72} shadowBlur={6} shadowColor="rgba(0,0,0,0.3)" />
+                <Rect
+                  width={TOOLTIP_WIDTH}
+                  height={TOOLTIP_HEIGHT}
+                  cornerRadius={6}
+                  fill="#0b101c"
+                  opacity={0.78}
+                  stroke="rgba(56, 189, 248, 0.3)"
+                  strokeWidth={1}
+                  shadowBlur={12}
+                  shadowColor="rgba(56, 189, 248, 0.2)"
+                />
                 <Rect x={0} y={0} width={TOOLTIP_WIDTH} height={4} cornerRadius={2} fill={DEVICE_STATUS_COLOR[hoveredSensor.currentStatus]} />
                 <Text x={12} y={12} width={TOOLTIP_WIDTH - 24} text={text} fontSize={12} lineHeight={1.4} fill="#f9fafb" />
               </Group>
@@ -689,7 +776,7 @@ export function FloorMap({
       </div>
 
       {/* 클릭 → 접점별 상태 패널. 선택된 감시장비의 자식 접점(센서)을 접점주소/단자/IO/상태로 나열. */}
-      {contactsEquipment && contactsSummary && (
+      {contactsEquipment && contactsSummary && !contactsPanelCollapsed && (
         <div className="floor-map__contacts">
           <div className="floor-map__contacts-head">
             <div>
@@ -706,7 +793,12 @@ export function FloorMap({
               {contactsSummary.alarm > 0 && <span className="badge badge--alarm">ALARM {contactsSummary.alarm}</span>}
               {contactsSummary.offline > 0 && <span className="badge badge--offline">OFFLINE {contactsSummary.offline}</span>}
             </div>
-            <button type="button" className="floor-map__contacts-close" onClick={() => setContactsEquipmentId(null)}>
+            <button
+              type="button"
+              className="floor-map__contacts-close"
+              title="접점 목록 패널만 접습니다(감시장비 선택은 유지됩니다)."
+              onClick={() => setContactsPanelCollapsed(true)}
+            >
               ✕
             </button>
           </div>

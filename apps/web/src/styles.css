@@ -2672,3 +2672,155 @@ select {
   font-size: var(--font-sm);
 }
 
+/* ─── 관제(Floor Map) 다크 SCADA 테마 (2026-07-22, 외부 시연/마케팅용 요청) ───
+ * 앱 전역 라이트 테마·색 토큰(§1626 :root)은 그대로 두고, 관제 화면(.floor-map)
+ * 안에서만 별도 팔레트(--scada-*)로 오버라이드한다 — 다른 화면(대시보드·관리자 등)은
+ * 영향받지 않는다. 기기 상태색(DEVICE_STATUS_COLOR, docs/ui-ux-design.md §6.1)은
+ * 고정값이라 바꾸지 않고, 그 색을 그대로 네온 글로우로 강조하는 방식으로만 화려함을 더한다. */
+.floor-map {
+  --scada-bg: #05070d;
+  --scada-panel: #0b101c;
+  --scada-panel-soft: #101728;
+  --scada-border: rgba(56, 189, 248, 0.25);
+  --scada-border-soft: rgba(100, 116, 165, 0.18);
+  --scada-text: #e6edf7;
+  --scada-muted: #8291ab;
+  --scada-accent: #38bdf8;
+  --scada-accent-soft: rgba(56, 189, 248, 0.14);
+
+  background:
+    radial-gradient(circle at 12% -8%, rgba(56, 189, 248, 0.1), transparent 42%),
+    radial-gradient(circle at 88% 105%, rgba(45, 212, 191, 0.08), transparent 45%),
+    var(--scada-bg);
+  border-color: var(--scada-border);
+  box-shadow:
+    0 0 0 1px rgba(56, 189, 248, 0.05),
+    0 24px 48px rgba(1, 4, 10, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.floor-map__toolbar {
+  color: var(--scada-muted);
+}
+
+.floor-map__area-select {
+  color: var(--scada-text);
+}
+
+.floor-map__area-select select {
+  border-color: var(--scada-border-soft);
+  background: var(--scada-panel);
+  color: var(--scada-text);
+}
+
+.floor-map__level-toggle {
+  border-color: var(--scada-border-soft);
+  background: var(--scada-panel);
+}
+
+.floor-map__level-toggle button {
+  color: var(--scada-muted);
+}
+
+.floor-map__level-toggle button.active,
+.floor-map__level-toggle button.active:hover:not(:disabled) {
+  background: var(--scada-accent);
+  border-color: var(--scada-accent);
+  color: #04121c;
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.55);
+}
+
+.floor-map__back {
+  border-color: var(--scada-accent);
+  color: var(--scada-accent);
+  background: transparent;
+}
+
+.floor-map__back:hover:not(:disabled) {
+  background: var(--scada-accent-soft);
+}
+
+.floor-map__level-summary {
+  color: var(--scada-muted);
+  font-family: var(--font-mono);
+}
+
+/* 툴바의 "초기화" 버튼(별도 클래스 없는 기본 button) — .floor-map__back·레벨 토글 버튼은
+ * 위에서 이미 각자 스타일을 가지므로 여기서 제외한다. */
+.floor-map__toolbar > button:not(.floor-map__back) {
+  border-color: var(--scada-border-soft);
+  background: var(--scada-panel);
+  color: var(--scada-text);
+}
+
+.floor-map__toolbar > button:not(.floor-map__back):hover:not(:disabled) {
+  border-color: var(--scada-accent);
+  color: var(--scada-accent);
+}
+
+.floor-map__stage {
+  background:
+    repeating-linear-gradient(
+      0deg,
+      rgba(56, 189, 248, 0.045) 0px,
+      rgba(56, 189, 248, 0.045) 1px,
+      transparent 1px,
+      transparent 32px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      rgba(56, 189, 248, 0.045) 0px,
+      rgba(56, 189, 248, 0.045) 1px,
+      transparent 1px,
+      transparent 32px
+    ),
+    var(--scada-bg);
+  border: 1px solid var(--scada-border-soft);
+  box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.5);
+}
+
+.floor-map__contacts {
+  border-color: var(--scada-border-soft);
+  background: var(--scada-panel);
+  box-shadow: 0 12px 32px rgba(1, 4, 10, 0.5);
+}
+
+.floor-map__contacts-head {
+  background: var(--scada-panel-soft);
+  border-bottom-color: var(--scada-border-soft);
+}
+
+.floor-map__contacts-head strong {
+  color: var(--scada-text);
+}
+
+.floor-map__contacts-sub {
+  color: var(--scada-muted);
+}
+
+.floor-map__contacts-close {
+  border-color: var(--scada-border-soft);
+  background: var(--scada-panel);
+  color: var(--scada-muted);
+}
+
+.floor-map__contacts-empty {
+  color: var(--scada-muted);
+}
+
+.floor-map__contacts-row {
+  border-bottom-color: var(--scada-border-soft);
+  background: var(--scada-panel);
+  color: var(--scada-text);
+}
+
+.floor-map__contacts-row--head {
+  background: var(--scada-panel-soft);
+  color: var(--scada-muted);
+}
+
+.floor-map__contacts-row:not(.floor-map__contacts-row--head):hover,
+.floor-map__contacts-row.active {
+  background: var(--scada-accent-soft);
+}
+
