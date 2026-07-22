@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAreaAclTopic,
   buildTopic,
+  buildDeviceAclTopic,
   buildDeviceBase,
   buildEnterpriseAclTopic,
   InvalidTopicSegmentError,
@@ -63,6 +64,16 @@ describe("ACL topic builders", () => {
         area: "living-room",
       }),
     ).toBe("enterprise/site1/bldg-a/2f/living-room/#");
+  });
+
+  it("device 단독 권한용 wildcard topic을 생성한다(코드 리뷰 P1-3)", () => {
+    expect(buildDeviceAclTopic("enterprise/site1/bldg-a/2f/living-room/lamp-01")).toBe(
+      "enterprise/site1/bldg-a/2f/living-room/lamp-01/#",
+    );
+  });
+
+  it("형식이 깨진 mqttTopicBase는 null을 반환한다(잘못된 wildcard를 claim에 싣지 않음)", () => {
+    expect(buildDeviceAclTopic("not-a-valid-topic")).toBeNull();
   });
 });
 

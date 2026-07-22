@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import type { AuthContext } from "@smarthome/auth";
-import { isAdmin } from "@smarthome/auth";
+import { hasAreaAccess, isAdmin } from "@smarthome/auth";
 import {
   DeviceConnectionConfig,
   type DeviceConnectionProtocol,
@@ -129,13 +129,11 @@ export class DevicesService {
     const devices = await listDevices(deviceExecutor, filter);
     if (isAdmin(auth)) return devices;
 
-    // 사용자의 ACL topic에서 area 프리픽스 집합 추출
-    const allowedAreaPrefixes = new Set(
-      auth.topics.map((t) => t.replace(/\/#$/, "")),
-    );
-    return devices.filter(
-      (d) => d.areaTopicPrefix !== null && allowedAreaPrefixes.has(d.areaTopicPrefix),
-    );
+    // area 프리픽스가 아니라 기기 자신의 mqttTopic으로 검사해야 area 권한(넓은 prefix)과
+    // device/group 단독 권한(기기까지 내려간 prefix)을 모두 hasAreaAccess의 startsWith 매칭
+    // 하나로 커버한다(코드 리뷰 P1-3 — 예전엔 areaTopicPrefix 정확 일치만 봐서 device 단독
+    // 권한 사용자에게 목록에 아무것도 안 보였다).
+    return devices.filter((d) => hasAreaAccess(auth, d.mqttTopic));
   }
 
   async state(id: string): Promise<unknown> {

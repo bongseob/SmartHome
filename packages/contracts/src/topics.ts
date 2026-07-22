@@ -132,6 +132,16 @@ export function buildAreaAclTopic(parts: Omit<TopicParts, "device" | "suffix">):
 }
 
 /**
+ * 기기 단독 권한(user_device_permission/user_group_permission)용 ACL 토픽 — area 권한 없이
+ * 이 기기만 허용한다(코드 리뷰 P1-3). mqttTopicBase는 device.mqtt_topic(buildDeviceBase로
+ * 생성된 값)을 그대로 전달해야 하며, 형식이 깨져 있으면(DB 오염) null을 반환해 호출부가
+ * 해당 권한을 조용히 건너뛰게 한다 — 잘못된 wildcard를 topics claim에 실어 보내지 않기 위함.
+ */
+export function buildDeviceAclTopic(mqttTopicBase: string): string | null {
+  return parseDeviceBase(mqttTopicBase) ? `${mqttTopicBase}/#` : null;
+}
+
+/**
  * UNS 토픽을 세그먼트로 분해한다. 형식이 맞지 않으면 null.
  * (gateway 등 수신측이 토픽에서 device/suffix를 추출할 때 사용)
  */

@@ -1,5 +1,5 @@
 import type { AccessLevel, Role } from "@smarthome/contracts";
-import { buildAreaAclTopic, buildEnterpriseAclTopic } from "@smarthome/contracts";
+import { buildAreaAclTopic, buildDeviceAclTopic, buildEnterpriseAclTopic } from "@smarthome/contracts";
 import type { QueryResultRow } from "./pool.js";
 import type { QueryExecutor } from "./audit-repository.js";
 
@@ -51,6 +51,10 @@ interface AccessRow extends QueryResultRow {
   access_level: AccessLevel;
 }
 
+interface DeviceTopicRow extends QueryResultRow {
+  mqtt_topic: string;
+}
+
 interface RefreshTokenRow extends QueryResultRow {
   token_hash: string;
   user_id: string;
@@ -82,6 +86,12 @@ export async function listUserRoles(db: QueryExecutor, userId: string): Promise<
   return result.rows.map((row) => row.role);
 }
 
+/**
+ * 사용자의 MQTT ACL / 목록 필터 근거가 되는 topic claim 전체. Area 권한(area 서브트리 전체) +
+ * Device 단독 권한 + Group 권한(멤버 기기)을 모두 합친다(코드 리뷰 P1-2·P1-3 — 예전엔 area
+ * 권한만 반영해 device/group 단독 권한 사용자가 목록·실시간 이벤트·MQTT ACL 어디서도 대상
+ * 기기를 보지 못했다).
+ */
 export async function listUserTopicClaims(
   db: QueryExecutor,
   userId: string,
@@ -90,7 +100,7 @@ export async function listUserTopicClaims(
   if (roles.includes("ADMIN")) {
     return [buildEnterpriseAclTopic()];
   }
-  const result = await db.query<AreaTopicRow>(
+  const areaResult = await db.query<AreaTopicRow>(
     `SELECT s.slug AS site_slug, b.slug AS building_slug, f.slug AS floor_slug, a.slug AS area_slug
      FROM user_area_permission uap
      JOIN area a ON a.id = uap.area_id
@@ -101,7 +111,7 @@ export async function listUserTopicClaims(
      ORDER BY s.slug, b.slug, f.slug, a.slug`,
     [userId],
   );
-  return result.rows.map((row) =>
+  const areaTopics = areaResult.rows.map((row) =>
     buildAreaAclTopic({
       site: row.site_slug,
       building: row.building_slug,
@@ -109,6 +119,25 @@ export async function listUserTopicClaims(
       area: row.area_slug,
     }),
   );
+
+  const deviceTopicResult = await db.query<DeviceTopicRow>(
+    `SELECT d.mqtt_topic
+     FROM user_device_permission udp
+     JOIN device d ON d.id = udp.device_id
+     WHERE udp.user_id::text = $1
+     UNION
+     SELECT d.mqtt_topic
+     FROM user_group_permission ugp
+     JOIN device_group_mapping dgm ON dgm.group_id = ugp.group_id
+     JOIN device d ON d.id = dgm.device_id
+     WHERE ugp.user_id::text = $1`,
+    [userId],
+  );
+  const deviceTopics = deviceTopicResult.rows
+    .map((row) => buildDeviceAclTopic(row.mqtt_topic))
+    .filter((topic): topic is string => topic !== null);
+
+  return [...new Set([...areaTopics, ...deviceTopics])];
 }
 
 export async function getUserAuthByUsername(
@@ -151,32 +180,43 @@ export async function getUserAuthById(
   return toUser(row, roles, topics);
 }
 
+/**
+ * 특정 기기에 대한 사용자의 최종 접근 레벨. Device 직접권한 / Area권한(device.area_id 경유) /
+ * Group권한(device_group_mapping 경유) 세 소스를 모두 모아 가장 높은 access_level을 반환한다
+ * (코드 리뷰 P1-2·P1-3·P2-3 — 예전엔 Group권한이 전혀 반영되지 않았고, direct 권한이 있으면
+ * 더 높은 area/group 권한이 있어도 무시했다). access_level enum은 VIEW<CONTROL<MANAGE 순서로
+ * 선언되어(0001_extensions_enums.sql) SQL MAX()가 그대로 올바른 순위 비교로 동작한다.
+ */
 export async function getDeviceAccessLevel(
   db: QueryExecutor,
   userId: string,
   deviceIdOrCode: string,
 ): Promise<AccessLevel | null> {
-  const direct = await db.query<AccessRow>(
-    `SELECT udp.access_level
-     FROM user_device_permission udp
-     JOIN device d ON d.id = udp.device_id
-     WHERE udp.user_id::text = $1 AND (d.id::text = $2 OR d.code = $2)
-     LIMIT 1`,
+  const result = await db.query<AccessRow>(
+    `WITH candidate_device AS (
+       SELECT id, area_id FROM device WHERE id::text = $2 OR code = $2 LIMIT 1
+     ),
+     levels AS (
+       SELECT udp.access_level
+       FROM user_device_permission udp
+       JOIN candidate_device cd ON cd.id = udp.device_id
+       WHERE udp.user_id::text = $1
+       UNION ALL
+       SELECT uap.access_level
+       FROM user_area_permission uap
+       JOIN candidate_device cd ON cd.area_id = uap.area_id
+       WHERE uap.user_id::text = $1
+       UNION ALL
+       SELECT ugp.access_level
+       FROM user_group_permission ugp
+       JOIN device_group_mapping dgm ON dgm.group_id = ugp.group_id
+       JOIN candidate_device cd ON cd.id = dgm.device_id
+       WHERE ugp.user_id::text = $1
+     )
+     SELECT MAX(access_level) AS access_level FROM levels`,
     [userId, deviceIdOrCode],
   );
-  if (direct.rows[0]) {
-    return direct.rows[0].access_level;
-  }
-
-  const area = await db.query<AccessRow>(
-    `SELECT uap.access_level
-     FROM user_area_permission uap
-     JOIN device d ON d.area_id = uap.area_id
-     WHERE uap.user_id::text = $1 AND (d.id::text = $2 OR d.code = $2)
-     LIMIT 1`,
-    [userId, deviceIdOrCode],
-  );
-  return area.rows[0]?.access_level ?? null;
+  return result.rows[0]?.access_level ?? null;
 }
 
 function toRefreshTokenRecord(row: RefreshTokenRow): RefreshTokenRecord {

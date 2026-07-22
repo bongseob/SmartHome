@@ -198,6 +198,8 @@ export interface CameraSummary {
   areaId: string | null;
   /** area 스코프 ACL 검사용(devices.service.ts의 list() 필터링과 동일 패턴). */
   areaTopicPrefix: string | null;
+  /** device 단독/group 권한까지 반영한 ACL 검사용(hasAreaAccess(auth, mqttTopic), 코드 리뷰 P1-3). */
+  mqttTopic: string;
   protocol: CameraProtocol;
   streamUrl: string;
   onvifEndpoint: string | null;
@@ -213,6 +215,7 @@ interface CameraSummaryRow extends QueryResultRow {
   name: string;
   current_status: DeviceStatus;
   area_id: string | null;
+  mqtt_topic: string;
   site_slug: string | null;
   building_slug: string | null;
   floor_slug: string | null;
@@ -233,6 +236,7 @@ function toCameraSummary(row: CameraSummaryRow): CameraSummary {
     name: row.name,
     currentStatus: row.current_status,
     areaId: row.area_id,
+    mqttTopic: row.mqtt_topic,
     // SQL에서 토픽 문자열을 CONCAT하지 않고 slug만 받아 여기서 buildAreaTopicPrefix()로 만든다
     // (CLAUDE.md — UNS 토픽 하드코딩 금지).
     areaTopicPrefix:
@@ -255,7 +259,7 @@ function toCameraSummary(row: CameraSummaryRow): CameraSummary {
 }
 
 const CAMERA_SUMMARY_COLUMNS = `
-  d.id::text AS device_id, d.code, d.name, d.current_status, d.area_id::text,
+  d.id::text AS device_id, d.code, d.name, d.current_status, d.area_id::text, d.mqtt_topic,
   s.slug AS site_slug, b.slug AS building_slug, f.slug AS floor_slug, a.slug AS area_slug,
   c.protocol, c.stream_url, c.onvif_endpoint, c.is_ptz, c.resolution,
   c.fov_deg::text, c.heading_deg::text

@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import type { AuthContext } from "@smarthome/auth";
-import { isAdmin } from "@smarthome/auth";
+import { hasAreaAccess, isAdmin } from "@smarthome/auth";
 import { listDevices, listGroupControlSummaries, query } from "@smarthome/db";
 
 const groupExecutor = { query };
@@ -11,18 +11,18 @@ export class GroupsService {
     const groups = await listGroupControlSummaries(groupExecutor);
     if (isAdmin(auth)) return groups;
 
-    const allowedAreaPrefixes = new Set(auth.topics.map((t) => t.replace(/\/#$/, "")));
     const visibleGroups = [];
     for (const group of groups) {
       const members = await listDevices(groupExecutor, { groupId: group.id });
+      // area가 아닌 기기 자신의 mqttTopic으로 검사 — area 권한뿐 아니라 device/group 단독
+      // 권한(listUserTopicClaims가 심어준 기기별 topic)도 함께 반영된다(코드 리뷰 P1-2·P1-3).
       const allowedMembers = members.filter(
         (device) =>
           device.deviceRole === "SENSOR" &&
           device.monitoringVisible &&
           device.enabled &&
           device.lifecycleStatus !== "DECOMMISSIONED" &&
-          device.areaTopicPrefix !== null &&
-          allowedAreaPrefixes.has(device.areaTopicPrefix),
+          hasAreaAccess(auth, device.mqttTopic),
       );
       if (allowedMembers.length > 0) {
         const onCount = allowedMembers.filter((device) => device.currentStatus === "ON").length;
@@ -50,9 +50,6 @@ export class GroupsService {
     );
     if (isAdmin(auth)) return activeSensors;
 
-    const allowedAreaPrefixes = new Set(auth.topics.map((t) => t.replace(/\/#$/, "")));
-    return activeSensors.filter(
-      (device) => device.areaTopicPrefix !== null && allowedAreaPrefixes.has(device.areaTopicPrefix),
-    );
+    return activeSensors.filter((device) => hasAreaAccess(auth, device.mqttTopic));
   }
 }

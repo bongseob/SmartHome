@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import type { AuthContext } from "@smarthome/auth";
-import { isAdmin, issueStreamToken } from "@smarthome/auth";
+import { hasAreaAccess, isAdmin, issueStreamToken } from "@smarthome/auth";
 import {
   InvalidTopicSegmentError,
   PtzGotoPresetArgs,
@@ -98,8 +98,8 @@ export class CamerasService {
     const cameras = await listCameras(cameraExecutor, filter);
     if (isAdmin(auth)) return cameras;
 
-    const allowedAreaPrefixes = new Set(auth.topics.map((t) => t.replace(/\/#$/, "")));
-    return cameras.filter((c) => c.areaTopicPrefix !== null && allowedAreaPrefixes.has(c.areaTopicPrefix));
+    // devices.service.ts와 동일하게 area가 아닌 카메라 자신의 mqttTopic으로 검사(코드 리뷰 P1-3).
+    return cameras.filter((c) => hasAreaAccess(auth, c.mqttTopic));
   }
 
   async get(id: string): Promise<CameraSummary> {

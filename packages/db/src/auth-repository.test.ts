@@ -6,6 +6,7 @@ import {
   getActiveRefreshToken,
   getDeviceAccessLevel,
   getUserAuthByUsername,
+  listUserTopicClaims,
   revokeRefreshToken,
   storeRefreshToken,
 } from "./auth-repository.js";
@@ -74,6 +75,67 @@ describe("auth repository", () => {
     );
 
     expect(access).toBe("CONTROL");
+  });
+
+  it("getDeviceAccessLevel 쿼리는 Device·Area·Group 세 권한 소스를 모두 조회해 MAX를 취한다(코드 리뷰 P1-2·P2-3 회귀 방지)", async () => {
+    class QueryTextCapturingDb implements QueryExecutor {
+      lastText = "";
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+      ): Promise<{ rows: T[]; rowCount: number | null }> {
+        this.lastText = text;
+        return { rows: [{ access_level: "MANAGE" } as unknown as T], rowCount: 1 };
+      }
+    }
+    const db = new QueryTextCapturingDb();
+    const access = await getDeviceAccessLevel(db, "u1", "d1");
+
+    expect(db.lastText).toContain("user_device_permission");
+    expect(db.lastText).toContain("user_area_permission");
+    expect(db.lastText).toContain("user_group_permission");
+    expect(db.lastText).toContain("device_group_mapping");
+    expect(db.lastText).toContain("MAX(access_level)");
+    expect(access).toBe("MANAGE");
+  });
+
+  it("listUserTopicClaims는 area 권한 + device 단독 권한 + group 권한 멤버 기기를 모두 topic으로 합친다(코드 리뷰 P1-2·P1-3)", async () => {
+    class FakeTopicsDb implements QueryExecutor {
+      async query<T extends QueryResultRow = QueryResultRow>(
+        text: string,
+      ): Promise<{ rows: T[]; rowCount: number | null }> {
+        if (text.includes("user_area_permission") && text.includes("JOIN area")) {
+          return {
+            rows: [
+              {
+                site_slug: "site1",
+                building_slug: "bldg-a",
+                floor_slug: "2f",
+                area_slug: "living-room",
+              } as unknown as T,
+            ],
+            rowCount: 1,
+          };
+        }
+        if (text.includes("user_device_permission") && text.includes("user_group_permission")) {
+          return {
+            rows: [
+              { mqtt_topic: "enterprise/site1/bldg-a/2f/bedroom/lamp-01" } as unknown as T,
+              { mqtt_topic: "enterprise/site1/bldg-a/2f/kitchen/switch-07" } as unknown as T,
+            ],
+            rowCount: 2,
+          };
+        }
+        throw new Error(`unexpected query: ${text}`);
+      }
+    }
+
+    const topics = await listUserTopicClaims(new FakeTopicsDb(), "u1", ["USER"]);
+
+    expect(topics).toEqual([
+      "enterprise/site1/bldg-a/2f/living-room/#",
+      "enterprise/site1/bldg-a/2f/bedroom/lamp-01/#",
+      "enterprise/site1/bldg-a/2f/kitchen/switch-07/#",
+    ]);
   });
 
   it("stores, reads, and revokes refresh token records", async () => {
