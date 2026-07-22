@@ -1,6 +1,6 @@
 import type { ExecutionStatus } from "@smarthome/contracts";
 import type { DeviceHistory, DeviceListItem } from "../lib/types";
-import { DEVICE_STATUS_COLOR } from "../lib/status";
+import { DEVICE_STATUS_COLOR, deviceStatusLabel } from "../lib/status";
 
 interface PendingCommand {
   commandId: string;
@@ -55,6 +55,10 @@ export function DeviceDrawer({
     : [];
 
   const commandDisabled = editMode || !device.enabled || !device.monitoringVisible;
+  // DI(디지털 입력)는 서버가 상태를 바꾸는 명령을 보낼 대상이 아니다 — 센서가 읽은 값을
+  // 그대로 수신해 보여줄 뿐이라 ON/OFF 액추에이터 명령 자체가 성립하지 않는다(2026-07-22).
+  // 상태 재확인(query_state)은 "바꿔라"가 아니라 "다시 보고해라"라 DI에도 그대로 유효하다.
+  const isReadOnlyInput = device.sensorIoType === "DI";
 
   return (
     <aside className="device-drawer">
@@ -71,7 +75,7 @@ export function DeviceDrawer({
           className="status-badge"
           style={{ backgroundColor: DEVICE_STATUS_COLOR[device.currentStatus] }}
         >
-          {device.currentStatus}
+          {deviceStatusLabel(device.currentStatus, device.deviceType)}
         </span>{" "}
         <span
           className={device.simulated ? "status-chip status-chip--simulated" : "status-chip status-chip--ok"}
@@ -85,12 +89,16 @@ export function DeviceDrawer({
         </span>
       </p>
       <div className="device-drawer__actions">
-        <button type="button" disabled={commandDisabled} onClick={() => onSendCommand("turn_on")}>
-          ON
-        </button>
-        <button type="button" disabled={commandDisabled} onClick={() => onSendCommand("turn_off")}>
-          OFF
-        </button>
+        {!isReadOnlyInput && (
+          <>
+            <button type="button" disabled={commandDisabled} onClick={() => onSendCommand("turn_on")}>
+              ON
+            </button>
+            <button type="button" disabled={commandDisabled} onClick={() => onSendCommand("turn_off")}>
+              OFF
+            </button>
+          </>
+        )}
         <button
           type="button"
           disabled={commandDisabled}
@@ -100,6 +108,9 @@ export function DeviceDrawer({
           상태 재확인
         </button>
       </div>
+      {isReadOnlyInput && (
+        <p className="device-drawer__edit-note">입력 전용(DI) 센서 — 서버에서 상태를 변경할 수 없습니다.</p>
+      )}
       {editMode && <p className="device-drawer__edit-note">편집 모드 — 제어 비활성화(위치만 이동 가능)</p>}
       {!device.enabled && <p className="device-drawer__edit-note">미사용 기기 — 제어 비활성화</p>}
       {!device.monitoringVisible && <p className="device-drawer__edit-note">모니터링 숨김 — 관제 화면에서 제외됨</p>}

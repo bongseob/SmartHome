@@ -254,6 +254,67 @@ async function seedEsp32Sample(): Promise<void> {
         await mapDeviceToGroup(lightId, floorLightGroupId);
         await mapDeviceToGroup(lightId, boardLightGroupId);
       }
+
+      // 층당 화재안전문 DI 감지 센서 1개(보드A의 11번째 접점) — 2026-07-22 요청. 조명(DO)과
+      // 달리 순수 입력(DI)이라 제어 명령은 없고 상태만 올라온다. ON=열림/OFF=닫힘은 프런트
+      // deviceStatusLabel()이 device_type='fire_door_sensor' 기준으로 라벨만 바꿔 보여준다
+      // (currentStatus enum 자체는 ON/OFF 그대로 — SRS 고정 상태 모델 유지).
+      if (boardSlug === "a") {
+        const doorRoom = ROOM_AREAS.find((r) => r.slug === "stairs")!;
+        const doorCode = `${boardCode}-fire-door`;
+        const doorTopic = buildDeviceBase({
+          site: "main-site",
+          building: "esp32-building",
+          floor: floor.slug,
+          area: "default",
+          device: doorCode,
+        });
+        await idOf(
+          `INSERT INTO device (
+             code, name, category, device_role, device_type, manufacturer, model, firmware_version,
+             mqtt_topic, area_id, parent_device_id, current_status, lifecycle_status,
+             sensor_signal_type, sensor_io_type, channel_address, terminal_block,
+             pos_x, pos_y, monitoring_visible, enabled
+           )
+           VALUES ($1,$2,'DEVICE','SENSOR','fire_door_sensor','Espressif','ESP32-DevKitC','1.0.0',
+             $3,$4,$5,$6,'ACTIVE','DIGITAL','DI',$7,$8,$9,$10,true,true)
+           ON CONFLICT (code) DO UPDATE SET
+             name = EXCLUDED.name,
+             category = EXCLUDED.category,
+             device_role = EXCLUDED.device_role,
+             device_type = EXCLUDED.device_type,
+             manufacturer = EXCLUDED.manufacturer,
+             model = EXCLUDED.model,
+             firmware_version = EXCLUDED.firmware_version,
+             mqtt_topic = EXCLUDED.mqtt_topic,
+             area_id = EXCLUDED.area_id,
+             parent_device_id = EXCLUDED.parent_device_id,
+             current_status = EXCLUDED.current_status,
+             lifecycle_status = EXCLUDED.lifecycle_status,
+             sensor_signal_type = EXCLUDED.sensor_signal_type,
+             sensor_io_type = EXCLUDED.sensor_io_type,
+             channel_address = EXCLUDED.channel_address,
+             terminal_block = EXCLUDED.terminal_block,
+             pos_x = EXCLUDED.pos_x,
+             pos_y = EXCLUDED.pos_y,
+             monitoring_visible = true,
+             enabled = true
+           RETURNING id::text AS id`,
+          [
+            doorCode,
+            `${floor.name} 화재안전문 감지(A-CH11)`,
+            doorTopic,
+            defaultRoomAreaId,
+            boardId,
+            floor.sort % 2 === 0 ? "ON" : "OFF",
+            "11",
+            boardCode,
+            doorRoom.baseX + 60,
+            doorRoom.baseY,
+          ],
+        );
+        deviceCount += 1;
+      }
     }
   }
 

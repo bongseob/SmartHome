@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type Konva from "konva";
-import { Circle, Group, Image as KonvaImage, Layer, Rect, Stage, Text } from "react-konva";
+import { Circle, Group, Image as KonvaImage, Layer, Rect, Shape, Stage, Text } from "react-konva";
 import type { DeviceStatus } from "@smarthome/contracts";
 import type { AreaOverview, DeviceListItem } from "../lib/types";
-import { DEVICE_STATUS_COLOR } from "../lib/status";
+import { DEVICE_STATUS_COLOR, deviceStatusLabel } from "../lib/status";
 import { apiAssetUrl } from "../lib/api";
 import { useHtmlImage } from "../lib/useHtmlImage";
 
@@ -15,6 +15,17 @@ const MIN_STAGE_WIDTH = 360;
 const MIN_STAGE_HEIGHT = 420;
 /** 마커가 도면 밖으로 나가지 않도록 반지름+여백만큼 안쪽으로 제한한다. */
 const MARKER_EDGE_MARGIN = 12;
+/** 편집 모드 그리드/스냅 간격(map 좌표 기준 픽셀) — 마커 기본 지름(24px)과 맞춰 격자에
+ *  가지런히 놓이게 한다. */
+const EDIT_GRID_SIZE = 24;
+
+/** 격자가 도면 가장자리(0)가 아니라 도면 중앙(dimension/2)을 정확히 지나가도록 하는 시작
+ *  오프셋 — 그리드 표시(FloorMap)와 스냅 계산(DeviceMarker)이 항상 같은 격자를 기준으로
+ *  삼도록 공용으로 쓴다. 도면 폭/높이가 그리드 간격의 배수가 아니면 가장자리 셀만 살짝
+ *  작아지고, 그만큼이 양쪽에 똑같이 나뉘어 시각적으로 중앙 대칭이 된다. */
+function gridOffset(dimension: number, gridSize: number): number {
+  return ((dimension / 2) % gridSize + gridSize) % gridSize;
+}
 type MonitoringLevel = "equipment" | "sensor";
 
 interface EquipmentSummary {
@@ -166,15 +177,22 @@ function DeviceMarker({
       y={y}
       draggable={editMode}
       dragBoundFunc={(absolutePos) => {
-        // absolutePos도 같은 화면 좌표계라 map 좌표 여백(MARKER_EDGE_MARGIN)에 scale을 곱해
-        // 화면 좌표 경계로 변환한 뒤 그대로 clamp한다.
-        const minX = pos.x + MARKER_EDGE_MARGIN * scale;
-        const maxX = pos.x + (width - MARKER_EDGE_MARGIN) * scale;
-        const minY = pos.y + MARKER_EDGE_MARGIN * scale;
-        const maxY = pos.y + (height - MARKER_EDGE_MARGIN) * scale;
+        // absolutePos는 화면 좌표라, map 좌표로 되돌려 그리드에 스냅한 뒤 다시 화면 좌표로
+        // 바꾼다 — 저장되는 값(device.posX/posY)도 항상 그리드에 맞춰지도록 스냅은 map
+        // 좌표 기준으로 한다(배율과 무관하게 항상 같은 지점에 스냅되게 하기 위함).
+        const mapX = (absolutePos.x - pos.x) / scale;
+        const mapY = (absolutePos.y - pos.y) / scale;
+        const clampedX = Math.min(Math.max(mapX, MARKER_EDGE_MARGIN), width - MARKER_EDGE_MARGIN);
+        const clampedY = Math.min(Math.max(mapY, MARKER_EDGE_MARGIN), height - MARKER_EDGE_MARGIN);
+        // 화면에 보이는 격자(도면 중앙을 지나가도록 오프셋된)와 정확히 같은 지점에 스냅되도록
+        // 그리드 그리기와 동일한 gridOffset()을 기준으로 삼는다.
+        const offsetX = gridOffset(width, EDIT_GRID_SIZE);
+        const offsetY = gridOffset(height, EDIT_GRID_SIZE);
+        const snappedX = Math.round((clampedX - offsetX) / EDIT_GRID_SIZE) * EDIT_GRID_SIZE + offsetX;
+        const snappedY = Math.round((clampedY - offsetY) / EDIT_GRID_SIZE) * EDIT_GRID_SIZE + offsetY;
         return {
-          x: Math.min(Math.max(absolutePos.x, minX), maxX),
-          y: Math.min(Math.max(absolutePos.y, minY), maxY),
+          x: snappedX * scale + pos.x,
+          y: snappedY * scale + pos.y,
         };
       }}
       onMouseEnter={(e) => {
@@ -327,6 +345,9 @@ interface FloorMapProps {
   onFocusHandled?: () => void;
   /** 미확인 알람이 걸린 기기(접점) id 집합 — 해당 마커를 빨간 링으로 강조한다. */
   alarmedDeviceIds?: Set<string>;
+  /** 카메라(category="CAMERA") 감시장비 마커 클릭 시 — 지정하면 접점 드릴다운 대신 바로
+   *  라이브 영상을 연다(카메라는 하위 접점이 없어 접점 패널을 열어도 빈 화면만 보였다). */
+  onViewCamera?: (device: DeviceListItem) => void;
 }
 
 export function FloorMap({
@@ -339,6 +360,7 @@ export function FloorMap({
   focusEquipmentId = null,
   onFocusHandled,
   alarmedDeviceIds,
+  onViewCamera,
 }: FloorMapProps): JSX.Element {
   const width = overview.area.imageWidthPx ?? FALLBACK_WIDTH;
   const height = overview.area.imageHeightPx ?? FALLBACK_HEIGHT;
@@ -597,6 +619,29 @@ export function FloorMap({
               fillRadialGradientColorStops={[0, "rgba(2, 6, 16, 0)", 1, "rgba(2, 6, 16, 0.55)"]}
             />
           )}
+          {/* 편집 모드 전용 스냅 그리드 — 마커 드래그가 이 간격(EDIT_GRID_SIZE)에 맞춰 스냅되는
+              지점을 눈으로 보여준다. 배경 레이어에 그려서 확대·축소·팬에 같이 따라간다. */}
+          {editMode && (
+            <Shape
+              listening={false}
+              sceneFunc={(ctx, shape) => {
+                const offsetX = gridOffset(width, EDIT_GRID_SIZE);
+                const offsetY = gridOffset(height, EDIT_GRID_SIZE);
+                ctx.beginPath();
+                for (let gx = offsetX; gx <= width; gx += EDIT_GRID_SIZE) {
+                  ctx.moveTo(gx, 0);
+                  ctx.lineTo(gx, height);
+                }
+                for (let gy = offsetY; gy <= height; gy += EDIT_GRID_SIZE) {
+                  ctx.moveTo(0, gy);
+                  ctx.lineTo(width, gy);
+                }
+                ctx.strokeShape(shape);
+              }}
+              stroke="rgba(56, 189, 248, 0.35)"
+              strokeWidth={1}
+            />
+          )}
         </Layer>
         <Layer>
           {renderedDevices.map((device, index) => {
@@ -657,7 +702,13 @@ export function FloorMap({
                   onDeviceDragEnd?.(device.id, (nx - pos.x) / scale, (ny - pos.y) / scale);
                 }}
                 onSelectSensor={() => onSelectDevice(device)}
-                onToggleEquipment={() => setContactsEquipmentId((cur) => (cur === device.id ? null : device.id))}
+                onToggleEquipment={() => {
+                  if (device.category === "CAMERA") {
+                    onViewCamera?.(device);
+                    return;
+                  }
+                  setContactsEquipmentId((cur) => (cur === device.id ? null : device.id));
+                }}
               />
             );
           })}
@@ -672,16 +723,26 @@ export function FloorMap({
             // 툴팁도 마커와 같은 고정 스케일 레이어에 있어 화면 좌표로 변환해야 한다.
             const x = mapPos.x * scale + pos.x;
             const y = mapPos.y * scale + pos.y;
-            const lines = [
-              hoveredEquipment.name,
-              `전체 ${hoveredSummary.total} · ON ${hoveredSummary.on} · OFF ${hoveredSummary.off}`,
-              [
-                hoveredSummary.warning > 0 ? `WARNING ${hoveredSummary.warning}` : null,
-                hoveredSummary.alarm > 0 ? `ALARM ${hoveredSummary.alarm}` : null,
-                hoveredSummary.offline > 0 ? `OFFLINE ${hoveredSummary.offline}` : null,
-              ].filter(Boolean).join(" · ") || "이상 없음",
-              "클릭하면 접점별 상태",
-            ];
+            // 카메라는 하위 접점이 없어 감시장비용 집계(전체/ON/OFF)가 항상 0으로만 나와
+            // 의미가 없다 — 카메라 자체 정보 + 클릭 시 동작(영상 보기)으로 따로 보여준다.
+            const isCamera = hoveredEquipment.category === "CAMERA";
+            const lines = isCamera
+              ? [
+                  hoveredEquipment.name,
+                  `상태 ${hoveredEquipment.currentStatus}`,
+                  hoveredEquipment.simulated ? "가상 카메라(시뮬레이터 응답 중)" : "실제 카메라",
+                  "클릭하면 영상 보기",
+                ]
+              : [
+                  hoveredEquipment.name,
+                  `전체 ${hoveredSummary.total} · ON ${hoveredSummary.on} · OFF ${hoveredSummary.off}`,
+                  [
+                    hoveredSummary.warning > 0 ? `WARNING ${hoveredSummary.warning}` : null,
+                    hoveredSummary.alarm > 0 ? `ALARM ${hoveredSummary.alarm}` : null,
+                    hoveredSummary.offline > 0 ? `OFFLINE ${hoveredSummary.offline}` : null,
+                  ].filter(Boolean).join(" · ") || "이상 없음",
+                  "클릭하면 접점별 상태",
+                ];
             const text = lines.join("\n");
 
             const TOOLTIP_WIDTH = 200;
@@ -733,7 +794,7 @@ export function FloorMap({
             const y = mapPos.y * scale + pos.y;
             const lines = [
               sensorLabel(hoveredSensor),
-              `상태 ${hoveredSensor.currentStatus}`,
+              `상태 ${deviceStatusLabel(hoveredSensor.currentStatus, hoveredSensor.deviceType)}`,
               `${hoveredSensor.sensorIoType ?? "I/O"} · ${hoveredSensor.deviceType ?? hoveredSensor.category}`,
             ];
             const text = lines.join("\n");
@@ -823,7 +884,7 @@ export function FloorMap({
                 >
                   <span className="floor-map__contacts-status">
                     <i style={{ background: DEVICE_STATUS_COLOR[sensor.currentStatus] }} aria-hidden="true" />
-                    {sensor.currentStatus}
+                    {deviceStatusLabel(sensor.currentStatus, sensor.deviceType)}
                   </span>
                   <span>{sensor.channelAddress ?? "—"}</span>
                   <span>{sensor.terminalBlock ?? "—"}</span>

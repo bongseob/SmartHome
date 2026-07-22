@@ -6,6 +6,7 @@ import {
   createCommand,
   getAlarmCameras,
   getAreaOverview,
+  getCamera,
   getDeviceHistory,
   getDeviceState,
   getSession,
@@ -198,6 +199,18 @@ export function App(): JSX.Element {
       .then(setLiveViewCameras)
       .catch(() => setLiveViewCameras([]));
   }, []);
+
+  /** 관제 도면에서 카메라 마커를 직접 클릭 — 알람 경유 없이 바로 라이브 뷰를 연다. */
+  const handleViewCamera = useCallback(
+    (device: DeviceListItem) => {
+      getCamera(device.id)
+        .then((camera) => setLiveViewCameras([camera]))
+        .catch((err: unknown) => {
+          if (err instanceof AuthExpiredError) handleLogout();
+        });
+    },
+    [handleLogout],
+  );
 
   useEffect(() => {
     if (!user) return;
@@ -739,6 +752,7 @@ export function App(): JSX.Element {
                   focusEquipmentId={focusEquipmentId}
                   onFocusHandled={() => setFocusEquipmentId(null)}
                   alarmedDeviceIds={alarmedDeviceIds}
+                  onViewCamera={handleViewCamera}
                 />
               </Suspense>
             ) : (

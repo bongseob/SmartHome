@@ -200,6 +200,14 @@ export class CommandsService implements OnModuleInit, OnModuleDestroy {
     if (!device) {
       throw new NotFoundException(`device not found: ${body.target.id}`);
     }
+    // DI/AI(순수 입력)는 서버가 상태를 바꾸는 액추에이터 명령을 보낼 대상이 아니다 — 센서가
+    // 읽은 값을 그대로 수신해 보여줄 뿐이다(2026-07-22). query_state("다시 보고해라")는
+    // 상태를 바꾸지 않는 재보고 요청이라 입력 전용 기기에도 그대로 허용한다.
+    if ((device.sensorIoType === "DI" || device.sensorIoType === "AI") && body.command !== "query_state") {
+      throw new BadRequestException(
+        `${device.code}는 입력 전용(${device.sensorIoType}) 센서라 '${body.command}' 명령을 보낼 수 없습니다.`,
+      );
+    }
     const identity: DeviceIdentity | null = parseDeviceBase(device.mqttTopic);
     if (!identity) {
       throw new BadRequestException(`device has invalid mqtt_topic: ${device.code}`);
@@ -251,7 +259,11 @@ export class CommandsService implements OnModuleInit, OnModuleDestroy {
           device.deviceRole === "SENSOR" &&
           device.monitoringVisible &&
           device.enabled &&
-          device.lifecycleStatus !== "DECOMMISSIONED",
+          device.lifecycleStatus !== "DECOMMISSIONED" &&
+          // DI/AI(순수 입력)는 그룹 일괄 제어 대상에서 제외한다 — 액추에이터가 없어 turn_on/
+          // turn_off를 받아도 아무 것도 바뀌지 않는다(2026-07-22).
+          device.sensorIoType !== "DI" &&
+          device.sensorIoType !== "AI",
       )
       .map((device) => device.id);
     if (deviceIds.length === 0) {
