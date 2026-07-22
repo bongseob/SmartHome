@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ExecutionStatus, RealtimeEvent } from "@smarthome/contracts";
 import {
   ApiError,
@@ -29,27 +29,47 @@ import type {
 } from "./lib/types";
 import { useRealtime } from "./lib/useRealtime";
 import { LoginView } from "./components/LoginView";
-import { FloorMap } from "./components/FloorMap";
 import { DeviceDrawer } from "./components/DeviceDrawer";
 import { EventFeed, type FeedEntry } from "./components/EventFeed";
-import { SchedulerAdmin } from "./components/SchedulerAdmin";
-import { SystemInfoAdmin } from "./components/SystemInfoAdmin";
-import { FloorMapAdmin } from "./components/FloorMapAdmin";
-import { ImageAdmin } from "./components/ImageAdmin";
-import { DeviceAdmin } from "./components/DeviceAdmin";
-import { CameraAdmin } from "./components/CameraAdmin";
-import { RecommendationsAdmin } from "./components/RecommendationsAdmin";
 import { Dashboard } from "./components/Dashboard";
-import { GroupControl } from "./components/GroupControl";
-import { FullMonitoring } from "./components/FullMonitoring";
 import { AlarmBanner } from "./components/AlarmBanner";
-import { LiveCameraView } from "./components/LiveCameraView";
-import { CameraViewer } from "./components/CameraViewer";
 import { ServerStatusOverlay } from "./components/ServerStatusOverlay";
 import { useConfirm } from "./components/ConfirmDialog";
 import { useSystemName } from "./lib/useSystemName";
 
+// 관리자 화면·카메라 화면·도면 편집(Konva)은 초기 진입(대시보드) 경로에 필요 없어 초기 번들에서
+// 분리한다(코드 리뷰 P3-1 — 프로덕션 초기 JS가 2.35MB/gzip 702KB로 컸다). Dashboard/LoginView 등
+// 처음 화면에 바로 필요한 것만 위에서 즉시 import한다.
+const FloorMap = lazy(() => import("./components/FloorMap").then((m) => ({ default: m.FloorMap })));
+const SchedulerAdmin = lazy(() =>
+  import("./components/SchedulerAdmin").then((m) => ({ default: m.SchedulerAdmin })),
+);
+const SystemInfoAdmin = lazy(() =>
+  import("./components/SystemInfoAdmin").then((m) => ({ default: m.SystemInfoAdmin })),
+);
+const FloorMapAdmin = lazy(() =>
+  import("./components/FloorMapAdmin").then((m) => ({ default: m.FloorMapAdmin })),
+);
+const ImageAdmin = lazy(() => import("./components/ImageAdmin").then((m) => ({ default: m.ImageAdmin })));
+const DeviceAdmin = lazy(() => import("./components/DeviceAdmin").then((m) => ({ default: m.DeviceAdmin })));
+const CameraAdmin = lazy(() => import("./components/CameraAdmin").then((m) => ({ default: m.CameraAdmin })));
+const RecommendationsAdmin = lazy(() =>
+  import("./components/RecommendationsAdmin").then((m) => ({ default: m.RecommendationsAdmin })),
+);
+const GroupControl = lazy(() => import("./components/GroupControl").then((m) => ({ default: m.GroupControl })));
+const FullMonitoring = lazy(() =>
+  import("./components/FullMonitoring").then((m) => ({ default: m.FullMonitoring })),
+);
+const LiveCameraView = lazy(() =>
+  import("./components/LiveCameraView").then((m) => ({ default: m.LiveCameraView })),
+);
+const CameraViewer = lazy(() => import("./components/CameraViewer").then((m) => ({ default: m.CameraViewer })));
+
 const MAX_FEED_ENTRIES = 50;
+/** lazy 화면 전환 중 보여줄 최소 placeholder — 화면 대부분이 즉시 이어서 나오므로 스피너 없이 텍스트만. */
+function ViewLoading(): JSX.Element {
+  return <p>불러오는 중…</p>;
+}
 
 interface PendingCommand {
   commandId: string;
@@ -604,7 +624,9 @@ export function App(): JSX.Element {
         onNavigateToDevice={handleNavigateToDeviceById}
       />
       {liveViewCameras && (
-        <LiveCameraView cameras={liveViewCameras} onClose={() => setLiveViewCameras(null)} />
+        <Suspense fallback={null}>
+          <LiveCameraView cameras={liveViewCameras} onClose={() => setLiveViewCameras(null)} />
+        </Suspense>
       )}
       {isAdmin && (
         <ServerStatusOverlay open={serverStatusOpen} onClose={() => setServerStatusOpen(false)} />
@@ -632,63 +654,85 @@ export function App(): JSX.Element {
         </div>
       ) : view === "fullMonitoring" ? (
         <div className="app-shell__body app-shell__body--single">
-          <FullMonitoring onOpenLightingControl={handleOpenFloorControl} />
+          <Suspense fallback={<ViewLoading />}>
+            <FullMonitoring onOpenLightingControl={handleOpenFloorControl} />
+          </Suspense>
         </div>
       ) : view === "groupControl" ? (
         <div className="app-shell__body app-shell__body--single">
-          <GroupControl
-            onAuthExpired={handleLogout}
-            initialOpenGroupId={focusGroupId}
-            onInitialFocusHandled={() => setFocusGroupId(null)}
-          />
+          <Suspense fallback={<ViewLoading />}>
+            <GroupControl
+              onAuthExpired={handleLogout}
+              initialOpenGroupId={focusGroupId}
+              onInitialFocusHandled={() => setFocusGroupId(null)}
+            />
+          </Suspense>
         </div>
       ) : view === "schedulers" ? (
         <div className="app-shell__body app-shell__body--single">
-          <SchedulerAdmin onNavigateToDevice={handleNavigateToDevice} onNavigateToGroup={handleNavigateToGroup} />
+          <Suspense fallback={<ViewLoading />}>
+            <SchedulerAdmin onNavigateToDevice={handleNavigateToDevice} onNavigateToGroup={handleNavigateToGroup} />
+          </Suspense>
         </div>
       ) : view === "systemInfo" ? (
         <div className="app-shell__body app-shell__body--single">
-          <SystemInfoAdmin />
+          <Suspense fallback={<ViewLoading />}>
+            <SystemInfoAdmin />
+          </Suspense>
         </div>
       ) : view === "floorMaps" ? (
         <div className="app-shell__body app-shell__body--single">
-          <FloorMapAdmin />
+          <Suspense fallback={<ViewLoading />}>
+            <FloorMapAdmin />
+          </Suspense>
         </div>
       ) : view === "images" ? (
         <div className="app-shell__body app-shell__body--single">
-          <ImageAdmin />
+          <Suspense fallback={<ViewLoading />}>
+            <ImageAdmin />
+          </Suspense>
         </div>
       ) : view === "devices" ? (
         <div className="app-shell__body app-shell__body--single">
-          <DeviceAdmin />
+          <Suspense fallback={<ViewLoading />}>
+            <DeviceAdmin />
+          </Suspense>
         </div>
       ) : view === "cameras" ? (
         <div className="app-shell__body app-shell__body--single">
-          <CameraAdmin />
+          <Suspense fallback={<ViewLoading />}>
+            <CameraAdmin />
+          </Suspense>
         </div>
       ) : view === "cameraViewer" ? (
         <div className="app-shell__body app-shell__body--single">
-          <CameraViewer />
+          <Suspense fallback={<ViewLoading />}>
+            <CameraViewer />
+          </Suspense>
         </div>
       ) : view === "recommendations" ? (
         <div className="app-shell__body app-shell__body--single">
-          <RecommendationsAdmin />
+          <Suspense fallback={<ViewLoading />}>
+            <RecommendationsAdmin />
+          </Suspense>
         </div>
       ) : (
         <div className="app-shell__body">
           <main className="app-shell__map">
             {overview ? (
-              <FloorMap
-                overview={overview}
-                selectedDeviceId={selectedDevice?.id ?? null}
-                onSelectDevice={handleSelectDevice}
-                editMode={mode === "edit"}
-                pendingPositions={pendingPositions}
-                onDeviceDragEnd={handleDeviceDragEnd}
-                focusEquipmentId={focusEquipmentId}
-                onFocusHandled={() => setFocusEquipmentId(null)}
-                alarmedDeviceIds={alarmedDeviceIds}
-              />
+              <Suspense fallback={<ViewLoading />}>
+                <FloorMap
+                  overview={overview}
+                  selectedDeviceId={selectedDevice?.id ?? null}
+                  onSelectDevice={handleSelectDevice}
+                  editMode={mode === "edit"}
+                  pendingPositions={pendingPositions}
+                  onDeviceDragEnd={handleDeviceDragEnd}
+                  focusEquipmentId={focusEquipmentId}
+                  onFocusHandled={() => setFocusEquipmentId(null)}
+                  alarmedDeviceIds={alarmedDeviceIds}
+                />
+              </Suspense>
             ) : (
               <p>지역을 불러오는 중…</p>
             )}
