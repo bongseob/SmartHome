@@ -3,7 +3,12 @@ import type { AlarmState } from "@smarthome/contracts";
 import { IllegalAlarmTransitionError } from "@smarthome/contracts";
 import type { QueryResultRow } from "./pool.js";
 import type { QueryExecutor } from "./audit-repository.js";
-import { AlarmNotFoundError, raiseAlarmFromPolicyInTx, recordAlarmActionInTx } from "./alarm-service.js";
+import {
+  AlarmNotFoundError,
+  raiseAlarmFromPolicyInTx,
+  recordAlarmActionInTx,
+  resolveOpenAlarmsForDeviceInTx,
+} from "./alarm-service.js";
 
 interface AlarmRow extends QueryResultRow {
   id: string;
@@ -216,5 +221,93 @@ describe("raiseAlarmFromPolicyInTx", () => {
     // (SAVEPOINT 없이 바로 재조회하면 Postgres가 "current transaction is aborted"로 거부함
     // — 실제 동시 요청 10개로 재현해서 발견한 버그).
     expect(db.statements.some((s) => s.includes("ROLLBACK TO SAVEPOINT"))).toBe(true);
+  });
+});
+
+describe("resolveOpenAlarmsForDeviceInTx(코드 리뷰 2026-07-22 — ACK만으론 재발생이 막히던 문제)", () => {
+  /** 여러 알람 행을 device_id로 들고 있는 멀티 로우 페이크 DB. */
+  class MultiRowAlarmDb implements QueryExecutor {
+    readonly statements: string[] = [];
+    readonly auditActorTypes: unknown[] = [];
+    constructor(private rows: Map<string, AlarmRow>) {}
+
+    async query<T extends QueryResultRow = QueryResultRow>(
+      text: string,
+      params?: unknown[],
+    ): Promise<{ rows: T[]; rowCount: number | null }> {
+      this.statements.push(text);
+
+      if (text.includes("SELECT id::text FROM alarm_log WHERE device_id")) {
+        const deviceId = params?.[0] as string;
+        const open = [...this.rows.values()].filter(
+          (r) => r.device_id === deviceId && ["RAISED", "ACK", "SNOOZED"].includes(r.state),
+        );
+        return { rows: open.map((r) => ({ id: r.id }) as unknown as T), rowCount: open.length };
+      }
+      if (text.includes("FROM alarm_log") && text.includes("FOR UPDATE")) {
+        const id = params?.[0] as string;
+        const row = this.rows.get(id) ?? null;
+        return { rows: row ? [{ ...row } as unknown as T] : [], rowCount: row ? 1 : 0 };
+      }
+      if (text.includes("UPDATE alarm_log")) {
+        const id = params?.[0] as string;
+        const row = this.rows.get(id);
+        if (!row) return { rows: [], rowCount: 0 };
+        const updated: AlarmRow = {
+          ...row,
+          state: params?.[1] as AlarmState,
+          snoozed_until: (params?.[2] as Date | null) ?? row.snoozed_until,
+          resolved_at: (params?.[3] as Date | null) ?? row.resolved_at,
+        };
+        this.rows.set(id, updated);
+        return { rows: [{ ...updated } as unknown as T], rowCount: 1 };
+      }
+      if (text.includes("INSERT INTO alarm_action")) {
+        return { rows: [], rowCount: 1 };
+      }
+      if (text.includes("INSERT INTO audit_log")) {
+        this.auditActorTypes.push(params?.[0]);
+        return { rows: [], rowCount: 1 };
+      }
+      throw new Error(`unexpected query: ${text}`);
+    }
+  }
+
+  it("device의 열린 알람(RAISED/ACK/SNOOZED)을 전부 RESOLVED로 전이하고 actorType=SYSTEM으로 감사 기록한다", async () => {
+    const rows = new Map<string, AlarmRow>([
+      ["1", { ...alarmRow("RAISED"), id: "1", device_id: "device-1", message: "ON → ALARM" }],
+      ["2", { ...alarmRow("ACK"), id: "2", device_id: "device-1", message: "ALARM → ON" }],
+      // 다른 device의 알람은 건드리지 않아야 한다.
+      ["3", { ...alarmRow("RAISED"), id: "3", device_id: "device-2", message: "다른 기기 알람" }],
+    ]);
+    const db = new MultiRowAlarmDb(rows);
+
+    const resolved = await resolveOpenAlarmsForDeviceInTx(db, "device-1", "기기가 ON(정상)로 복귀해 자동 해결");
+
+    expect(resolved.map((a) => a.id).sort()).toEqual(["1", "2"]);
+    expect(resolved.every((a) => a.state === "RESOLVED")).toBe(true);
+    expect(db.auditActorTypes).toEqual(["SYSTEM", "SYSTEM"]);
+    // device-2의 알람은 그대로 RAISED 유지(건드리지 않음).
+    expect(rows.get("3")?.state).toBe("RAISED");
+  });
+
+  it("열린 알람이 없으면 빈 배열을 반환하고 아무 것도 갱신하지 않는다(no-op)", async () => {
+    const db = new MultiRowAlarmDb(new Map());
+
+    const resolved = await resolveOpenAlarmsForDeviceInTx(db, "device-1", "기기가 ON(정상)로 복귀해 자동 해결");
+
+    expect(resolved).toEqual([]);
+    expect(db.statements.some((s) => s.includes("UPDATE alarm_log"))).toBe(false);
+  });
+
+  it("이미 RESOLVED인 알람은 건드리지 않는다", async () => {
+    const rows = new Map<string, AlarmRow>([
+      ["1", { ...alarmRow("RESOLVED"), id: "1", device_id: "device-1" }],
+    ]);
+    const db = new MultiRowAlarmDb(rows);
+
+    const resolved = await resolveOpenAlarmsForDeviceInTx(db, "device-1", "기기가 ON(정상)로 복귀해 자동 해결");
+
+    expect(resolved).toEqual([]);
   });
 });

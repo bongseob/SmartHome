@@ -30,6 +30,7 @@ import {
   raiseAlarmFromPolicy,
   raiseUnexpectedStateChangeAlarm,
   recordFailedDelivery,
+  resolveOpenAlarmsForDevice,
   setDeviceStatus,
   sweepDueEscalations,
   transitionCommandWithAudit,
@@ -565,6 +566,23 @@ async function onMessage(
       });
       if (status === "OFFLINE") {
         await cascadeBoardOfflineToChildren(events, id, parts.device);
+      }
+      // 기기가 정상(ON/OFF)으로 돌아오면 그 기기에 열려 있던 알람을 전부 자동 해결한다
+      // (코드 리뷰 2026-07-22 — 확인(ACK)만으로는 알람이 계속 "열림" 상태로 남아 같은
+      // 메시지의 재발생이 raiseUnexpectedStateChangeAlarm의 중복 억제에 막혔다). 명령으로
+      // 복귀했든(INTENTIONAL) 현장에서 복귀했든(FIELD) 상관없이 적용한다 — 어느 쪽이든
+      // 실제로 정상 상태라는 사실은 같다.
+      if (status === "ON" || status === "OFF") {
+        const resolved = await resolveOpenAlarmsForDevice(id, `기기가 ${status}(정상)로 복귀해 자동 해결`);
+        for (const alarm of resolved) {
+          await publishRealtimeEvent(events, {
+            type: "alarm.updated",
+            alarmId: alarm.id,
+            deviceId: alarm.deviceId,
+            state: alarm.state,
+            ts: Date.now(),
+          });
+        }
       }
       if (classification.origin === "FIELD") {
         const message =

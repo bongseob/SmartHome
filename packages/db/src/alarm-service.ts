@@ -7,6 +7,7 @@ import {
   insertAlarmAction,
   insertAlarmLog,
   listDueEscalations,
+  listOpenAlarmIdsForDevice,
   lockAlarmById,
   updateAlarmState,
   type AlarmPolicyRecord,
@@ -99,6 +100,42 @@ export async function recordAlarmActionInTx(
   });
 
   return updated;
+}
+
+/**
+ * 기기가 정상(ON/OFF)으로 복귀했을 때 그 기기의 열린 알람(RAISED/ACK/SNOOZED)을 전부
+ * RESOLVED로 자동 전이한다(코드 리뷰 2026-07-22 — 확인(ACK)만으로는 알람이 계속 "열림"
+ * 상태로 남아, raiseUnexpectedStateChangeAlarm의 동일 메시지 중복 억제 때문에 같은 알람이
+ * 다시는 발생하지 못했다). recordAlarmActionInTx를 그대로 재사용해 알람 액션 이력·감사
+ * 로그를 정상 승인/거절과 동일하게 남기고, actorType=SYSTEM으로 사람이 아닌 자동 처리임을
+ * 구분한다. 열린 알람이 없으면 빈 배열(정상 — no-op).
+ */
+export async function resolveOpenAlarmsForDevice(
+  deviceId: string,
+  reason: string,
+): Promise<AlarmRecord[]> {
+  return withTransaction((client) => resolveOpenAlarmsForDeviceInTx(client, deviceId, reason));
+}
+
+export async function resolveOpenAlarmsForDeviceInTx(
+  db: QueryExecutor,
+  deviceId: string,
+  reason: string,
+): Promise<AlarmRecord[]> {
+  const openIds = await listOpenAlarmIdsForDevice(db, deviceId);
+  const resolved: AlarmRecord[] = [];
+  for (const alarmId of openIds) {
+    resolved.push(
+      await recordAlarmActionInTx(db, {
+        alarmId,
+        actorId: null,
+        actorType: "SYSTEM",
+        actionType: "RESOLVE",
+        note: reason,
+      }),
+    );
+  }
+  return resolved;
 }
 
 export interface RaiseAlarmFromPolicyInput {

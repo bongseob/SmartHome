@@ -392,6 +392,17 @@ const ALARM_LOG_COLUMNS = `
   raised_at, snoozed_until, resolved_at, escalated_level
 `;
 
+/** 기기가 정상(ON/OFF)으로 복귀했을 때 그 기기의 열린 알람을 전부 자동 해결하는 데 쓴다
+ *  (코드 리뷰 2026-07-22 — 확인(ACK)만으로는 알람이 "열림" 상태로 남아 같은 메시지의
+ *  재발생이 계속 막혔다). policy 유무와 무관하게 device_id 기준으로 전부 찾는다. */
+export async function listOpenAlarmIdsForDevice(db: QueryExecutor, deviceId: string): Promise<string[]> {
+  const r = await db.query<{ id: string }>(
+    `SELECT id::text FROM alarm_log WHERE device_id::text = $1 AND state IN ('RAISED','ACK','SNOOZED')`,
+    [deviceId],
+  );
+  return r.rows.map((row) => row.id);
+}
+
 /** 동일 policy+device로 이미 열려 있는(RAISED/ACK/SNOOZED) 알람이 있으면 재발행하지 않는다(중복 억제). */
 export async function findOpenAlarm(
   db: QueryExecutor,
